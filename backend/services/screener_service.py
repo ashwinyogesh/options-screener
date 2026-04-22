@@ -153,12 +153,6 @@ def process_symbol(
                 T = dte / 365.0
                 _IDEAL_DELTA = -0.225  # midpoint of -0.10 to -0.35 target
 
-                # Chain-level median OI for env score (stock-level liquidity signal)
-                import pandas as _pd
-                chain_median_oi = float(puts_df["openInterest"].median()) if not puts_df.empty else 0.0
-                if _pd.isna(chain_median_oi):
-                    chain_median_oi = 0.0
-
                 all_strikes_sorted = sorted(puts_df["strike"].unique(), reverse=True)  # ATM-first
                 otm_strikes = [s for s in all_strikes_sorted if s < current_price * 1.02]
 
@@ -199,6 +193,10 @@ def process_symbol(
                         candidates.append((sp, d, prem, used_hv, stale_prem, iv_hv_ratio_val, sig, oi_val, vol_val))
                     except Exception:
                         continue
+
+                # Chain median OI: only strikes with 0.1 < |delta| < 0.4 (the relevant CSP range)
+                delta_range_ois = [c[7] for c in candidates if 0.1 < abs(c[1]) < 0.4]
+                chain_median_oi = float(np.median(delta_range_ois)) if delta_range_ois else 0.0
 
                 # Primary filter: -0.35 to -0.10 delta
                 in_range = [c for c in candidates if -0.35 <= c[1] <= -0.10]
