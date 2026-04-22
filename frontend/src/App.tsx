@@ -74,11 +74,12 @@ function applyDitmFilters(results: DitmResult[], filters: DitmFilterState): Ditm
 
 function applyFilters(results: ScreenerResult[], filters: FilterState): ScreenerResult[] {
   return results.filter(r => {
+    const best = r.strikes.find(s => s.is_best) ?? r.strikes[0]
     if (r.rsi < filters.minRsi || r.rsi > filters.maxRsi) return false
     if (filters.minIvRank > 0 && (r.iv_rank == null || r.iv_rank < filters.minIvRank)) return false
     if (filters.smaRatioBullishOnly && r.sma_ratio <= 1.0) return false
-    if (r.delta < filters.minDelta || r.delta > filters.maxDelta) return false
-    if (filters.maxSpreadPct > 0 && (r.bid_ask_spread_pct == null || r.bid_ask_spread_pct > filters.maxSpreadPct)) return false
+    if (best && (best.delta < filters.minDelta || best.delta > filters.maxDelta)) return false
+    if (filters.maxSpreadPct > 0 && (best == null || best.bid_ask_spread_pct == null || best.bid_ask_spread_pct > filters.maxSpreadPct)) return false
     if (filters.excludeEarningsWithinDte && r.earnings_within_dte) return false
     return true
   })
