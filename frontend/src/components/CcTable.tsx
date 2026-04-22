@@ -51,7 +51,7 @@ const COLUMNS = [
   }),
   col.accessor('iv_rank',       {
     header: () => (
-      <span className="col-tip" title="IV Rank = (HV_today − HV_min_252) / (HV_max_252 − HV_min_252) × 100">
+      <span className="col-tip" title="IV Rank: how far today's IV sits between the 252d min and max (magnitude of the move).&#10;IV Percentile (P:): % of past days where IV was cheaper than today (frequency).&#10;&#10;Formula: IV Rank = (HV_today − HV_min_252) / (HV_max_252 − HV_min_252) × 100&#10;Score uses IV Rank (25 pts) + IV÷HV Ratio (20 pts)">
         IV Rank ⓘ
       </span>
     ),
