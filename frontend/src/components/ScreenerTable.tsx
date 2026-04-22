@@ -92,17 +92,20 @@ function groupResults(results: ScreenerResult[]): GroupedScreenerResult[] {
         vol_support_2: r.vol_support_2,
         vol_support_3: r.vol_support_3,
         best_score: 0,
+        using_hv_fallback: false,
         expirations: [],
       })
     }
     const group = map.get(r.symbol)!
     if (r.earnings_within_dte) group.earnings_within_dte = true
+    if (r.using_hv_fallback) group.using_hv_fallback = true
     group.expirations.push({
       dte: r.dte,
       expiration: r.expiration,
       earnings_within_dte: r.earnings_within_dte,
       strikes: r.strikes,
       best_score: r.best_csp_score,
+      using_hv_fallback: r.using_hv_fallback,
     })
   }
   for (const g of map.values()) {
@@ -120,6 +123,9 @@ export function ScreenerTable({ data }: Props) {
   const groupedData = useMemo(() => groupResults(data), [data])
   const [sorting, setSorting] = useState<SortingState>([{ id: 'best_score', desc: true }])
   const [strikeExpanded, setStrikeExpanded] = useState<Set<string>>(new Set())
+  const [staleDismissed, setStaleDismissed] = useState(false)
+
+  const anyStale = groupedData.some(r => r.using_hv_fallback)
 
   const toggleStrikes = (key: string) => {
     setStrikeExpanded(prev => {
@@ -155,6 +161,12 @@ export function ScreenerTable({ data }: Props) {
 
   return (
     <div className="table-wrapper">
+      {anyStale && !staleDismissed && (
+        <div className="stale-banner">
+          <span>⚠ Market closed — options quotes are stale (bid/ask = 0). Delta is estimated from 30-day historical volatility instead of implied volatility. Treat delta values as approximate.</span>
+          <button className="stale-dismiss" onClick={() => setStaleDismissed(true)}>✕</button>
+        </div>
+      )}
       <table className="screener-table">
         <thead>
           {table.getHeaderGroups().map(hg => (
@@ -308,6 +320,7 @@ export function ScreenerTable({ data }: Props) {
                       <span className={bestStrike.delta >= -0.35 && bestStrike.delta <= -0.10 ? 'delta-ok' : 'delta-warn'}>
                     {fmtDelta(bestStrike.delta)}
                   </span>
+                  {bestStrike.iv_fallback && <span className="iv-fallback-tag" title="Delta estimated from historical volatility (HV) — market closed/stale quotes">~HV</span>}
                 </td>
                 <td>{fmtSpread(bestStrike.bid_ask_spread_pct)}</td>
                 <td>{fmtAnn(bestStrike.annualized_return)}</td>
@@ -330,6 +343,7 @@ export function ScreenerTable({ data }: Props) {
                       <span className={s.delta >= -0.35 && s.delta <= -0.10 ? 'delta-ok' : 'delta-warn'}>
                         {fmtDelta(s.delta)}
                       </span>
+                      {s.iv_fallback && <span className="iv-fallback-tag" title="Delta estimated from historical volatility (HV) — market closed/stale quotes">~HV</span>}
                     </td>
                     <td>{fmtSpread(s.bid_ask_spread_pct)}</td>
                     <td>{fmtAnn(s.annualized_return)}</td>

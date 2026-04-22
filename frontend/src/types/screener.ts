@@ -6,6 +6,8 @@ export interface StrikeInfo {
   bid_ask_spread_pct: number | null
   csp_score: number
   is_best: boolean
+  iv_fallback: boolean
+  stale_premium: boolean
 }
 
 export interface ScreenerResult {
@@ -27,6 +29,7 @@ export interface ScreenerResult {
   expiration: string
   strikes: StrikeInfo[]
   best_csp_score: number
+  using_hv_fallback: boolean
 }
 
 export interface ExpirationRow {
@@ -35,6 +38,7 @@ export interface ExpirationRow {
   earnings_within_dte: boolean
   strikes: StrikeInfo[]
   best_score: number
+  using_hv_fallback: boolean
 }
 
 export interface GroupedScreenerResult {
@@ -53,6 +57,7 @@ export interface GroupedScreenerResult {
   vol_support_2: number | null
   vol_support_3: number | null
   best_score: number
+  using_hv_fallback: boolean
   expirations: ExpirationRow[]
 }
 

@@ -73,6 +73,8 @@ class StrikeResultOut(BaseModel):
     bid_ask_spread_pct: Optional[float]
     csp_score: float
     is_best: bool
+    iv_fallback: bool
+    stale_premium: bool
 
 
 class ScreenerResultOut(BaseModel):
@@ -94,6 +96,7 @@ class ScreenerResultOut(BaseModel):
     expiration: str
     strikes: List[StrikeResultOut]
     best_csp_score: float
+    using_hv_fallback: bool
 
 
 class ScreenerErrorOut(BaseModel):
@@ -222,8 +225,11 @@ def _to_out(r: ScreenerResult) -> ScreenerResultOut:
                 bid_ask_spread_pct=s.bid_ask_spread_pct,
                 csp_score=s.csp_score,
                 is_best=s.is_best,
+                iv_fallback=s.iv_fallback,
+                stale_premium=s.stale_premium,
             )
             for s in r.strikes
         ],
         best_csp_score=r.best_csp_score,
+        using_hv_fallback=r.using_hv_fallback,
     )

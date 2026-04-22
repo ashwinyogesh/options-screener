@@ -39,6 +39,8 @@ class StrikeResult:
     bid_ask_spread_pct: Optional[float]
     csp_score: float
     is_best: bool = False
+    iv_fallback: bool = False   # True when hv_sigma was used instead of yfinance IV
+    stale_premium: bool = False # True when lastPrice was used instead of (bid+ask)/2
 
 
 @dataclass
@@ -61,6 +63,7 @@ class ScreenerResult:
     expiration: str
     strikes: list[StrikeResult] = field(default_factory=list)
     best_csp_score: float = 0.0
+    using_hv_fallback: bool = False  # True when any strike in this row used hv_sigma
 
 
 @dataclass
@@ -128,33 +131,47 @@ def process_symbol(
                 all_strikes_sorted = sorted(puts_df["strike"].unique(), reverse=True)  # ATM-first
                 otm_strikes = [s for s in all_strikes_sorted if s < current_price * 1.02]
 
-                # Pre-compute (strike, delta, premium) for every OTM liquid strike
-                candidates: list[tuple[float, float, float]] = []  # (strike, delta, premium)
+                # Pre-compute (strike, delta, premium, iv_fallback, stale_prem) for every OTM liquid strike
+                candidates: list[tuple[float, float, float, bool, bool]] = []
                 for sp in otm_strikes:
                     try:
-                        prem = get_premium(puts_df, sp)
-                        if prem <= 0:
+                        row = puts_df[puts_df["strike"] == sp]
+                        if row.empty:
                             continue
+                        bid = float(row["bid"].iloc[0]) if not __import__('pandas').isna(row["bid"].iloc[0]) else 0.0
+                        ask = float(row["ask"].iloc[0]) if not __import__('pandas').isna(row["ask"].iloc[0]) else 0.0
+                        last = float(row["lastPrice"].iloc[0]) if not __import__('pandas').isna(row["lastPrice"].iloc[0]) else 0.0
+                        market_closed_row = (bid == 0.0 and ask == 0.0)
+                        if bid > 0 and ask > 0:
+                            prem = round((bid + ask) / 2.0, 4)
+                            stale_prem = False
+                        elif last > 0:
+                            prem = round(last, 4)
+                            stale_prem = True
+                        else:
+                            continue  # no usable premium
                         sig = get_implied_volatility(puts_df, sp)
                         # IV from yfinance is back-computed from lastPrice when
                         # bid/ask are 0 (market closed) — stale and unreliable.
                         # Use hv_sigma if IV looks suspiciously low (< 15%).
+                        used_hv = False
                         if math.isnan(sig) or sig < 0.15:
                             sig = hv_sigma
+                            used_hv = True
                         d = black_scholes_put_delta(current_price, sp, rf_rate, T, sig)
-                        candidates.append((sp, d, prem))
+                        candidates.append((sp, d, prem, used_hv, stale_prem))
                     except Exception:
                         continue
 
                 # Primary filter: -0.35 to -0.10 delta
-                in_range = [(sp, d, prem) for sp, d, prem in candidates if -0.35 <= d <= -0.10]
+                in_range = [c for c in candidates if -0.35 <= c[1] <= -0.10]
 
                 # Fallback: if nothing in range, take up to 5 strikes nearest to ideal delta
                 if not in_range and candidates:
                     in_range = sorted(candidates, key=lambda x: abs(x[1] - _IDEAL_DELTA))[:5]
 
                 strike_results: list[StrikeResult] = []
-                for sp, d, prem in in_range:
+                for sp, d, prem, used_hv, stale_prem in in_range:
                     try:
                         spread_raw = get_bid_ask_spread_pct(puts_df, sp)
                         spread_s: Optional[float] = None if math.isnan(spread_raw) else spread_raw
@@ -177,6 +194,8 @@ def process_symbol(
                             annualized_return=ann_ret_s,
                             bid_ask_spread_pct=spread_s,
                             csp_score=score_s,
+                            iv_fallback=used_hv,
+                            stale_premium=stale_prem,
                         ))
                     except Exception:
                         continue
@@ -208,6 +227,7 @@ def process_symbol(
                     expiration=expiration,
                     strikes=strike_results,
                     best_csp_score=best_score_val,
+                    using_hv_fallback=any(sr.iv_fallback for sr in strike_results),
                 ))
             except Exception as exc:
                 logger.debug("Skipping expiration %s for %s: %s", opts.get("expiration"), sym, exc)
