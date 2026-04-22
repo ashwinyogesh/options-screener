@@ -13,17 +13,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        working-directory: backend
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt --target backend_packages
-
       - name: Zip backend for deployment
         run: |
           cd backend
@@ -34,13 +23,21 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: Enable Oryx build
+        run: |
+          az webapp config appsettings set \
+            --name optionsapi \
+            --resource-group options-rg \
+            --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true
+
       - name: Deploy zip to App Service
         run: |
           az webapp deploy \
             --name optionsapi \
             --resource-group options-rg \
             --src-path backend.zip \
-            --type zip
+            --type zip \
+            --timeout 600
 
       - name: Set startup command
         run: |
