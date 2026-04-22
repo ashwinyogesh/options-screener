@@ -136,7 +136,10 @@ def process_symbol(
                         if prem <= 0:
                             continue
                         sig = get_implied_volatility(puts_df, sp)
-                        if math.isnan(sig) or sig <= 0:
+                        # IV from yfinance is back-computed from lastPrice when
+                        # bid/ask are 0 (market closed) — stale and unreliable.
+                        # Use hv_sigma if IV looks suspiciously low (< 15%).
+                        if math.isnan(sig) or sig < 0.15:
                             sig = hv_sigma
                         d = black_scholes_put_delta(current_price, sp, rf_rate, T, sig)
                         candidates.append((sp, d, prem))
