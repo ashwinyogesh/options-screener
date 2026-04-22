@@ -177,7 +177,9 @@ def get_implied_volatility(puts_df: pd.DataFrame, strike: float) -> float:
 def get_bid_ask_spread_pct(puts_df: pd.DataFrame, strike: float) -> float:
     """
     Returns (ask - bid) / mid * 100 as a spread quality indicator.
-    Lower is better (tighter market). Returns NaN if bid/ask unavailable.
+    Lower is better (tighter market).
+    Falls back to a lastPrice-based estimate when bid/ask are zero
+    (common outside market hours).
     Works with both puts and calls DataFrames.
     """
     row = puts_df[puts_df["strike"] == strike]
@@ -185,12 +187,24 @@ def get_bid_ask_spread_pct(puts_df: pd.DataFrame, strike: float) -> float:
         return float("nan")
     bid = float(row["bid"].iloc[0]) if pd.notna(row["bid"].iloc[0]) else 0.0
     ask = float(row["ask"].iloc[0]) if pd.notna(row["ask"].iloc[0]) else 0.0
-    if bid <= 0 or ask <= 0 or ask < bid:
-        return float("nan")
-    mid = (bid + ask) / 2.0
-    if mid == 0:
-        return float("nan")
-    return round((ask - bid) / mid * 100.0, 2)
+    last = float(row["lastPrice"].iloc[0]) if pd.notna(row["lastPrice"].iloc[0]) else 0.0
+
+    if bid > 0 and ask > 0 and ask >= bid:
+        mid = (bid + ask) / 2.0
+        if mid > 0:
+            return round((ask - bid) / mid * 100.0, 2)
+
+    # Fallback: estimate spread from ask vs lastPrice when one of bid/ask is missing
+    if ask > 0 and last > 0 and ask >= last:
+        mid = (ask + last) / 2.0
+        if mid > 0:
+            return round((ask - last) / mid * 100.0, 2)
+    if bid > 0 and last > 0 and last >= bid:
+        mid = (bid + last) / 2.0
+        if mid > 0:
+            return round((last - bid) / mid * 100.0, 2)
+
+    return float("nan")
 
 
 def get_open_interest(options_df: pd.DataFrame, strike: float) -> int:
