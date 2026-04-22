@@ -82,12 +82,7 @@ export interface ScreenerResponse {
 }
 
 export interface FilterState {
-  minRsi: number
-  maxRsi: number
-  minIvRank: number
   smaRatioBullishOnly: boolean  // sma_ratio > 1
-  minDelta: number
-  maxDelta: number
   maxSpreadPct: number          // 0 = no filter
   excludeEarningsWithinDte: boolean
   maxCollateral: number         // 0 = no filter; strike × 100 per contract
