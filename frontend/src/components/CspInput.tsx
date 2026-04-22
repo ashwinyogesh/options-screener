@@ -157,14 +157,14 @@ export function CspInput({ onScan, onCustom, loading }: Props) {
               f.weight === null
                 ? <div key={f.factor} className="score-factor-section">{f.factor}</div>
                 : <div key={f.factor} className="score-factor-block">
-                    <div className="score-factor-row">
-                      <button
-                        className="score-factor-expand"
-                        onClick={() => setExpandedFactor(expandedFactor === f.factor ? null : f.factor)}
-                        title="Show calculation"
-                      >
+                    <div
+                      className="score-factor-row score-factor-row-clickable"
+                      onClick={() => setExpandedFactor(expandedFactor === f.factor ? null : f.factor)}
+                      title="Click to show calculation"
+                    >
+                      <span className="score-factor-expand">
                         {expandedFactor === f.factor ? '▾' : '▸'}
-                      </button>
+                      </span>
                       <span className="score-factor-name">{f.factor}</span>
                       <span
                         className="score-factor-weight"
