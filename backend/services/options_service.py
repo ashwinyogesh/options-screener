@@ -70,6 +70,48 @@ def get_all_expirations_data(symbol: str, min_dte: int = 30, max_dte: int = 60) 
         raise ValueError(f"All expirations in range were empty or illiquid for '{symbol}'")
     return results
 
+
+def get_all_expirations_calls_data(symbol: str, min_dte: int = 30, max_dte: int = 60) -> list[dict]:
+    """
+    Like get_all_expirations_data but returns call chains instead of put chains.
+    Each dict has: expiration, dte, calls_df, earnings_date.
+    """
+    ticker = yf.Ticker(symbol)
+    expirations = ticker.options
+    if not expirations:
+        raise ValueError(f"No options data available for '{symbol}'")
+
+    valid = [(exp, _dte(exp)) for exp in expirations if min_dte <= _dte(exp) <= max_dte]
+    if not valid:
+        raise ValueError(
+            f"No expiration in {min_dte}\u2013{max_dte} DTE range for '{symbol}'. "
+            f"Available: {expirations[:8]}"
+        )
+
+    earnings_date = _get_earnings_date(ticker)
+
+    results = []
+    for exp, dte_val in sorted(valid, key=lambda x: x[1]):
+        try:
+            chain = ticker.option_chain(exp)
+            calls = chain.calls.copy()
+            liquid_mask = (calls["volume"].fillna(0) > 0) | (calls["openInterest"].fillna(0) > 0)
+            calls = calls[liquid_mask].reset_index(drop=True)
+            if calls.empty:
+                continue
+            results.append({
+                "expiration": exp,
+                "dte": dte_val,
+                "calls_df": calls,
+                "earnings_date": earnings_date,
+            })
+        except Exception:
+            continue
+
+    if not results:
+        raise ValueError(f"All expirations in range were empty or illiquid for '{symbol}'")
+    return results
+
 def get_options_data(symbol: str, min_dte: int = 30, max_dte: int = 45) -> dict:
     """
     Returns a dict with keys:

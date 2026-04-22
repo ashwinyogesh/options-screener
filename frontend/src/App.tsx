@@ -3,15 +3,20 @@ import { SymbolInput } from './components/SymbolInput'
 import { CspInput } from './components/CspInput'
 import { FilterPanel } from './components/FilterPanel'
 import { ScreenerTable } from './components/ScreenerTable'
+import { CcInput } from './components/CcInput'
+import { CcTable } from './components/CcTable'
+import { CcFilterPanel } from './components/CcFilterPanel'
 import { DitmFilterPanel } from './components/DitmFilterPanel'
 import { DitmTable } from './components/DitmTable'
 import { MomentumFilterPanel } from './components/MomentumFilterPanel'
 import { MomentumTable } from './components/MomentumTable'
 import { MomentumInput } from './components/MomentumInput'
 import { useScreener } from './hooks/useScreener'
+import { useCc } from './hooks/useCc'
 import { useDitm } from './hooks/useDitm'
 import { useMomentum } from './hooks/useMomentum'
 import type { FilterState, ScreenerResult } from './types/screener'
+import type { CcFilterState, CcResult } from './types/cc'
 import type { DitmFilterState, DitmResult } from './types/ditm'
 import type { MomentumFilterState, MomentumResult } from './types/momentum'
 
@@ -22,7 +27,14 @@ const DEFAULT_FILTERS: FilterState = {
   maxCollateral: 0,
 }
 
-const DEFAULT_DITM_FILTERS: DitmFilterState = {
+const DEFAULT_CC_FILTERS: CcFilterState = {
+  smaRatioBullishOnly: false,
+  maxSpreadPct: 0,
+  excludeEarningsWithinDte: false,
+  maxCollateral: 0,
+}
+
+
   minDelta: 0.80,
   maxExtrinsicPct: 0,
   minMoneynessPct: 0,
@@ -68,7 +80,18 @@ function applyDitmFilters(results: DitmResult[], filters: DitmFilterState): Ditm
   })
 }
 
-function applyFilters(results: ScreenerResult[], filters: FilterState): ScreenerResult[] {
+function applyCcFilters(results: CcResult[], filters: CcFilterState): CcResult[] {
+  return results.filter(r => {
+    const best = r.strikes.find(s => s.is_best) ?? r.strikes[0]
+    if (filters.smaRatioBullishOnly && r.sma_ratio <= 1.0) return false
+    if (filters.maxSpreadPct > 0 && (best == null || best.bid_ask_spread_pct == null || best.bid_ask_spread_pct > filters.maxSpreadPct)) return false
+    if (filters.excludeEarningsWithinDte && r.earnings_within_dte) return false
+    if (filters.maxCollateral > 0 && best != null && best.strike * 100 > filters.maxCollateral) return false
+    return true
+  })
+}
+
+
   return results.filter(r => {
     const best = r.strikes.find(s => s.is_best) ?? r.strikes[0]
     if (filters.smaRatioBullishOnly && r.sma_ratio <= 1.0) return false
@@ -80,12 +103,17 @@ function applyFilters(results: ScreenerResult[], filters: FilterState): Screener
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'csp' | 'ditm' | 'momentum'>('csp')
+  const [activeTab, setActiveTab] = useState<'csp' | 'cc' | 'ditm' | 'momentum'>('csp')
 
   // CSP state
   const { results: cspResults, errors: cspErrors, loading: cspLoading, symbolCount: cspSymbolCount, isScanMode: cspIsScanMode, errorMessage: cspErrorMessage, run: runCsp, scan: scanCsp } = useScreener()
   const [cspFilters, setCspFilters] = useState<FilterState>(DEFAULT_FILTERS)
   const filteredCsp = useMemo(() => applyFilters(cspResults, cspFilters), [cspResults, cspFilters])
+
+  // CC state
+  const { results: ccResults, errors: ccErrors, loading: ccLoading, symbolCount: ccSymbolCount, isScanMode: ccIsScanMode, errorMessage: ccErrorMessage, run: runCc, scan: scanCc } = useCc()
+  const [ccFilters, setCcFilters] = useState<CcFilterState>(DEFAULT_CC_FILTERS)
+  const filteredCc = useMemo(() => applyCcFilters(ccResults, ccFilters), [ccResults, ccFilters])
 
   // DITM state
   const { results: ditmResults, errors: ditmErrors, loading: ditmLoading, symbolCount: ditmSymbolCount, errorMessage: ditmErrorMessage, run: runDitm } = useDitm()
@@ -107,6 +135,12 @@ export default function App() {
             onClick={() => setActiveTab('csp')}
           >
             CSP — Cash Secured Put
+          </button>
+          <button
+            className={`tab-btn${activeTab === 'cc' ? ' tab-btn-active' : ''}`}
+            onClick={() => setActiveTab('cc')}
+          >
+            CC — Covered Call
           </button>
           <button
             className={`tab-btn${activeTab === 'ditm' ? ' tab-btn-active' : ''}`}
@@ -163,6 +197,50 @@ export default function App() {
             {!cspLoading && cspResults.length === 0 && !cspErrorMessage && (
               <div className="empty-state">
                 <p>Click <strong>⚡ Scan Now</strong> to automatically find the top CSP opportunities, or switch to Custom Symbols.</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {activeTab === 'cc' && (
+          <>
+            <CcInput
+              onScan={(topN, minDTE, maxDTE) => scanCc(topN, minDTE, maxDTE)}
+              onCustom={(symbols, minDTE, maxDTE) => runCc({ symbols, minDTE, maxDTE })}
+              loading={ccLoading}
+            />
+            {ccResults.length > 0 && (
+              <CcFilterPanel filters={ccFilters} onChange={setCcFilters} />
+            )}
+            {ccLoading && (
+              <div className="loading-state">
+                <div className="spinner" />
+                {ccIsScanMode
+                  ? <p>Scanning <strong>75 stocks</strong> in parallel &mdash; est. <strong>~20s</strong></p>
+                  : <p>Fetching <strong>{ccSymbolCount}</strong> symbol{ccSymbolCount !== 1 ? 's' : ''} in parallel
+                      &nbsp;&mdash; est. <strong>~{Math.ceil(ccSymbolCount / 5) * 4}s</strong></p>
+                }
+              </div>
+            )}
+            {ccErrorMessage && (
+              <div className="error-banner"><strong>Error:</strong> {ccErrorMessage}</div>
+            )}
+            {ccErrors.length > 0 && (
+              <div className="error-summary">
+                <strong>{ccErrors.length} symbol{ccErrors.length > 1 ? 's' : ''} failed:</strong>
+                <ul>{ccErrors.map(e => <li key={e.symbol}><strong>{e.symbol}</strong>: {e.reason}</li>)}</ul>
+              </div>
+            )}
+            {!ccLoading && ccResults.length > 0 && (
+              <div className="results-meta">
+                Showing <strong>{filteredCc.length}</strong> of <strong>{ccResults.length}</strong> results
+                {filteredCc.length < ccResults.length && ' (filters active)'}
+              </div>
+            )}
+            <CcTable data={filteredCc} />
+            {!ccLoading && ccResults.length === 0 && !ccErrorMessage && (
+              <div className="empty-state">
+                <p>Click <strong>⚡ Scan Now</strong> to automatically find top Covered Call opportunities, or switch to Custom Symbols.</p>
               </div>
             )}
           </>

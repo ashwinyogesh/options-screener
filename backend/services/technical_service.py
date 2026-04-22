@@ -531,3 +531,155 @@ def compute_strike_score(
 def compute_csp_final_score(env_score: float, strike_score: float) -> float:
     """Final Score = 0.4 × Env Score + 0.6 × Strike Score."""
     return round(0.4 * env_score + 0.6 * strike_score, 1)
+
+
+def compute_volume_resistance(df: pd.DataFrame, n_bins: int = 50, lookback: int = 252) -> list[float]:
+    """
+    Volume Profile resistance levels above current price.
+
+    Same method as compute_volume_support but returns the midpoints of the top-3
+    high-volume bins ABOVE current price, sorted ascending (nearest resistance first).
+    """
+    data = df.tail(lookback).copy()
+    if len(data) < 20:
+        return []
+
+    current_price = float(data["Close"].iloc[-1])
+    typical = (data["High"] + data["Low"] + data["Close"]) / 3.0
+
+    try:
+        bins = pd.cut(typical, bins=n_bins)
+        vol_by_bin = data["Volume"].groupby(bins).sum()
+        bin_mids = pd.Series(
+            [interval.mid for interval in vol_by_bin.index],
+            index=vol_by_bin.index,
+        )
+
+        above_mask = bin_mids > current_price
+        above_vol = vol_by_bin[above_mask]
+        above_mids = bin_mids[above_mask]
+
+        if above_vol.empty:
+            return []
+
+        top3_labels = above_vol.nlargest(3).index
+        resistance_prices = sorted(
+            [float(above_mids[lbl]) for lbl in top3_labels]
+        )  # ascending = nearest resistance first
+        return [round(p, 2) for p in resistance_prices]
+
+    except Exception:
+        return []
+
+
+def compute_cc_strike_score(
+    *,
+    delta: float,
+    current_price: float,
+    strike: float,
+    iv_used: float,
+    dte: int,
+    vol_resistance_1: float | None,
+    vol_resistance_2: float | None,
+    vol_resistance_3: float | None,
+    bid_ask_spread_pct: float | None,
+    open_interest: int,
+    market_open: bool,
+    volume: int,
+) -> float:
+    """
+    CC Strike Safety Score 0–100.
+    Measures how safe *this specific call strike* is at *this expiration*.
+
+    Delta (18):               Bell-curve peak at +0.20→+0.25
+    Distance vs Resistance (13): Nearest vol-resistance level above current price
+    Expected Move Buffer (15):  How far strike is above 1σ upward move
+    % OTM from Spot (12):    Raw distance cushion above current price
+    Bid-Ask Spread % (22):   Execution quality at this strike
+    OI / Volume (20):        Liquidity at this specific strike
+    """
+    import math as _math
+    score = 0.0
+
+    # --- Delta bell-curve (18 pts) --- call delta sweet spot +0.20 to +0.25
+    if not _math.isnan(delta):
+        if 0.20 <= delta <= 0.25:
+            score += 18.0
+        elif (0.15 <= delta < 0.20) or (0.25 < delta <= 0.30):
+            score += 12.0
+        elif 0.10 <= delta < 0.15:
+            score += 6.0
+        elif delta > 0.30:
+            score += 7.0  # closer to money — higher assignment risk but some premium value
+
+    # --- Distance vs Nearest Resistance Above Current Price (13 pts) ---
+    # gap_pct < 0: strike is at/above resistance (resistance between price and strike) → best
+    # gap_pct > 0: strike is below resistance (no protection before stock reaches our strike) → bad
+    resistances = [r for r in [vol_resistance_1, vol_resistance_2, vol_resistance_3] if r is not None]
+    resistances_above_price = [r for r in resistances if r > current_price]
+    if resistances_above_price:
+        nearest_R = min(resistances_above_price)
+        gap_pct = (nearest_R - strike) / strike * 100.0
+        if gap_pct <= 0:
+            score += 13.0
+        elif gap_pct <= 5:
+            score += 13.0 - gap_pct / 5.0 * 5.0   # 13→8
+        elif gap_pct <= 10:
+            score += 8.0 - (gap_pct - 5) / 5.0 * 8.0  # 8→0
+        # else 0
+
+    # --- Expected Move Buffer (15 pts) --- upside 1σ ceiling
+    if not _math.isnan(iv_used) and iv_used > 0 and dte > 0:
+        T = dte / 365.0
+        em = current_price * iv_used * _math.sqrt(T)
+        em_upper = current_price + em
+        sigmas_outside = (strike - em_upper) / em  # positive = strike above 1σ ceiling
+        if sigmas_outside >= 0.20:
+            score += 15.0
+        elif sigmas_outside >= 0.0:
+            score += 10.0 + sigmas_outside / 0.20 * 5.0
+        elif sigmas_outside >= -0.10:
+            score += 4.0 + (sigmas_outside + 0.10) / 0.10 * 6.0
+        # else 0
+
+    # --- % OTM from Spot (12 pts) --- % above current price
+    otm_pct = (strike - current_price) / current_price * 100.0
+    if otm_pct >= 15:
+        score += 12.0
+    elif otm_pct >= 10:
+        score += 9.0 + (otm_pct - 10) / 5.0 * 3.0
+    elif otm_pct >= 5:
+        score += 6.0 + (otm_pct - 5) / 5.0 * 3.0
+    elif otm_pct >= 2:
+        score += 2.0 + (otm_pct - 2) / 3.0 * 4.0
+
+    # --- Bid-Ask Spread % (22 pts) ---
+    if bid_ask_spread_pct is not None and not _math.isnan(bid_ask_spread_pct):
+        if bid_ask_spread_pct <= 1.0:
+            score += 22.0
+        elif bid_ask_spread_pct <= 3.0:
+            score += 15.0 + (3.0 - bid_ask_spread_pct) / 2.0 * 7.0
+        elif bid_ask_spread_pct <= 5.0:
+            score += 8.0 + (5.0 - bid_ask_spread_pct) / 2.0 * 7.0
+        elif bid_ask_spread_pct <= 8.0:
+            score += 2.0 + (8.0 - bid_ask_spread_pct) / 3.0 * 6.0
+        # >8% = 0
+
+    # --- OI / Volume at this strike (20 pts) ---
+    liquidity_count = volume if (market_open and volume > 0) else open_interest
+    if liquidity_count >= 1000:
+        score += 20.0
+    elif liquidity_count >= 500:
+        score += 14.0 + (liquidity_count - 500) / 500.0 * 6.0
+    elif liquidity_count >= 200:
+        score += 8.0 + (liquidity_count - 200) / 300.0 * 6.0
+    elif liquidity_count >= 100:
+        score += (liquidity_count - 100) / 100.0 * 8.0
+    # <100: 0 pts
+
+    return round(max(0.0, min(100.0, score)), 1)
+
+
+def compute_cc_final_score(env_score: float, strike_score: float) -> float:
+    """CC Final Score = 0.4 × Env Score + 0.6 × Strike Score."""
+    return round(0.4 * env_score + 0.6 * strike_score, 1)
