@@ -4,13 +4,17 @@ const UNIVERSE_SIZE = 75  // keep in sync with backend/services/universe.py
 const PRESET_BASKET = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'META', 'GOOGL', 'SPY', 'QQQ', 'AMD']
 
 const SCORE_LEGEND = [
-  { factor: 'IV Rank',        weight: 25, detail: '\u2265 50 = full. Reward selling expensive premium.' },
-  { factor: 'Ann. Return',    weight: 20, detail: '\u2265 25% ann = full. Yield quality.' },
-  { factor: 'SMA50/200',      weight: 20, detail: '\u2265 1.05 = full. Only sell puts in uptrends.' },
-  { factor: 'RSI(14)',         weight: 15, detail: '40\u201365 = full. Avoid overbought/oversold.' },
-  { factor: 'Delta',           weight: 10, detail: '\u22120.20 to \u22120.30 = full. Ideal probability zone.' },
-  { factor: 'Spread %',        weight: 10, detail: '\u2264 3% = full. Tight bid-ask = liquid market.' },
-  { factor: 'Earnings in DTE', weight: -15, detail: 'Hard penalty if earnings fall within the expiry window.' },
+  { factor: 'IV Rank',          weight: 15, detail: '≥ 50 = full. Reward selling expensive premium.' },
+  { factor: 'IV / HV Ratio',    weight: 10, detail: '≥ 1.5× = full. IV above realized vol = premium-selling edge.' },
+  { factor: 'Ann. Return',      weight: 12, detail: '≥ 25% ann = full. Yield quality.' },
+  { factor: 'Prem / Distance',   weight:  8, detail: 'Premium as % of gap to strike. Higher = better compensated.' },
+  { factor: 'Trend Align',      weight: 10, detail: 'Price > SMA50 > SMA200 = full. Only sell puts in uptrends.' },
+  { factor: 'SMA50 Slope',      weight: 10, detail: '10-day SMA50 slope ≥ 0.5% = full. Rising trend confirmed.' },
+  { factor: 'RSI(14)',           weight: 10, detail: '40–65 = full. Avoid overbought/oversold.' },
+  { factor: 'Delta',             weight: 10, detail: '−0.15 to −0.30 = full. Aggressive <−0.30. Low-yield >−0.15.' },
+  { factor: 'Expected Move',    weight: 10, detail: 'Strike outside 1σ move window = full. Inside = low.' },
+  { factor: 'Spread %',          weight:  5, detail: '≤ 3% = full. Tight bid-ask = liquid market.' },
+  { factor: 'Earnings in DTE',  weight: -15, detail: 'Hard penalty if earnings fall within the expiry window.' },
 ]
 
 const SCORE_TIERS = [
