@@ -48,9 +48,9 @@ const SCORE_LEGEND = [
 ]
 
 const SCORE_TIERS = [
-  { range: '\u2265 70', label: 'Strong',   color: '#4ade80', desc: 'All signals aligned \u2014 high-quality CSP setup' },
-  { range: '45\u201369', label: 'Moderate', color: '#facc15', desc: 'Most signals ok, not fully optimised' },
-  { range: '< 45',  label: 'Weak',     color: '#f87171', desc: 'Poor yield, bad IV environment, or earnings risk' },
+  { range: '≥ 70', label: 'Strong',   color: '#4ade80', desc: 'All signals aligned and chain is liquid — high-quality, executable CSP setup' },
+  { range: '45–69', label: 'Moderate', color: '#facc15', desc: 'Most signals ok; some weakness in environment or execution quality' },
+  { range: '< 45',  label: 'Weak',     color: '#f87171', desc: 'Poor IV environment, execution risk, earnings overlap, or illiquid chain' },
 ]
 
 interface Props {
