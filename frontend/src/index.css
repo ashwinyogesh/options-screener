@@ -283,9 +283,9 @@ body {
 .expiry-date { font-size: 11px; color: #64748b; }
 
 /* ── Dual-row cells (BB Low top / BB Mid bottom) ─────────────────────────── */
-.dual-cell { display: flex; flex-direction: column; gap: 3px; }
-.dual-cell > span:first-child { font-size: 13px; }
-.dual-cell > span.dim { font-size: 12px; opacity: 0.55; }
+.dual-cell { display: flex; flex-direction: column; gap: 0; }
+.dual-cell > span:first-child { font-size: 13px; padding-bottom: 4px; }
+.dual-cell > span.mid-row { font-size: 12px; padding-top: 4px; border-top: 1px solid #334155; }
 
 /* ── Bollinger Bands stacked column ─────────────────────────────────────── */
 .bb-bands   { display: flex; flex-direction: column; gap: 1px; font-size: 12px; line-height: 1.4; }

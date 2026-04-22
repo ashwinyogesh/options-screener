@@ -153,6 +153,18 @@ const COLUMNS = [
       )
     },
   }),
+  col.accessor('dte', {
+    header: 'DTE',
+    cell: info => {
+      const row = info.row.original
+      return (
+        <span>
+          {info.getValue()}<br />
+          <span className="expiry-date">{row.expiration}</span>
+        </span>
+      )
+    },
+  }),
   col.accessor('strike', {
     header: () => (
       <span className="col-tip" title="Top: BB Low strike (≤ BB Lower)  ·  Bottom: BB Mid strike (≤ BB Middle)">
@@ -169,7 +181,7 @@ const COLUMNS = [
             {fmt2(row.strike)}{row.strike_is_fallback && ' *'}
             <span className="strike-fall"> {fallPct.toFixed(1)}%</span>
           </span>
-          <span className={`dim${row.strike_mid_is_fallback ? ' fallback' : ''}`}>
+          <span className={`mid-row${row.strike_mid_is_fallback ? ' fallback' : ''}`}>
             {fmt2(row.strike_mid)}{row.strike_mid_is_fallback && ' *'}
             <span className="strike-fall"> {midFallPct.toFixed(1)}%</span>
           </span>
@@ -186,7 +198,7 @@ const COLUMNS = [
       return (
         <span className="dual-cell">
           <span className={inRange ? 'delta-ok' : 'delta-warn'}>{fmtDelta(row.delta)}</span>
-          <span className={`dim ${midInRange ? 'delta-ok' : 'delta-warn'}`}>{fmtDelta(row.delta_mid)}</span>
+          <span className={`mid-row ${midInRange ? 'delta-ok' : 'delta-warn'}`}>{fmtDelta(row.delta_mid)}</span>
         </span>
       )
     },
@@ -200,26 +212,14 @@ const COLUMNS = [
     cell: info => {
       const row = info.row.original
       const fmtSpread = (v: number | null) => {
-        if (v == null) return <span className="dim">—</span>
+        if (v == null) return <span>—</span>
         const cls = v > 10 ? 'spread-wide' : v > 5 ? 'spread-ok' : 'spread-tight'
         return <span className={cls}>{v.toFixed(1)}%</span>
       }
       return (
         <span className="dual-cell">
-          {fmtSpread(row.bid_ask_spread_pct)}
-          <span className="dim">{fmtSpread(row.bid_ask_spread_pct_mid)}</span>
-        </span>
-      )
-    },
-  }),
-  col.accessor('dte', {
-    header: 'DTE',
-    cell: info => {
-      const row = info.row.original
-      return (
-        <span className="dual-cell">
-          <span>{info.getValue()}</span>
-          <span className="expiry-date dim">{row.expiration}</span>
+          <span>{fmtSpread(row.bid_ask_spread_pct)}</span>
+          <span className="mid-row">{fmtSpread(row.bid_ask_spread_pct_mid)}</span>
         </span>
       )
     },
@@ -231,7 +231,7 @@ const COLUMNS = [
       return (
         <span className="dual-cell">
           <span>{fmt2(row.premium)}</span>
-          <span className="dim">{fmt2(row.premium_mid)}</span>
+          <span className="mid-row">{fmt2(row.premium_mid)}</span>
         </span>
       )
     },
@@ -243,7 +243,7 @@ const COLUMNS = [
       return (
         <span className="dual-cell">
           <span>{fmtMoney(row.collateral)}</span>
-          <span className="dim">{fmtMoney(row.collateral_mid)}</span>
+          <span className="mid-row">{fmtMoney(row.collateral_mid)}</span>
         </span>
       )
     },
@@ -255,7 +255,7 @@ const COLUMNS = [
       return (
         <span className="dual-cell">
           <span>{fmtPct(row.return_pct)}</span>
-          <span className="dim">{fmtPct(row.return_pct_mid)}</span>
+          <span className="mid-row">{fmtPct(row.return_pct_mid)}</span>
         </span>
       )
     },
@@ -267,7 +267,7 @@ const COLUMNS = [
       return (
         <span className="dual-cell">
           <span>{fmtAnn(row.annualized_return)}</span>
-          <span className="dim">{fmtAnn(row.annualized_return_mid)}</span>
+          <span className="mid-row">{fmtAnn(row.annualized_return_mid)}</span>
         </span>
       )
     },
