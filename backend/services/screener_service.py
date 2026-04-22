@@ -46,18 +46,24 @@ class ScreenerResult:
     earnings_within_dte: bool
     strike: float
     strike_is_fallback: bool
+    strike_mid: float
+    strike_mid_is_fallback: bool
     vol_support_1: Optional[float]
     vol_support_2: Optional[float]
     vol_support_3: Optional[float]
     delta: float
+    delta_mid: float
     bid_ask_spread_pct: Optional[float]  # (ask-bid)/mid * 100
     csp_score: float                     # composite quality score 0-100
     dte: int
     expiration: str
     premium: float
+    premium_mid: float
     collateral: float
     return_pct: float
     annualized_return: float
+    return_pct_mid: float
+    annualized_return_mid: float
 
 
 @dataclass
@@ -112,9 +118,11 @@ def process_symbol(
 
         # 4. Strike selection
         strike, strike_is_fallback = select_strike(puts_df, bb["bb_lower"])
+        strike_mid, strike_mid_is_fallback = select_strike(puts_df, bb["bb_middle"])
 
         # 5. Premium (mid-price)
         premium = get_premium(puts_df, strike)
+        premium_mid = get_premium(puts_df, strike_mid)
 
         # 5a. Bid-ask spread quality
         spread_pct = get_bid_ask_spread_pct(puts_df, strike)
@@ -134,6 +142,7 @@ def process_symbol(
         # 7. Black-Scholes delta
         T = dte / 365.0
         delta = black_scholes_put_delta(current_price, strike, rf_rate, T, sigma)
+        delta_mid = black_scholes_put_delta(current_price, strike_mid, rf_rate, T, sigma)
 
         # 8. Returns
         # collateral = strike × 100 (dollars secured per contract)
@@ -141,6 +150,9 @@ def process_symbol(
         collateral = round(strike * 100.0, 2)
         return_pct = round((premium * 100) / collateral * 100.0, 4) if collateral > 0 else 0.0
         annualized_return = round(return_pct * (365.0 / dte), 4) if dte > 0 else 0.0
+        collateral_mid = round(strike_mid * 100.0, 2)
+        return_pct_mid = round((premium_mid * 100) / collateral_mid * 100.0, 4) if collateral_mid > 0 else 0.0
+        annualized_return_mid = round(return_pct_mid * (365.0 / dte), 4) if dte > 0 else 0.0
 
         # 9. CSP composite score
         csp_score = compute_csp_score(
@@ -167,18 +179,24 @@ def process_symbol(
             earnings_within_dte=earnings_within_dte,
             strike=strike,
             strike_is_fallback=strike_is_fallback,
+            strike_mid=strike_mid,
+            strike_mid_is_fallback=strike_mid_is_fallback,
             vol_support_1=vol_supports[0] if len(vol_supports) > 0 else None,
             vol_support_2=vol_supports[1] if len(vol_supports) > 1 else None,
             vol_support_3=vol_supports[2] if len(vol_supports) > 2 else None,
             delta=delta,
+            delta_mid=delta_mid,
             bid_ask_spread_pct=bid_ask_spread_pct,
             csp_score=csp_score,
             dte=dte,
             expiration=expiration,
             premium=round(premium, 4),
+            premium_mid=round(premium_mid, 4),
             collateral=collateral,
             return_pct=return_pct,
             annualized_return=annualized_return,
+            return_pct_mid=return_pct_mid,
+            annualized_return_mid=annualized_return_mid,
         )
         return result, None
 

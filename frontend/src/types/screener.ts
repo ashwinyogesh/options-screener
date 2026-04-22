@@ -12,18 +12,24 @@ export interface ScreenerResult {
   earnings_within_dte: boolean
   strike: number
   strike_is_fallback: boolean
+  strike_mid: number
+  strike_mid_is_fallback: boolean
   vol_support_1: number | null
   vol_support_2: number | null
   vol_support_3: number | null
   delta: number
+  delta_mid: number
   bid_ask_spread_pct: number | null
   csp_score: number
   dte: number
   expiration: string
   premium: number
+  premium_mid: number
   collateral: number
   return_pct: number
   annualized_return: number
+  return_pct_mid: number
+  annualized_return_mid: number
 }
 
 export interface ScreenerError {

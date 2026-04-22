@@ -79,18 +79,24 @@ class ScreenerResultOut(BaseModel):
     earnings_within_dte: bool
     strike: float
     strike_is_fallback: bool
+    strike_mid: float
+    strike_mid_is_fallback: bool
     vol_support_1: Optional[float]
     vol_support_2: Optional[float]
     vol_support_3: Optional[float]
     delta: float
+    delta_mid: float
     bid_ask_spread_pct: Optional[float]
     csp_score: float
     dte: int
     expiration: str
     premium: float
+    premium_mid: float
     collateral: float
     return_pct: float
     annualized_return: float
+    return_pct_mid: float
+    annualized_return_mid: float
 
 
 class ScreenerErrorOut(BaseModel):
@@ -207,16 +213,22 @@ def _to_out(r: ScreenerResult) -> ScreenerResultOut:
         earnings_within_dte=r.earnings_within_dte,
         strike=r.strike,
         strike_is_fallback=r.strike_is_fallback,
+        strike_mid=r.strike_mid,
+        strike_mid_is_fallback=r.strike_mid_is_fallback,
         vol_support_1=r.vol_support_1,
         vol_support_2=r.vol_support_2,
         vol_support_3=r.vol_support_3,
         delta=r.delta,
+        delta_mid=r.delta_mid,
         bid_ask_spread_pct=r.bid_ask_spread_pct,
         csp_score=r.csp_score,
         dte=r.dte,
         expiration=r.expiration,
         premium=r.premium,
+        premium_mid=r.premium_mid,
         collateral=r.collateral,
         return_pct=r.return_pct,
         annualized_return=r.annualized_return,
+        return_pct_mid=r.return_pct_mid,
+        annualized_return_mid=r.annualized_return_mid,
     )

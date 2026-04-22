@@ -133,15 +133,27 @@ const COLUMNS = [
     },
   }),
   col.accessor('strike', {
-    header: 'Strike',
+    header: () => (
+      <span className="col-tip" title="Top: strike ≤ BB Lower  ·  Bottom (dim): strike ≤ BB Middle">
+        Strike ⓘ
+      </span>
+    ),
     cell: info => {
       const row = info.row.original
       const fallPct = ((row.strike - row.price) / row.price) * 100
+      const midFallPct = ((row.strike_mid - row.price) / row.price) * 100
       return (
-        <span className={row.strike_is_fallback ? 'fallback' : ''}>
-          {fmt2(info.getValue())}
-          {row.strike_is_fallback && ' *'}<br />
-          <span className="strike-fall">{fallPct.toFixed(1)}%</span>
+        <span>
+          <span className={row.strike_is_fallback ? 'fallback' : ''}>
+            {fmt2(row.strike)}{row.strike_is_fallback && ' *'}
+            <br />
+            <span className="strike-fall">{fallPct.toFixed(1)}%</span>
+          </span>
+          <br />
+          <span className={`dim${row.strike_mid_is_fallback ? ' fallback' : ''}`} title="BB Middle strike">
+            {fmt2(row.strike_mid)}{row.strike_mid_is_fallback && ' *'}
+            <span className="strike-fall"> {midFallPct.toFixed(1)}%</span>
+          </span>
         </span>
       )
     },
@@ -170,9 +182,16 @@ const COLUMNS = [
   col.accessor('delta', {
     header: 'Delta',
     cell: info => {
-      const v = info.getValue()
-      const inRange = v >= -0.30 && v <= -0.15
-      return <span className={inRange ? 'delta-ok' : 'delta-warn'}>{fmtDelta(v)}</span>
+      const row = info.row.original
+      const inRange = row.delta >= -0.30 && row.delta <= -0.15
+      const midInRange = row.delta_mid >= -0.30 && row.delta_mid <= -0.15
+      return (
+        <span>
+          <span className={inRange ? 'delta-ok' : 'delta-warn'}>{fmtDelta(row.delta)}</span>
+          <br />
+          <span className={`dim ${midInRange ? 'delta-ok' : 'delta-warn'}`}>{fmtDelta(row.delta_mid)}</span>
+        </span>
+      )
     },
   }),
   col.accessor('bid_ask_spread_pct', {
@@ -202,7 +221,15 @@ const COLUMNS = [
   }),
   col.accessor('premium', {
     header: 'Premium',
-    cell: info => fmt2(info.getValue()),
+    cell: info => {
+      const row = info.row.original
+      return (
+        <span>
+          {fmt2(row.premium)}<br />
+          <span className="dim">{fmt2(row.premium_mid)}</span>
+        </span>
+      )
+    },
   }),
   col.accessor('collateral', {
     header: 'Collateral',
@@ -214,7 +241,15 @@ const COLUMNS = [
   }),
   col.accessor('annualized_return', {
     header: 'Ann. Return',
-    cell: info => fmtAnn(info.getValue()),
+    cell: info => {
+      const row = info.row.original
+      return (
+        <span>
+          {fmtAnn(row.annualized_return)}<br />
+          <span className="dim">{fmtAnn(row.annualized_return_mid)}</span>
+        </span>
+      )
+    },
   }),
 ]
 
