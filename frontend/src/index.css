@@ -287,6 +287,10 @@ body {
 .dual-cell > span:first-child { font-size: 13px; padding-bottom: 4px; }
 .dual-cell > span.mid-row { font-size: 12px; padding-top: 4px; border-top: 1px solid #334155; }
 
+/* ── Expiration stacking within a cell (one block per DTE) ───────────────── */
+.exp-col { display: flex; flex-direction: column; gap: 0; }
+.exp-block { margin-top: 6px; padding-top: 6px; border-top: 2px dashed #475569; }
+
 /* ── Bollinger Bands stacked column ─────────────────────────────────────── */
 .bb-bands   { display: flex; flex-direction: column; gap: 1px; font-size: 12px; line-height: 1.4; }
 .bb-upper   { color: #f87171; }

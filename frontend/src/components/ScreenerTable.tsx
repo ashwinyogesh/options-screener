@@ -6,10 +6,10 @@ import {
   createColumnHelper,
   type SortingState,
 } from '@tanstack/react-table'
-import { useState } from 'react'
-import type { ScreenerResult } from '../types/screener'
+import { useState, useMemo } from 'react'
+import type { ScreenerResult, GroupedScreenerResult } from '../types/screener'
 
-const col = createColumnHelper<ScreenerResult>()
+const col = createColumnHelper<GroupedScreenerResult>()
 
 function fmt2(n: number | null | undefined): string {
   if (n == null) return '—'
@@ -141,158 +141,264 @@ const COLUMNS = [
       )
     },
   }),
-  col.accessor('dte', {
+  col.display({
+    id: 'dte',
     header: 'DTE',
     cell: info => {
-      const row = info.row.original
+      const exps = info.row.original.expirations
       return (
-        <span>
-          {info.getValue()}<br />
-          <span className="expiry-date">{row.expiration}</span>
+        <span className="exp-col">
+          {exps.map((exp, i) => (
+            <span key={i} className={i > 0 ? 'exp-block' : ''}>
+              {exp.dte}<br />
+              <span className="expiry-date">{exp.expiration}</span>
+              {exp.earnings_within_dte && <span className="earnings-warn"> ⚠</span>}
+            </span>
+          ))}
         </span>
       )
     },
   }),
-  col.accessor('strike', {
+  col.display({
+    id: 'strike',
     header: () => (
       <span className="col-tip" title="Top: BB Low strike (≤ BB Lower)  ·  Bottom: BB Mid strike (≤ BB Middle)">
         Strike ⓘ
       </span>
     ),
     cell: info => {
-      const row = info.row.original
-      const fallPct = ((row.strike - row.price) / row.price) * 100
-      const midFallPct = ((row.strike_mid - row.price) / row.price) * 100
+      const { price, expirations } = info.row.original
       return (
-        <span className="dual-cell">
-          <span className={row.strike_is_fallback ? 'fallback' : ''}>
-            {fmt2(row.strike)}{row.strike_is_fallback && ' *'}
-            <span className="strike-fall"> {fallPct.toFixed(1)}%</span>
-          </span>
-          <span className={`mid-row${row.strike_mid_is_fallback ? ' fallback' : ''}`}>
-            {fmt2(row.strike_mid)}{row.strike_mid_is_fallback && ' *'}
-            <span className="strike-fall"> {midFallPct.toFixed(1)}%</span>
-          </span>
+        <span className="exp-col">
+          {expirations.map((exp, i) => {
+            const fallPct = ((exp.strike - price) / price) * 100
+            const midFallPct = ((exp.strike_mid - price) / price) * 100
+            return (
+              <span key={i} className={`dual-cell${i > 0 ? ' exp-block' : ''}`}>
+                <span className={exp.strike_is_fallback ? 'fallback' : ''}>
+                  {fmt2(exp.strike)}{exp.strike_is_fallback && ' *'}
+                  <span className="strike-fall"> {fallPct.toFixed(1)}%</span>
+                </span>
+                <span className={`mid-row${exp.strike_mid_is_fallback ? ' fallback' : ''}`}>
+                  {fmt2(exp.strike_mid)}{exp.strike_mid_is_fallback && ' *'}
+                  <span className="strike-fall"> {midFallPct.toFixed(1)}%</span>
+                </span>
+              </span>
+            )
+          })}
         </span>
       )
     },
   }),
-  col.accessor('delta', {
+  col.display({
+    id: 'delta',
     header: 'Delta',
     cell: info => {
-      const row = info.row.original
-      const inRange = row.delta >= -0.30 && row.delta <= -0.15
-      const midInRange = row.delta_mid >= -0.30 && row.delta_mid <= -0.15
+      const { expirations } = info.row.original
       return (
-        <span className="dual-cell">
-          <span className={inRange ? 'delta-ok' : 'delta-warn'}>{fmtDelta(row.delta)}</span>
-          <span className={`mid-row ${midInRange ? 'delta-ok' : 'delta-warn'}`}>{fmtDelta(row.delta_mid)}</span>
+        <span className="exp-col">
+          {expirations.map((exp, i) => {
+            const inRange = exp.delta >= -0.30 && exp.delta <= -0.15
+            const midInRange = exp.delta_mid >= -0.30 && exp.delta_mid <= -0.15
+            return (
+              <span key={i} className={`dual-cell${i > 0 ? ' exp-block' : ''}`}>
+                <span className={inRange ? 'delta-ok' : 'delta-warn'}>{fmtDelta(exp.delta)}</span>
+                <span className={`mid-row ${midInRange ? 'delta-ok' : 'delta-warn'}`}>{fmtDelta(exp.delta_mid)}</span>
+              </span>
+            )
+          })}
         </span>
       )
     },
   }),
-  col.accessor('bid_ask_spread_pct', {
+  col.display({
+    id: 'bid_ask_spread_pct',
     header: () => (
       <span className="col-tip" title="(Ask − Bid) / Mid × 100  ·  Lower = tighter market  ·  >10% = illiquid">
         Spread% ⓘ
       </span>
     ),
     cell: info => {
-      const row = info.row.original
+      const { expirations } = info.row.original
       const fmtSpread = (v: number | null) => {
         if (v == null) return <span>—</span>
         const cls = v > 10 ? 'spread-wide' : v > 5 ? 'spread-ok' : 'spread-tight'
         return <span className={cls}>{v.toFixed(1)}%</span>
       }
       return (
-        <span className="dual-cell">
-          <span>{fmtSpread(row.bid_ask_spread_pct)}</span>
-          <span className="mid-row">{fmtSpread(row.bid_ask_spread_pct_mid)}</span>
+        <span className="exp-col">
+          {expirations.map((exp, i) => (
+            <span key={i} className={`dual-cell${i > 0 ? ' exp-block' : ''}`}>
+              <span>{fmtSpread(exp.bid_ask_spread_pct)}</span>
+              <span className="mid-row">{fmtSpread(exp.bid_ask_spread_pct_mid)}</span>
+            </span>
+          ))}
         </span>
       )
     },
   }),
-  col.accessor('premium', {
+  col.display({
+    id: 'premium',
     header: 'Premium',
     cell: info => {
-      const row = info.row.original
+      const { expirations } = info.row.original
       return (
-        <span className="dual-cell">
-          <span>{fmt2(row.premium)}</span>
-          <span className="mid-row">{fmt2(row.premium_mid)}</span>
+        <span className="exp-col">
+          {expirations.map((exp, i) => (
+            <span key={i} className={`dual-cell${i > 0 ? ' exp-block' : ''}`}>
+              <span>{fmt2(exp.premium)}</span>
+              <span className="mid-row">{fmt2(exp.premium_mid)}</span>
+            </span>
+          ))}
         </span>
       )
     },
   }),
-  col.accessor('collateral', {
+  col.display({
+    id: 'collateral',
     header: 'Collateral',
     cell: info => {
-      const row = info.row.original
+      const { expirations } = info.row.original
       return (
-        <span className="dual-cell">
-          <span>{fmtMoney(row.collateral)}</span>
-          <span className="mid-row">{fmtMoney(row.collateral_mid)}</span>
+        <span className="exp-col">
+          {expirations.map((exp, i) => (
+            <span key={i} className={`dual-cell${i > 0 ? ' exp-block' : ''}`}>
+              <span>{fmtMoney(exp.collateral)}</span>
+              <span className="mid-row">{fmtMoney(exp.collateral_mid)}</span>
+            </span>
+          ))}
         </span>
       )
     },
   }),
-  col.accessor('return_pct', {
+  col.display({
+    id: 'return_pct',
     header: 'Return %',
     cell: info => {
-      const row = info.row.original
+      const { expirations } = info.row.original
       return (
-        <span className="dual-cell">
-          <span>{fmtPct(row.return_pct)}</span>
-          <span className="mid-row">{fmtPct(row.return_pct_mid)}</span>
+        <span className="exp-col">
+          {expirations.map((exp, i) => (
+            <span key={i} className={`dual-cell${i > 0 ? ' exp-block' : ''}`}>
+              <span>{fmtPct(exp.return_pct)}</span>
+              <span className="mid-row">{fmtPct(exp.return_pct_mid)}</span>
+            </span>
+          ))}
         </span>
       )
     },
   }),
-  col.accessor('annualized_return', {
+  col.display({
+    id: 'annualized_return',
     header: 'Ann. Return',
     cell: info => {
-      const row = info.row.original
+      const { expirations } = info.row.original
       return (
-        <span className="dual-cell">
-          <span>{fmtAnn(row.annualized_return)}</span>
-          <span className="mid-row">{fmtAnn(row.annualized_return_mid)}</span>
+        <span className="exp-col">
+          {expirations.map((exp, i) => (
+            <span key={i} className={`dual-cell${i > 0 ? ' exp-block' : ''}`}>
+              <span>{fmtAnn(exp.annualized_return)}</span>
+              <span className="mid-row">{fmtAnn(exp.annualized_return_mid)}</span>
+            </span>
+          ))}
         </span>
       )
     },
   }),
-  col.accessor('csp_score', {
+  col.accessor('best_score', {
     header: () => (
       <span className="col-tip" title="CSP score 0-100: IV Rank(25) + Ann.Return(20) + SMA trend(20) + RSI zone(15) + Delta(10) + Spread%(10) − Earnings(−15)">
         Score ⓘ
       </span>
     ),
     cell: info => {
-      const row = info.row.original
+      const { expirations } = info.row.original
       const scoreFmt = (v: number) => {
         const cls = v >= 70 ? 'positive' : v >= 45 ? 'rsi-ok' : 'negative'
         return <span className={cls} style={{ fontWeight: 700, fontSize: '14px' }}>{v.toFixed(0)}</span>
       }
       return (
-        <span className="dual-cell">
-          <span>{scoreFmt(row.csp_score)}</span>
-          <span className="mid-row">{scoreFmt(row.csp_score_mid)}</span>
+        <span className="exp-col">
+          {expirations.map((exp, i) => (
+            <span key={i} className={`dual-cell${i > 0 ? ' exp-block' : ''}`}>
+              <span>{scoreFmt(exp.csp_score)}</span>
+              <span className="mid-row">{scoreFmt(exp.csp_score_mid)}</span>
+            </span>
+          ))}
         </span>
       )
     },
   }),
 ]
 
+function groupResults(results: ScreenerResult[]): GroupedScreenerResult[] {
+  const map = new Map<string, GroupedScreenerResult>()
+  for (const r of results) {
+    if (!map.has(r.symbol)) {
+      map.set(r.symbol, {
+        symbol: r.symbol,
+        price: r.price,
+        bb_upper: r.bb_upper,
+        bb_middle: r.bb_middle,
+        bb_lower: r.bb_lower,
+        sma_ratio: r.sma_ratio,
+        rsi: r.rsi,
+        iv_rank: r.iv_rank,
+        iv_percentile: r.iv_percentile,
+        earnings_date: r.earnings_date,
+        earnings_within_dte: false,
+        vol_support_1: r.vol_support_1,
+        vol_support_2: r.vol_support_2,
+        vol_support_3: r.vol_support_3,
+        best_score: 0,
+        expirations: [],
+      })
+    }
+    const group = map.get(r.symbol)!
+    if (r.earnings_within_dte) group.earnings_within_dte = true
+    group.expirations.push({
+      dte: r.dte,
+      expiration: r.expiration,
+      earnings_within_dte: r.earnings_within_dte,
+      strike: r.strike,
+      strike_is_fallback: r.strike_is_fallback,
+      strike_mid: r.strike_mid,
+      strike_mid_is_fallback: r.strike_mid_is_fallback,
+      delta: r.delta,
+      delta_mid: r.delta_mid,
+      bid_ask_spread_pct: r.bid_ask_spread_pct,
+      bid_ask_spread_pct_mid: r.bid_ask_spread_pct_mid,
+      premium: r.premium,
+      premium_mid: r.premium_mid,
+      collateral: r.collateral,
+      collateral_mid: r.collateral_mid,
+      return_pct: r.return_pct,
+      return_pct_mid: r.return_pct_mid,
+      annualized_return: r.annualized_return,
+      annualized_return_mid: r.annualized_return_mid,
+      csp_score: r.csp_score,
+      csp_score_mid: r.csp_score_mid,
+    })
+  }
+  for (const g of map.values()) {
+    g.expirations.sort((a, b) => a.dte - b.dte)
+    g.best_score = Math.max(...g.expirations.map(e => e.csp_score))
+  }
+  return [...map.values()].sort((a, b) => b.best_score - a.best_score)
+}
+
 interface Props {
   data: ScreenerResult[]
 }
 
 export function ScreenerTable({ data }: Props) {
+  const groupedData = useMemo(() => groupResults(data), [data])
   const [sorting, setSorting] = useState<SortingState>([
-    { id: 'csp_score', desc: true },
+    { id: 'best_score', desc: true },
   ])
 
   const table = useReactTable({
-    data,
+    data: groupedData,
     columns: COLUMNS,
     state: { sorting },
     onSortingChange: setSorting,
@@ -300,7 +406,7 @@ export function ScreenerTable({ data }: Props) {
     getSortedRowModel: getSortedRowModel(),
   })
 
-  if (data.length === 0) return null
+  if (groupedData.length === 0) return null
 
   return (
     <div className="table-wrapper">
