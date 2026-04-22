@@ -45,7 +45,7 @@ const COLUMNS = [
   }),
   col.accessor('sma_ratio', {
     header: () => (
-      <span className="col-tip" title="SMA50 / SMA200  ·  >1.0 = bullish (50 above 200)  ·  <1.0 = bearish">
+      <span className="col-tip" title="SMA50 / SMA200 ratio (display)  ·  Score uses: Price>SMA50>SMA200 alignment (10 pts) + SMA50 10-day slope (10 pts)">
         SMA50/200 ⓘ
       </span>
     ),
@@ -61,7 +61,7 @@ const COLUMNS = [
   }),
   col.accessor('iv_rank', {
     header: () => (
-      <span className="col-tip" title="IV Rank = (HV_today − HV_min_252) / (HV_max_252 − HV_min_252) × 100  ·  HV-based proxy  ·  High = selling expensive vol">
+      <span className="col-tip" title="IV Rank = (HV_today − HV_min_252) / (HV_max_252 − HV_min_252) × 100  ·  Score uses IV Rank (15 pts) + IV÷HV Ratio (10 pts; ≥1.5× = full)">
         IV Rank ⓘ
       </span>
     ),
@@ -200,7 +200,7 @@ export function ScreenerTable({ data }: Props) {
                 className="sortable"
                 onClick={() => scoreCol?.toggleSorting(scoreSorted === 'asc')}
               >
-                <span className="col-tip" title="CSP score 0-100: IV Rank(25) + Ann.Return(20) + SMA trend(20) + RSI zone(15) + Delta(10) + Spread%(10) − Earnings(−15)">
+                <span className="col-tip" title="CSP Score 0–100&#10;&#10;IV Rank          15 pts  ≥50 = full&#10;IV / HV Ratio    10 pts  ≥1.5× = full (IV well above realized vol)&#10;Ann. Return      12 pts  ≥25% = full&#10;Prem / Distance   8 pts  premium as % of gap to strike&#10;Trend align      10 pts  Price > SMA50 > SMA200&#10;SMA50 Slope      10 pts  10-day slope > 0.5% = full&#10;RSI              10 pts  40–65 = full&#10;Delta            10 pts  −0.15 to −0.30 ideal; &lt;−0.30 aggressive; &gt;−0.15 low-yield&#10;Expected Move    10 pts  strike outside 1σ move&#10;Spread %          5 pts  ≤3% = full&#10;Earnings in DTE  −15 pts penalty">
                   Score ⓘ
                 </span>
                 {scoreSorted === 'asc' && ' ↑'}
