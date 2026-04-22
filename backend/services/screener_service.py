@@ -137,8 +137,8 @@ def process_symbol(
                         if math.isnan(sig) or sig <= 0:
                             sig = hv_sigma
                         d = black_scholes_put_delta(current_price, sp, rf_rate, T, sig)
-                        if d <= -0.90:
-                            continue  # deep ITM — not a CSP candidate
+                        if not (-0.35 <= d <= -0.10):
+                            continue  # keep only 10-35 delta range
                         spread_raw = get_bid_ask_spread_pct(puts_df, sp)
                         spread_s: Optional[float] = None if math.isnan(spread_raw) else spread_raw
                         collateral_s = round(sp * 100.0, 2)

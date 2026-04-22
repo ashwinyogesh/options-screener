@@ -304,7 +304,7 @@ export function ScreenerTable({ data }: Props) {
                   )}
                 </td>
                 <td>
-                  <span className={bestStrike.delta >= -0.30 && bestStrike.delta <= -0.15 ? 'delta-ok' : 'delta-warn'}>
+                      <span className={bestStrike.delta >= -0.35 && bestStrike.delta <= -0.10 ? 'delta-ok' : 'delta-warn'}>
                     {fmtDelta(bestStrike.delta)}
                   </span>
                 </td>
@@ -326,7 +326,7 @@ export function ScreenerTable({ data }: Props) {
                       <span className="strike-prem dim"> ${s.premium.toFixed(2)}</span>
                     </td>
                     <td>
-                      <span className={s.delta >= -0.30 && s.delta <= -0.15 ? 'delta-ok' : 'delta-warn'}>
+                      <span className={s.delta >= -0.35 && s.delta <= -0.10 ? 'delta-ok' : 'delta-warn'}>
                         {fmtDelta(s.delta)}
                       </span>
                     </td>
