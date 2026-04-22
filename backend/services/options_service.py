@@ -23,6 +23,53 @@ def _dte(expiration_str: str) -> int:
     return (exp - today).days
 
 
+def get_all_expirations_data(symbol: str, min_dte: int = 30, max_dte: int = 60) -> list[dict]:
+    """
+    Returns a list of dicts sorted by DTE ascending, one per valid expiration
+    in [min_dte, max_dte]:
+      expiration   : str  — 'YYYY-MM-DD'
+      dte          : int
+      puts_df      : pd.DataFrame — filtered put chain
+      earnings_date: str | None
+
+    Raises ValueError if no valid expiration is found or no options exist.
+    """
+    ticker = yf.Ticker(symbol)
+    expirations = ticker.options
+    if not expirations:
+        raise ValueError(f"No options data available for '{symbol}'")
+
+    valid = [(exp, _dte(exp)) for exp in expirations if min_dte <= _dte(exp) <= max_dte]
+    if not valid:
+        raise ValueError(
+            f"No expiration in {min_dte}\u2013{max_dte} DTE range for '{symbol}'. "
+            f"Available: {expirations[:8]}"
+        )
+
+    earnings_date = _get_earnings_date(ticker)
+
+    results = []
+    for exp, dte_val in sorted(valid, key=lambda x: x[1]):
+        try:
+            chain = ticker.option_chain(exp)
+            puts = chain.puts.copy()
+            liquid_mask = (puts["volume"].fillna(0) > 0) | (puts["openInterest"].fillna(0) > 0)
+            puts = puts[liquid_mask].reset_index(drop=True)
+            if puts.empty:
+                continue
+            results.append({
+                "expiration": exp,
+                "dte": dte_val,
+                "puts_df": puts,
+                "earnings_date": earnings_date,
+            })
+        except Exception:
+            continue
+
+    if not results:
+        raise ValueError(f"All expirations in range were empty or illiquid for '{symbol}'")
+    return results
+
 def get_options_data(symbol: str, min_dte: int = 30, max_dte: int = 45) -> dict:
     """
     Returns a dict with keys:

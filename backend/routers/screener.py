@@ -31,7 +31,7 @@ _CONCURRENCY = 5  # max parallel yfinance fetches
 class ScreenerRequest(BaseModel):
     symbols: List[str]
     minDTE: int = 30
-    maxDTE: int = 45
+    maxDTE: int = 60
 
     @field_validator("symbols")
     @classmethod
@@ -146,8 +146,8 @@ async def run_csp_screener(request: ScreenerRequest) -> ScreenerResponse:
 
     results: list[ScreenerResultOut] = []
     errors: list[ScreenerErrorOut] = []
-    for result, error in pairs:
-        if result is not None:
+    for result_list, error in pairs:
+        for result in result_list:
             results.append(_to_out(result))
         if error is not None:
             errors.append(ScreenerErrorOut(symbol=error.symbol, reason=error.reason))
@@ -160,7 +160,7 @@ async def run_csp_screener(request: ScreenerRequest) -> ScreenerResponse:
 async def run_csp_scan(
     top_n: int = Query(default=20, ge=1, le=50),
     min_dte: int = Query(default=30, ge=1, le=90),
-    max_dte: int = Query(default=45, ge=1, le=90),
+    max_dte: int = Query(default=60, ge=1, le=90),
 ) -> ScreenerResponse:
     """
     Scans the full curated universe (~75 stocks) and returns the
@@ -185,8 +185,8 @@ async def run_csp_scan(
 
     results: list[ScreenerResultOut] = []
     errors: list[ScreenerErrorOut] = []
-    for result, error in pairs:
-        if result is not None:
+    for result_list, error in pairs:
+        for result in result_list:
             results.append(_to_out(result))
         if error is not None:
             errors.append(ScreenerErrorOut(symbol=error.symbol, reason=error.reason))

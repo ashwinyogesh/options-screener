@@ -32,13 +32,13 @@ export function CspInput({ onScan, onCustom, loading }: Props) {
   // Scan mode state
   const [topN, setTopN] = useState(20)
   const [scanMinDTE, setScanMinDTE] = useState(30)
-  const [scanMaxDTE, setScanMaxDTE] = useState(45)
+  const [scanMaxDTE, setScanMaxDTE] = useState(60)
 
   // Custom mode state
   const [chips, setChips] = useState<string[]>([])
   const [inputValue, setInputValue] = useState('')
   const [minDTE, setMinDTE] = useState(30)
-  const [maxDTE, setMaxDTE] = useState(45)
+  const [maxDTE, setMaxDTE] = useState(60)
   const [dteError, setDteError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
