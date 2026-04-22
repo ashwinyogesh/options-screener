@@ -24,6 +24,7 @@ from services.technical_service import (
     compute_iv_rank_percentile,
     compute_rsi,
     compute_sma_ratio,
+    compute_trend_data,
     compute_volume_support,
 )
 
@@ -91,6 +92,7 @@ def process_symbol(
         # 2. Technical indicators (computed once, shared across expirations)
         bb = compute_bollinger(df)
         sma_ratio = compute_sma_ratio(df)
+        trend = compute_trend_data(df)
         rsi = compute_rsi(df)
         iv_rank_raw, iv_pct_raw = compute_iv_rank_percentile(df)
         iv_rank: Optional[float] = None if math.isnan(iv_rank_raw) else iv_rank_raw
@@ -155,11 +157,15 @@ def process_symbol(
                         # bid/ask are 0 (market closed) — stale and unreliable.
                         # Use hv_sigma if IV looks suspiciously low (< 15%).
                         used_hv = False
+                        iv_hv_ratio: Optional[float] = None
                         if math.isnan(sig) or sig < 0.15:
                             sig = hv_sigma
                             used_hv = True
+                        else:
+                            if hv_sigma > 0:
+                                iv_hv_ratio = round(sig / hv_sigma, 4)
                         d = black_scholes_put_delta(current_price, sp, rf_rate, T, sig)
-                        candidates.append((sp, d, prem, used_hv, stale_prem))
+                        candidates.append((sp, d, prem, used_hv, stale_prem, iv_hv_ratio, sig))
                     except Exception:
                         continue
 
@@ -171,7 +177,7 @@ def process_symbol(
                     in_range = sorted(candidates, key=lambda x: abs(x[1] - _IDEAL_DELTA))[:5]
 
                 strike_results: list[StrikeResult] = []
-                for sp, d, prem, used_hv, stale_prem in in_range:
+                for sp, d, prem, used_hv, stale_prem, iv_hv_ratio, sig_used in in_range:
                     try:
                         spread_raw = get_bid_ask_spread_pct(puts_df, sp)
                         spread_s: Optional[float] = None if math.isnan(spread_raw) else spread_raw
@@ -180,8 +186,16 @@ def process_symbol(
                         ann_ret_s = round(ret_s * (365.0 / dte), 4) if dte > 0 else 0.0
                         score_s = compute_csp_score(
                             iv_rank=iv_rank,
+                            iv_hv_ratio=iv_hv_ratio,
                             annualized_return=ann_ret_s,
-                            sma_ratio=sma_ratio,
+                            premium=prem,
+                            current_price=current_price,
+                            strike=sp,
+                            dte=dte,
+                            iv_used=sig_used,
+                            price_above_sma50=trend["price_above_sma50"],
+                            sma50_above_sma200=trend["sma50_above_sma200"],
+                            sma50_slope_pct=trend["sma50_slope_pct"],
                             rsi=rsi,
                             delta=d,
                             bid_ask_spread_pct=spread_s,

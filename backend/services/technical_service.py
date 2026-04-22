@@ -48,6 +48,45 @@ def compute_sma_ratio(df: pd.DataFrame) -> float:
     return round(sma50 / sma200, 4)
 
 
+def compute_trend_data(df: pd.DataFrame, slope_days: int = 10) -> dict:
+    """
+    Returns trend indicators needed for the revised CSP scorer:
+      sma_ratio          : float  (sma50 / sma200, for display)
+      price_above_sma50  : bool
+      sma50_above_sma200 : bool
+      sma50_slope_pct    : float  (% change in SMA50 over last slope_days days)
+    """
+    close = df["Close"]
+    nan = float("nan")
+    if len(close) < 200:
+        return {
+            "sma_ratio": nan,
+            "price_above_sma50": False,
+            "sma50_above_sma200": False,
+            "sma50_slope_pct": nan,
+        }
+    sma50_series = close.rolling(50).mean()
+    sma200_series = close.rolling(200).mean()
+    sma50 = float(sma50_series.iloc[-1])
+    sma200 = float(sma200_series.iloc[-1])
+    current = float(close.iloc[-1])
+    sma_ratio = round(sma50 / sma200, 4) if sma200 != 0 else nan
+
+    sma50_valid = sma50_series.dropna()
+    if len(sma50_valid) > slope_days:
+        past = float(sma50_valid.iloc[-(slope_days + 1)])
+        sma50_slope_pct = round((sma50 - past) / past * 100, 4) if past != 0 else nan
+    else:
+        sma50_slope_pct = nan
+
+    return {
+        "sma_ratio": sma_ratio,
+        "price_above_sma50": current > sma50,
+        "sma50_above_sma200": sma50 > sma200,
+        "sma50_slope_pct": sma50_slope_pct,
+    }
+
+
 def compute_rsi(df: pd.DataFrame, period: int = 14) -> float:
     """
     Wilder-smoothed RSI(14).
@@ -289,80 +328,132 @@ def compute_momentum_score(
 
 
 def compute_csp_score(
+    *,
     iv_rank: float | None,
+    iv_hv_ratio: float | None,
     annualized_return: float,
-    sma_ratio: float,
+    premium: float,
+    current_price: float,
+    strike: float,
+    dte: int,
+    iv_used: float,
+    price_above_sma50: bool,
+    sma50_above_sma200: bool,
+    sma50_slope_pct: float,
     rsi: float,
     delta: float,
     bid_ask_spread_pct: float | None,
     earnings_within_dte: bool,
 ) -> float:
     """
-    Composite CSP quality score 0-100. Weights:
-      IV Rank          25 pts  (>=50 = full; selling expensive premium)
-      Ann. Return      20 pts  (>=25% ann = full; yield quality)
-      SMA Ratio        20 pts  (>=1.05 = full; uptrend structure)
-      RSI zone         15 pts  (40-65 = full; avoid overbought/oversold)
-      Delta quality    10 pts  (-0.20 to -0.30 = full; ideal probability)
-      Spread %         10 pts  (<=3% = full; liquidity)
-      Earnings in DTE  -15 pts (hard penalty for earnings risk)
-    Clipped to [0, 100].
+    Composite CSP score 0-100 (plus -15 earnings penalty).
+
+    IV Score          25 pts: IV Rank (15) + IV/HV Ratio (10)
+    Return Score      20 pts: Ann. Return / day (12) + Premium/Distance (8)
+    Trend Score       20 pts: Price>SMA50>SMA200 (10) + SMA50 Slope (10)
+    RSI Score         10 pts
+    Delta Score       10 pts: ideal -0.15 to -0.30 (10), aggressive <-0.30 (6), low-yield >-0.15 (3)
+    Expected Move     10 pts: strike outside 1-sigma expected move
+    Spread %           5 pts: liquidity guard
+    Earnings in DTE  -15 pts: hard penalty
     """
     import math as _math
     score = 0.0
 
-    # IV Rank (25 pts)
+    # --- IV Rank (15 pts) ---
     if iv_rank is not None and not _math.isnan(iv_rank):
         if iv_rank >= 50:
-            score += 25.0
+            score += 15.0
         elif iv_rank >= 30:
-            score += 12.5 + (iv_rank - 30) / 20.0 * 12.5
+            score += 7.5 + (iv_rank - 30) / 20.0 * 7.5
         else:
-            score += max(0.0, iv_rank / 30.0) * 12.5
+            score += max(0.0, iv_rank / 30.0) * 7.5
 
-    # Annualized Return (20 pts)
+    # --- IV / HV Ratio (10 pts) ---
+    if iv_hv_ratio is not None and not _math.isnan(iv_hv_ratio):
+        if iv_hv_ratio >= 1.5:
+            score += 10.0
+        elif iv_hv_ratio >= 1.2:
+            score += 6.0 + (iv_hv_ratio - 1.2) / 0.3 * 4.0
+        elif iv_hv_ratio >= 1.0:
+            score += 3.0 + (iv_hv_ratio - 1.0) / 0.2 * 3.0
+        else:
+            score += max(0.0, iv_hv_ratio) * 3.0
+
+    # --- Ann. Return (12 pts) ---
     if not _math.isnan(annualized_return):
         if annualized_return >= 25:
-            score += 20.0
+            score += 12.0
         elif annualized_return >= 15:
-            score += 10.0 + (annualized_return - 15) / 10.0 * 10.0
+            score += 6.0 + (annualized_return - 15) / 10.0 * 6.0
         elif annualized_return >= 8:
-            score += (annualized_return - 8) / 7.0 * 10.0
+            score += (annualized_return - 8) / 7.0 * 6.0
 
-    # SMA Ratio / Trend (20 pts)
-    if not _math.isnan(sma_ratio):
-        if sma_ratio >= 1.05:
-            score += 20.0
-        elif sma_ratio >= 1.0:
-            score += (sma_ratio - 1.0) / 0.05 * 20.0
-        # < 1.0 -> bearish -> 0 pts
+    # --- Premium / Distance (8 pts) ---
+    distance = current_price - strike
+    if distance > 0 and premium > 0:
+        prem_dist_pct = premium / distance * 100.0
+        if prem_dist_pct >= 15:
+            score += 8.0
+        elif prem_dist_pct >= 8:
+            score += 4.0 + (prem_dist_pct - 8) / 7.0 * 4.0
+        elif prem_dist_pct >= 3:
+            score += (prem_dist_pct - 3) / 5.0 * 4.0
 
-    # RSI zone (15 pts)
+    # --- Trend: Price > SMA50 > SMA200 (10 pts) ---
+    if price_above_sma50 and sma50_above_sma200:
+        score += 10.0
+    elif sma50_above_sma200:
+        score += 4.0
+
+    # --- Trend: SMA50 Slope (10 pts) ---
+    if not _math.isnan(sma50_slope_pct):
+        if sma50_slope_pct >= 0.5:
+            score += 10.0
+        elif sma50_slope_pct >= 0:
+            score += 5.0 + sma50_slope_pct / 0.5 * 5.0
+        elif sma50_slope_pct >= -0.2:
+            score += 2.0
+
+    # --- RSI (10 pts) ---
     if not _math.isnan(rsi):
         if 40 <= rsi <= 65:
-            score += 15.0
-        elif (35 <= rsi < 40) or (65 < rsi <= 70):
-            score += 8.0
-        elif (30 <= rsi < 35) or (70 < rsi <= 75):
-            score += 3.0
-
-    # Delta quality (10 pts)
-    if not _math.isnan(delta):
-        if -0.30 <= delta <= -0.20:
             score += 10.0
-        elif (-0.35 <= delta < -0.30) or (-0.20 < delta <= -0.15):
+        elif (35 <= rsi < 40) or (65 < rsi <= 70):
+            score += 6.0
+        elif (30 <= rsi < 35) or (70 < rsi <= 75):
+            score += 2.0
+
+    # --- Delta (10 pts) ---
+    if not _math.isnan(delta):
+        if -0.30 <= delta <= -0.15:
+            score += 10.0   # ideal zone
+        elif delta < -0.30:
+            score += 6.0    # aggressive (closer to ATM)
+        elif delta > -0.15:
+            score += 3.0    # too far OTM, low yield
+
+    # --- Expected Move (10 pts) ---
+    if not _math.isnan(iv_used) and iv_used > 0 and dte > 0:
+        T = dte / 365.0
+        em = current_price * iv_used * _math.sqrt(T)
+        em_lower = current_price - em
+        boundary_band = em * 0.05
+        if strike <= em_lower:
+            score += 10.0
+        elif strike <= em_lower + boundary_band:
             score += 5.0
 
-    # Spread % (10 pts)
+    # --- Spread % (5 pts) ---
     if bid_ask_spread_pct is not None and not _math.isnan(bid_ask_spread_pct):
         if bid_ask_spread_pct <= 3.0:
-            score += 10.0
+            score += 5.0
         elif bid_ask_spread_pct <= 5.0:
-            score += 7.0
-        elif bid_ask_spread_pct <= 10.0:
             score += 3.0
+        elif bid_ask_spread_pct <= 10.0:
+            score += 1.0
 
-    # Earnings penalty
+    # --- Earnings penalty ---
     if earnings_within_dte:
         score -= 15.0
 
