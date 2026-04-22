@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, field_validator
 
 from services.data_service import get_risk_free_rate
-from services.screener_service import ScreenerError, ScreenerResult, process_symbol
+from services.screener_service import ScreenerError, ScreenerResult, StrikeResult, process_symbol
 from services.universe import MOMENTUM_UNIVERSE, UNIVERSE_SIZE
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,16 @@ class ScreenerRequest(BaseModel):
         return v
 
 
+class StrikeResultOut(BaseModel):
+    strike: float
+    delta: float
+    premium: float
+    annualized_return: float
+    bid_ask_spread_pct: Optional[float]
+    csp_score: float
+    is_best: bool
+
+
 class ScreenerResultOut(BaseModel):
     symbol: str
     price: float
@@ -77,29 +87,13 @@ class ScreenerResultOut(BaseModel):
     iv_percentile: Optional[float]
     earnings_date: Optional[str]
     earnings_within_dte: bool
-    strike: float
-    strike_is_fallback: bool
-    strike_mid: float
-    strike_mid_is_fallback: bool
     vol_support_1: Optional[float]
     vol_support_2: Optional[float]
     vol_support_3: Optional[float]
-    delta: float
-    delta_mid: float
-    bid_ask_spread_pct: Optional[float]
-    bid_ask_spread_pct_mid: Optional[float]
-    csp_score: float
-    csp_score_mid: float
     dte: int
     expiration: str
-    premium: float
-    premium_mid: float
-    collateral: float
-    collateral_mid: float
-    return_pct: float
-    annualized_return: float
-    return_pct_mid: float
-    annualized_return_mid: float
+    strikes: List[StrikeResultOut]
+    best_csp_score: float
 
 
 class ScreenerErrorOut(BaseModel):
@@ -191,7 +185,7 @@ async def run_csp_scan(
         if error is not None:
             errors.append(ScreenerErrorOut(symbol=error.symbol, reason=error.reason))
 
-    results.sort(key=lambda r: r.csp_score, reverse=True)
+    results.sort(key=lambda r: r.best_csp_score, reverse=True)
     top_results = results[:top_n]
 
     logger.info(
@@ -214,27 +208,22 @@ def _to_out(r: ScreenerResult) -> ScreenerResultOut:
         iv_percentile=r.iv_percentile,
         earnings_date=r.earnings_date,
         earnings_within_dte=r.earnings_within_dte,
-        strike=r.strike,
-        strike_is_fallback=r.strike_is_fallback,
-        strike_mid=r.strike_mid,
-        strike_mid_is_fallback=r.strike_mid_is_fallback,
         vol_support_1=r.vol_support_1,
         vol_support_2=r.vol_support_2,
         vol_support_3=r.vol_support_3,
-        delta=r.delta,
-        delta_mid=r.delta_mid,
-        bid_ask_spread_pct=r.bid_ask_spread_pct,
-        bid_ask_spread_pct_mid=r.bid_ask_spread_pct_mid,
-        csp_score=r.csp_score,
-        csp_score_mid=r.csp_score_mid,
         dte=r.dte,
         expiration=r.expiration,
-        premium=r.premium,
-        premium_mid=r.premium_mid,
-        collateral=r.collateral,
-        collateral_mid=r.collateral_mid,
-        return_pct=r.return_pct,
-        annualized_return=r.annualized_return,
-        return_pct_mid=r.return_pct_mid,
-        annualized_return_mid=r.annualized_return_mid,
+        strikes=[
+            StrikeResultOut(
+                strike=s.strike,
+                delta=s.delta,
+                premium=s.premium,
+                annualized_return=s.annualized_return,
+                bid_ask_spread_pct=s.bid_ask_spread_pct,
+                csp_score=s.csp_score,
+                is_best=s.is_best,
+            )
+            for s in r.strikes
+        ],
+        best_csp_score=r.best_csp_score,
     )

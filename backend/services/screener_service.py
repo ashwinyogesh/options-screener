@@ -17,7 +17,6 @@ from services.options_service import (
     get_implied_volatility,
     get_all_expirations_data,
     get_premium,
-    select_strike,
 )
 from services.technical_service import (
     compute_bollinger,
@@ -29,6 +28,17 @@ from services.technical_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class StrikeResult:
+    strike: float
+    delta: float
+    premium: float
+    annualized_return: float
+    bid_ask_spread_pct: Optional[float]
+    csp_score: float
+    is_best: bool = False
 
 
 @dataclass
@@ -44,29 +54,13 @@ class ScreenerResult:
     iv_percentile: Optional[float]  # % of days HV < today's HV
     earnings_date: Optional[str]
     earnings_within_dte: bool
-    strike: float
-    strike_is_fallback: bool
-    strike_mid: float
-    strike_mid_is_fallback: bool
     vol_support_1: Optional[float]
     vol_support_2: Optional[float]
     vol_support_3: Optional[float]
-    delta: float
-    delta_mid: float
-    bid_ask_spread_pct: Optional[float]      # (ask-bid)/mid * 100 for BB Lower strike
-    bid_ask_spread_pct_mid: Optional[float]  # (ask-bid)/mid * 100 for BB Middle strike
-    csp_score: float                         # composite quality score 0-100
-    csp_score_mid: float                     # composite quality score for BB Middle strike
     dte: int
     expiration: str
-    premium: float
-    premium_mid: float
-    collateral: float
-    collateral_mid: float
-    return_pct: float
-    annualized_return: float
-    return_pct_mid: float
-    annualized_return_mid: float
+    strikes: list[StrikeResult] = field(default_factory=list)
+    best_csp_score: float = 0.0
 
 
 @dataclass
@@ -128,57 +122,53 @@ def process_symbol(
                     except ValueError:
                         pass
 
-                # 4. Strike selection
-                strike, strike_is_fallback = select_strike(puts_df, bb["bb_lower"])
-                strike_mid, strike_mid_is_fallback = select_strike(puts_df, bb["bb_middle"])
-
-                # 5. Premium (mid-price)
-                premium = get_premium(puts_df, strike)
-                premium_mid = get_premium(puts_df, strike_mid)
-
-                # 5a. Bid-ask spread quality
-                spread_pct = get_bid_ask_spread_pct(puts_df, strike)
-                bid_ask_spread_pct: Optional[float] = None if math.isnan(spread_pct) else spread_pct
-                spread_pct_mid = get_bid_ask_spread_pct(puts_df, strike_mid)
-                bid_ask_spread_pct_mid: Optional[float] = None if math.isnan(spread_pct_mid) else spread_pct_mid
-
-                # 6. Implied volatility for delta calculation
-                sigma = get_implied_volatility(puts_df, strike)
-                if math.isnan(sigma) or sigma <= 0:
-                    sigma = hv_sigma
-
-                # 7. Black-Scholes delta
+                # 4. Compute metrics for all OTM liquid strikes
                 T = dte / 365.0
-                delta = black_scholes_put_delta(current_price, strike, rf_rate, T, sigma)
-                delta_mid = black_scholes_put_delta(current_price, strike_mid, rf_rate, T, sigma)
+                all_strikes_sorted = sorted(puts_df["strike"].unique(), reverse=True)  # ATM-first
+                otm_strikes = [s for s in all_strikes_sorted if s < current_price * 1.02]
 
-                # 8. Returns
-                collateral = round(strike * 100.0, 2)
-                collateral_mid = round(strike_mid * 100.0, 2)
-                return_pct = round((premium * 100) / collateral * 100.0, 4) if collateral > 0 else 0.0
-                annualized_return = round(return_pct * (365.0 / dte), 4) if dte > 0 else 0.0
-                return_pct_mid = round((premium_mid * 100) / collateral_mid * 100.0, 4) if collateral_mid > 0 else 0.0
-                annualized_return_mid = round(return_pct_mid * (365.0 / dte), 4) if dte > 0 else 0.0
+                strike_results: list[StrikeResult] = []
+                for sp in otm_strikes:
+                    try:
+                        prem = get_premium(puts_df, sp)
+                        sig = get_implied_volatility(puts_df, sp)
+                        if math.isnan(sig) or sig <= 0:
+                            sig = hv_sigma
+                        d = black_scholes_put_delta(current_price, sp, rf_rate, T, sig)
+                        if d < -0.60 or d > -0.01:
+                            continue  # filter extreme deltas
+                        spread_raw = get_bid_ask_spread_pct(puts_df, sp)
+                        spread_s: Optional[float] = None if math.isnan(spread_raw) else spread_raw
+                        collateral_s = round(sp * 100.0, 2)
+                        ret_s = round((prem * 100) / collateral_s * 100.0, 4) if collateral_s > 0 else 0.0
+                        ann_ret_s = round(ret_s * (365.0 / dte), 4) if dte > 0 else 0.0
+                        score_s = compute_csp_score(
+                            iv_rank=iv_rank,
+                            annualized_return=ann_ret_s,
+                            sma_ratio=sma_ratio,
+                            rsi=rsi,
+                            delta=d,
+                            bid_ask_spread_pct=spread_s,
+                            earnings_within_dte=earnings_within_dte,
+                        )
+                        strike_results.append(StrikeResult(
+                            strike=sp,
+                            delta=d,
+                            premium=round(prem, 4),
+                            annualized_return=ann_ret_s,
+                            bid_ask_spread_pct=spread_s,
+                            csp_score=score_s,
+                        ))
+                    except Exception:
+                        continue
 
-                # 9. CSP composite score
-                csp_score = compute_csp_score(
-                    iv_rank=iv_rank,
-                    annualized_return=annualized_return,
-                    sma_ratio=sma_ratio,
-                    rsi=rsi,
-                    delta=delta,
-                    bid_ask_spread_pct=bid_ask_spread_pct,
-                    earnings_within_dte=earnings_within_dte,
-                )
-                csp_score_mid = compute_csp_score(
-                    iv_rank=iv_rank,
-                    annualized_return=annualized_return_mid,
-                    sma_ratio=sma_ratio,
-                    rsi=rsi,
-                    delta=delta_mid,
-                    bid_ask_spread_pct=bid_ask_spread_pct_mid,
-                    earnings_within_dte=earnings_within_dte,
-                )
+                if not strike_results:
+                    continue
+
+                # Mark the highest-scoring strike as best
+                best_idx = max(range(len(strike_results)), key=lambda i: strike_results[i].csp_score)
+                strike_results[best_idx].is_best = True
+                best_score_val = strike_results[best_idx].csp_score
 
                 results.append(ScreenerResult(
                     symbol=sym,
@@ -192,29 +182,13 @@ def process_symbol(
                     iv_percentile=iv_percentile,
                     earnings_date=earnings_date,
                     earnings_within_dte=earnings_within_dte,
-                    strike=strike,
-                    strike_is_fallback=strike_is_fallback,
-                    strike_mid=strike_mid,
-                    strike_mid_is_fallback=strike_mid_is_fallback,
                     vol_support_1=vol_supports[0] if len(vol_supports) > 0 else None,
                     vol_support_2=vol_supports[1] if len(vol_supports) > 1 else None,
                     vol_support_3=vol_supports[2] if len(vol_supports) > 2 else None,
-                    delta=delta,
-                    delta_mid=delta_mid,
-                    bid_ask_spread_pct=bid_ask_spread_pct,
-                    bid_ask_spread_pct_mid=bid_ask_spread_pct_mid,
-                    csp_score=csp_score,
-                    csp_score_mid=csp_score_mid,
                     dte=dte,
                     expiration=expiration,
-                    premium=round(premium, 4),
-                    premium_mid=round(premium_mid, 4),
-                    collateral=collateral,
-                    collateral_mid=collateral_mid,
-                    return_pct=return_pct,
-                    annualized_return=annualized_return,
-                    return_pct_mid=return_pct_mid,
-                    annualized_return_mid=annualized_return_mid,
+                    strikes=strike_results,
+                    best_csp_score=best_score_val,
                 ))
             except Exception as exc:
                 logger.debug("Skipping expiration %s for %s: %s", opts.get("expiration"), sym, exc)
