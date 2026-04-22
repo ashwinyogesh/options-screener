@@ -312,8 +312,13 @@ export function ScreenerTable({ data }: Props) {
                 </td>
                 {/* Expected Move cell — same rowSpan as DTE */}
                 <td className="em-cell" rowSpan={dteCellRows}>
-                  <span className="em-range">±${exp.expected_move.toFixed(2)}</span><br />
-                  <span className="em-floor" title="Lower bound of 1σ expected range">↓ {(r.price - exp.expected_move).toFixed(2)}</span>
+                  {exp.expected_move > 0
+                    ? <>
+                        <span className="em-range">±${exp.expected_move.toFixed(2)}</span><br />
+                        <span className="em-floor" title="Lower bound of 1σ expected range">↓ {(r.price - exp.expected_move).toFixed(2)}</span>
+                      </>
+                    : <span className="dim">—</span>
+                  }
                 </td>
 
                 {/* Best strike */}
