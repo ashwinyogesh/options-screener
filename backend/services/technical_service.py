@@ -339,23 +339,25 @@ def compute_csp_score(
     iv_used: float,
     price_above_sma50: bool,
     sma50_above_sma200: bool,
-    sma50_slope_pct: float,
+    dist_from_52w_high_pct: float,
     rsi: float,
     delta: float,
     bid_ask_spread_pct: float | None,
+    open_interest: int,
+    market_open: bool,
+    volume: int,
     earnings_within_dte: bool,
 ) -> float:
     """
     Composite CSP score 0-100 (plus -15 earnings penalty).
 
-    IV Score          25 pts: IV Rank (15) + IV/HV Ratio (10)
-    Return Score      20 pts: Ann. Return / day (12) + Premium/Distance (8)
-    Trend Score       20 pts: Price>SMA50>SMA200 (10) + SMA50 Slope (10)
-    RSI Score         10 pts
-    Delta Score       10 pts: ideal -0.15 to -0.30 (10), aggressive <-0.30 (6), low-yield >-0.15 (3)
-    Expected Move     10 pts: strike outside 1-sigma expected move
-    Spread %           5 pts: liquidity guard
-    Earnings in DTE  -15 pts: hard penalty
+    Volatility (25):  IV Rank (15) + IV/HV Ratio (10)
+    Return (15):      Ann. Return/day (10) + Premium Efficiency (5)
+    Trend (20):       SMA Alignment (10) + Distance from 52W High (10)
+    Risk Pos. (20):   Delta bell-curve (15) + Expected Move (5)
+    Momentum (8):     RSI (8)
+    Execution (12):   Spread % (8) + Open Interest / Volume (4)
+    Earnings in DTE: -15 pts penalty
     """
     import math as _math
     score = 0.0
@@ -380,78 +382,96 @@ def compute_csp_score(
         else:
             score += max(0.0, iv_hv_ratio) * 3.0
 
-    # --- Ann. Return (12 pts) ---
+    # --- Ann. Return/day (10 pts) ---
     if not _math.isnan(annualized_return):
         if annualized_return >= 25:
-            score += 12.0
+            score += 10.0
         elif annualized_return >= 15:
-            score += 6.0 + (annualized_return - 15) / 10.0 * 6.0
+            score += 5.0 + (annualized_return - 15) / 10.0 * 5.0
         elif annualized_return >= 8:
-            score += (annualized_return - 8) / 7.0 * 6.0
+            score += (annualized_return - 8) / 7.0 * 5.0
 
-    # --- Premium / Distance (8 pts) ---
+    # --- Premium Efficiency (5 pts): premium as % of distance to strike ---
     distance = current_price - strike
     if distance > 0 and premium > 0:
         prem_dist_pct = premium / distance * 100.0
         if prem_dist_pct >= 15:
-            score += 8.0
+            score += 5.0
         elif prem_dist_pct >= 8:
-            score += 4.0 + (prem_dist_pct - 8) / 7.0 * 4.0
+            score += 2.5 + (prem_dist_pct - 8) / 7.0 * 2.5
         elif prem_dist_pct >= 3:
-            score += (prem_dist_pct - 3) / 5.0 * 4.0
+            score += (prem_dist_pct - 3) / 5.0 * 2.5
 
-    # --- Trend: Price > SMA50 > SMA200 (10 pts) ---
+    # --- SMA Alignment (10 pts): Price > SMA50 > SMA200 ---
     if price_above_sma50 and sma50_above_sma200:
         score += 10.0
     elif sma50_above_sma200:
         score += 4.0
 
-    # --- Trend: SMA50 Slope (10 pts) ---
-    if not _math.isnan(sma50_slope_pct):
-        if sma50_slope_pct >= 0.5:
-            score += 10.0
-        elif sma50_slope_pct >= 0:
-            score += 5.0 + sma50_slope_pct / 0.5 * 5.0
-        elif sma50_slope_pct >= -0.2:
-            score += 2.0
+    # --- Distance from 52W High (10 pts) ---
+    # dist_from_52w_high_pct is negative when below high (e.g. -10 = 10% below)
+    if not _math.isnan(dist_from_52w_high_pct):
+        pct_below = abs(min(dist_from_52w_high_pct, 0.0))
+        if pct_below <= 5:
+            score += 10.0          # near or at 52W high
+        elif pct_below <= 10:
+            score += 7.0
+        elif pct_below <= 20:
+            score += 4.0
+        elif pct_below <= 30:
+            score += 1.0
 
-    # --- RSI (10 pts) ---
+    # --- RSI (8 pts) ---
     if not _math.isnan(rsi):
         if 40 <= rsi <= 65:
-            score += 10.0
+            score += 8.0
         elif (35 <= rsi < 40) or (65 < rsi <= 70):
-            score += 6.0
+            score += 5.0
         elif (30 <= rsi < 35) or (70 < rsi <= 75):
             score += 2.0
 
-    # --- Delta (10 pts) ---
+    # --- Delta bell-curve (15 pts): peak at -0.225 ---
     if not _math.isnan(delta):
-        if -0.30 <= delta <= -0.15:
-            score += 10.0   # ideal zone
+        if -0.25 <= delta <= -0.20:
+            score += 15.0          # peak zone
+        elif (-0.30 <= delta < -0.25) or (-0.20 < delta <= -0.15):
+            score += 10.0          # good, slightly off-center
+        elif -0.10 <= delta < -0.15 or delta == -0.10:
+            score += 5.0           # low yield, far OTM
         elif delta < -0.30:
-            score += 6.0    # aggressive (closer to ATM)
-        elif delta > -0.15:
-            score += 3.0    # too far OTM, low yield
+            score += 6.0           # aggressive (closer to ATM)
 
-    # --- Expected Move (10 pts) ---
+    # --- Expected Move (5 pts) ---
     if not _math.isnan(iv_used) and iv_used > 0 and dte > 0:
         T = dte / 365.0
         em = current_price * iv_used * _math.sqrt(T)
         em_lower = current_price - em
         boundary_band = em * 0.05
         if strike <= em_lower:
-            score += 10.0
-        elif strike <= em_lower + boundary_band:
             score += 5.0
+        elif strike <= em_lower + boundary_band:
+            score += 2.5
 
-    # --- Spread % (5 pts) ---
+    # --- Spread % (8 pts) ---
     if bid_ask_spread_pct is not None and not _math.isnan(bid_ask_spread_pct):
         if bid_ask_spread_pct <= 3.0:
-            score += 5.0
+            score += 8.0
         elif bid_ask_spread_pct <= 5.0:
-            score += 3.0
+            score += 5.0
         elif bid_ask_spread_pct <= 10.0:
-            score += 1.0
+            score += 2.0
+
+    # --- Open Interest / Volume (4 pts) ---
+    # Use volume when market is open (today's activity), OI otherwise (yesterday's count)
+    liquidity_count = volume if (market_open and volume > 0) else open_interest
+    if liquidity_count >= 1000:
+        score += 4.0
+    elif liquidity_count >= 500:
+        score += 3.0
+    elif liquidity_count >= 200:
+        score += 2.0
+    elif liquidity_count >= 100:
+        score += 1.0
 
     # --- Earnings penalty ---
     if earnings_within_dte:

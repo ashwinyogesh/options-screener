@@ -22,6 +22,7 @@ from services.technical_service import (
     compute_bollinger,
     compute_csp_score,
     compute_iv_rank_percentile,
+    compute_price_vs_52w_high,
     compute_rsi,
     compute_sma_ratio,
     compute_trend_data,
@@ -94,6 +95,7 @@ def process_symbol(
         sma_ratio = compute_sma_ratio(df)
         trend = compute_trend_data(df)
         rsi = compute_rsi(df)
+        dist_52w = compute_price_vs_52w_high(df)
         iv_rank_raw, iv_pct_raw = compute_iv_rank_percentile(df)
         iv_rank: Optional[float] = None if math.isnan(iv_rank_raw) else iv_rank_raw
         iv_percentile: Optional[float] = None if math.isnan(iv_pct_raw) else iv_pct_raw
@@ -101,8 +103,23 @@ def process_symbol(
 
         # Pre-compute HV sigma fallback once
         import numpy as np
+        from datetime import datetime as _dt
+        import pytz as _pytz
         log_ret = np.log(df["Close"] / df["Close"].shift(1)).dropna()
         hv_sigma = float(log_ret.iloc[-30:].std(ddof=1) * np.sqrt(252)) if len(log_ret) >= 30 else 0.25
+
+        # Detect if US market is currently open
+        try:
+            _et = _pytz.timezone("America/New_York")
+            _now = _dt.now(_et)
+            _weekday = _now.weekday()
+            _market_open = (
+                _weekday < 5
+                and _now.hour * 60 + _now.minute >= 9 * 60 + 30
+                and _now.hour * 60 + _now.minute < 16 * 60
+            )
+        except Exception:
+            _market_open = False
 
         # 3. All expirations in range
         all_exps = get_all_expirations_data(sym, min_dte, max_dte)
@@ -144,6 +161,8 @@ def process_symbol(
                         ask = float(row["ask"].iloc[0]) if not __import__('pandas').isna(row["ask"].iloc[0]) else 0.0
                         last = float(row["lastPrice"].iloc[0]) if not __import__('pandas').isna(row["lastPrice"].iloc[0]) else 0.0
                         market_closed_row = (bid == 0.0 and ask == 0.0)
+                        oi_val = int(row["openInterest"].iloc[0]) if not __import__('pandas').isna(row["openInterest"].iloc[0]) else 0
+                        vol_val = int(row["volume"].iloc[0]) if not __import__('pandas').isna(row["volume"].iloc[0]) else 0
                         if bid > 0 and ask > 0:
                             prem = round((bid + ask) / 2.0, 4)
                             stale_prem = False
@@ -165,7 +184,7 @@ def process_symbol(
                             if hv_sigma > 0:
                                 iv_hv_ratio = round(sig / hv_sigma, 4)
                         d = black_scholes_put_delta(current_price, sp, rf_rate, T, sig)
-                        candidates.append((sp, d, prem, used_hv, stale_prem, iv_hv_ratio, sig))
+                        candidates.append((sp, d, prem, used_hv, stale_prem, iv_hv_ratio, sig, oi_val, vol_val))
                     except Exception:
                         continue
 
@@ -177,7 +196,7 @@ def process_symbol(
                     in_range = sorted(candidates, key=lambda x: abs(x[1] - _IDEAL_DELTA))[:5]
 
                 strike_results: list[StrikeResult] = []
-                for sp, d, prem, used_hv, stale_prem, iv_hv_ratio, sig_used in in_range:
+                for sp, d, prem, used_hv, stale_prem, iv_hv_ratio, sig_used, oi_val, vol_val in in_range:
                     try:
                         spread_raw = get_bid_ask_spread_pct(puts_df, sp)
                         spread_s: Optional[float] = None if math.isnan(spread_raw) else spread_raw
@@ -195,10 +214,13 @@ def process_symbol(
                             iv_used=sig_used,
                             price_above_sma50=trend["price_above_sma50"],
                             sma50_above_sma200=trend["sma50_above_sma200"],
-                            sma50_slope_pct=trend["sma50_slope_pct"],
+                            dist_from_52w_high_pct=dist_52w,
                             rsi=rsi,
                             delta=d,
                             bid_ask_spread_pct=spread_s,
+                            open_interest=oi_val,
+                            market_open=_market_open,
+                            volume=vol_val,
                             earnings_within_dte=earnings_within_dte,
                         )
                         strike_results.append(StrikeResult(

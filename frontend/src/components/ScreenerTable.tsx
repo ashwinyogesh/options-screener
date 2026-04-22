@@ -200,7 +200,7 @@ export function ScreenerTable({ data }: Props) {
                 className="sortable"
                 onClick={() => scoreCol?.toggleSorting(scoreSorted === 'asc')}
               >
-                <span className="col-tip" title="CSP Score 0–100&#10;&#10;IV Rank          15 pts  ≥50 = full&#10;IV / HV Ratio    10 pts  ≥1.5× = full (IV well above realized vol)&#10;Ann. Return      12 pts  ≥25% = full&#10;Prem / Distance   8 pts  premium as % of gap to strike&#10;Trend align      10 pts  Price > SMA50 > SMA200&#10;SMA50 Slope      10 pts  10-day slope > 0.5% = full&#10;RSI              10 pts  40–65 = full&#10;Delta            10 pts  −0.15 to −0.30 ideal; &lt;−0.30 aggressive; &gt;−0.15 low-yield&#10;Expected Move    10 pts  strike outside 1σ move&#10;Spread %          5 pts  ≤3% = full&#10;Earnings in DTE  −15 pts penalty">
+                <span className="col-tip" title="CSP Score 0–100&#10;&#10;VOLATILITY (25)&#10;  IV Rank         15 pts  ≥50 = full&#10;  IV / HV Ratio   10 pts  ≥1.5× = full&#10;&#10;RETURN (15)&#10;  Ann. Return     10 pts  ≥25% = full&#10;  Prem Efficiency  5 pts  premium ÷ distance to strike&#10;&#10;TREND (20)&#10;  SMA Alignment   10 pts  Price>SMA50>SMA200&#10;  52W High Dist.  10 pts  ≤5% below high = full&#10;&#10;RISK POSITIONING (20)&#10;  Delta           15 pts  peak at −0.225; aggressive 6; low-yield 5&#10;  Expected Move    5 pts  strike outside 1σ move&#10;&#10;MOMENTUM (8)&#10;  RSI(14)          8 pts  40–65 = full&#10;&#10;EXECUTION (12)&#10;  Spread %         8 pts  ≤3% = full&#10;  Open Interest    4 pts  ≥1000 OI/vol = full&#10;&#10;Earnings in DTE −15 pts penalty">
                   Score ⓘ
                 </span>
                 {scoreSorted === 'asc' && ' ↑'}
