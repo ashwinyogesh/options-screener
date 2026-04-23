@@ -683,3 +683,200 @@ def compute_cc_strike_score(
 def compute_cc_final_score(env_score: float, strike_score: float) -> float:
     """CC Final Score = 0.4 × Env Score + 0.6 × Strike Score."""
     return round(0.4 * env_score + 0.6 * strike_score, 1)
+
+
+def compute_ditm_env_score(
+    *,
+    iv_rank: float | None,
+    iv_hv_ratio: float | None,
+    price_above_sma50: bool,
+    sma50_above_sma200: bool,
+    dist_from_52w_high_pct: float,
+    rsi: float,
+    chain_median_oi: float,
+    earnings_within_dte: bool,
+) -> float:
+    """
+    DITM Environment Score 0–100.
+    For BUYING calls: LOW IV is good (cheap premium), STRONG TREND is critical.
+
+    IV Cheapness (45):   IV Rank inverted (25) + IV/HV Ratio inverted (20)
+    Trend Strength (35): SMA Alignment (20) + 52W High Distance (15)
+    Momentum (10):       RSI(14) — want uptrend momentum, not overbought
+    Liquidity (10):      Chain Median OI (10)
+    Earnings in DTE:     −15 penalty (binary event = gap risk)
+    """
+    import math as _math
+    score = 0.0
+
+    # --- IV Rank INVERTED (25 pts) — low IV = cheap options = good for buying ---
+    # <20=25, 20–40 linear 25→15, 40–60 linear 15→7, 60–80 linear 7→2, >80=0
+    if iv_rank is not None and not _math.isnan(iv_rank):
+        if iv_rank < 20:
+            score += 25.0
+        elif iv_rank < 40:
+            score += 25.0 - (iv_rank - 20) / 20.0 * 10.0
+        elif iv_rank < 60:
+            score += 15.0 - (iv_rank - 40) / 20.0 * 8.0
+        elif iv_rank < 80:
+            score += 7.0 - (iv_rank - 60) / 20.0 * 5.0
+        # >=80: 0 pts — very expensive options, poor time to buy
+
+    # --- IV/HV Ratio INVERTED (20 pts) — IV < HV = options cheap relative to realized vol ---
+    # <0.8=20, 0.8–1.0 linear 20→12, 1.0–1.3 linear 12→5, 1.3–1.6 linear 5→1, >1.6=0
+    if iv_hv_ratio is not None and not _math.isnan(iv_hv_ratio):
+        if iv_hv_ratio < 0.8:
+            score += 20.0
+        elif iv_hv_ratio < 1.0:
+            score += 20.0 - (iv_hv_ratio - 0.8) / 0.2 * 8.0
+        elif iv_hv_ratio < 1.3:
+            score += 12.0 - (iv_hv_ratio - 1.0) / 0.3 * 7.0
+        elif iv_hv_ratio < 1.6:
+            score += 5.0 - (iv_hv_ratio - 1.3) / 0.3 * 4.0
+        # >=1.6: 0 pts
+
+    # --- SMA Alignment (20 pts) — uptrend required for long calls ---
+    if price_above_sma50 and sma50_above_sma200:
+        score += 20.0
+    elif price_above_sma50:
+        score += 12.0
+    elif sma50_above_sma200:
+        score += 6.0
+
+    # --- 52W High Distance (15 pts) — near highs = strong momentum ---
+    if not _math.isnan(dist_from_52w_high_pct):
+        pct_below = abs(min(dist_from_52w_high_pct, 0.0))
+        if pct_below <= 5:
+            score += 15.0
+        elif pct_below <= 10:
+            score += 15.0 - (pct_below - 5) / 5.0 * 4.0
+        elif pct_below <= 20:
+            score += 11.0 - (pct_below - 10) / 10.0 * 7.0
+        elif pct_below <= 30:
+            score += 4.0 - (pct_below - 20) / 10.0 * 4.0
+        # >30%: 0
+
+    # --- RSI(14) (10 pts) — uptrend momentum, not overbought ---
+    # 45–68=10; 68–78 linear 10→4; 35–45 linear 4→10; 30–35=2; <30 or >78=0
+    if not _math.isnan(rsi):
+        if 45 <= rsi <= 68:
+            score += 10.0
+        elif 68 < rsi <= 78:
+            score += 10.0 - (rsi - 68) / 10.0 * 6.0
+        elif 35 <= rsi < 45:
+            score += 4.0 + (rsi - 35) / 10.0 * 6.0
+        elif 30 <= rsi < 35:
+            score += 2.0
+        # <30 or >78: 0 — downtrend or overextended
+
+    # --- Chain Median OI (10 pts) — log scale, need liquid deep calls ---
+    if not _math.isnan(chain_median_oi) and chain_median_oi > 0:
+        score += min(_math.log10(chain_median_oi) / _math.log10(5000), 1.0) * 10.0
+
+    # --- Earnings penalty ---
+    if earnings_within_dte:
+        score -= 15.0
+
+    return round(score, 1)
+
+
+def compute_ditm_strike_score(
+    *,
+    delta: float,
+    current_price: float,
+    strike: float,
+    premium: float,
+    bid_ask_spread_pct: float | None,
+    open_interest: int,
+    market_open: bool,
+    volume: int,
+) -> float:
+    """
+    DITM Strike Quality Score 0–100.
+    Measures how efficient *this specific deep ITM call* is to buy.
+
+    Delta (30):           Deep ITM sweet spot 0.80–0.85
+    Extrinsic % (30):     Extrinsic / Stock Price × 100 — lower = less time premium wasted
+    Moneyness % (15):     (Price − Strike) / Price × 100 — deeper = more intrinsic value
+    Bid-Ask Spread (15):  Execution cost
+    OI / Volume (10):     Liquidity at this specific deep strike
+    """
+    import math as _math
+    score = 0.0
+
+    # --- Delta (30 pts) — sweet spot 0.80–0.85 ---
+    if not _math.isnan(delta):
+        if 0.80 <= delta <= 0.85:
+            score += 30.0
+        elif (0.75 <= delta < 0.80) or (0.85 < delta <= 0.90):
+            score += 24.0
+        elif (0.70 <= delta < 0.75) or (0.90 < delta <= 0.95):
+            score += 15.0
+        elif (0.65 <= delta < 0.70) or (0.95 < delta < 1.0):
+            score += 8.0
+        # <0.65: 0 — too close to ATM, not DITM
+
+    # --- Extrinsic % (30 pts) — extrinsic / stock price, lower is better ---
+    # Intrinsic = max(0, price - strike) for ITM call
+    intrinsic = max(0.0, current_price - strike)
+    extrinsic = max(0.0, premium - intrinsic)
+    extrinsic_pct = (extrinsic / current_price * 100.0) if current_price > 0 else 100.0
+
+    if extrinsic_pct <= 1.0:
+        score += 30.0
+    elif extrinsic_pct <= 2.0:
+        score += 30.0 - (extrinsic_pct - 1.0) * 8.0
+    elif extrinsic_pct <= 4.0:
+        score += 22.0 - (extrinsic_pct - 2.0) / 2.0 * 10.0
+    elif extrinsic_pct <= 6.0:
+        score += 12.0 - (extrinsic_pct - 4.0) / 2.0 * 8.0
+    elif extrinsic_pct <= 9.0:
+        score += 4.0 - (extrinsic_pct - 6.0) / 3.0 * 4.0
+    # >9%: 0
+
+    # --- Moneyness % (15 pts) — how far ITM, deeper = more intrinsic ---
+    moneyness_pct = (current_price - strike) / current_price * 100.0
+    if moneyness_pct >= 15:
+        score += 15.0
+    elif moneyness_pct >= 10:
+        score += 15.0 - (15 - moneyness_pct) / 5.0 * 4.0
+    elif moneyness_pct >= 7:
+        score += 11.0 - (10 - moneyness_pct) / 3.0 * 4.0
+    elif moneyness_pct >= 4:
+        score += 7.0 - (7 - moneyness_pct) / 3.0 * 4.0
+    elif moneyness_pct >= 1:
+        score += 3.0 - (4 - moneyness_pct) / 3.0 * 3.0
+    # <1% (barely ITM): 0
+
+    # --- Bid-Ask Spread % (15 pts) ---
+    if bid_ask_spread_pct is not None and not _math.isnan(bid_ask_spread_pct):
+        if bid_ask_spread_pct <= 1.0:
+            score += 15.0
+        elif bid_ask_spread_pct <= 3.0:
+            score += 15.0 - (bid_ask_spread_pct - 1.0) / 2.0 * 5.0
+        elif bid_ask_spread_pct <= 5.0:
+            score += 10.0 - (bid_ask_spread_pct - 3.0) / 2.0 * 5.0
+        elif bid_ask_spread_pct <= 8.0:
+            score += 5.0 - (bid_ask_spread_pct - 5.0) / 3.0 * 4.0
+        elif bid_ask_spread_pct <= 12.0:
+            score += 1.0
+        # >12%: 0
+
+    # --- OI / Volume (10 pts) ---
+    liquidity_count = volume if (market_open and volume > 0) else open_interest
+    if liquidity_count >= 500:
+        score += 10.0
+    elif liquidity_count >= 200:
+        score += 10.0 - (500 - liquidity_count) / 300.0 * 4.0
+    elif liquidity_count >= 100:
+        score += 6.0 - (200 - liquidity_count) / 100.0 * 3.0
+    elif liquidity_count >= 50:
+        score += 3.0 - (100 - liquidity_count) / 50.0 * 3.0
+    # <50: 0
+
+    return round(max(0.0, min(100.0, score)), 1)
+
+
+def compute_ditm_final_score(env_score: float, strike_score: float) -> float:
+    """DITM Final Score = 0.35 × Env + 0.65 × Strike (strike quality dominates for DITM)."""
+    return round(0.35 * env_score + 0.65 * strike_score, 1)
