@@ -26,7 +26,8 @@ from services.technical_service import (
     compute_rsi,
     compute_sma_ratio,
     compute_trend_data,
-    compute_volume_support,
+    compute_trend_persistence,
+    compute_volume_resistance,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,9 +62,9 @@ class DitmResult:
     iv_percentile: Optional[float]
     earnings_date: Optional[str]
     earnings_within_dte: bool
-    vol_support_1: Optional[float]
-    vol_support_2: Optional[float]
-    vol_support_3: Optional[float]
+    vol_resistance_1: Optional[float]
+    vol_resistance_2: Optional[float]
+    vol_resistance_3: Optional[float]
     dte: int
     expiration: str
     strikes: list[DitmStrikeResult] = field(default_factory=list)
@@ -101,7 +102,8 @@ def process_ditm_symbol(
         iv_rank_raw, iv_pct_raw = compute_iv_rank_percentile(df)
         iv_rank: Optional[float] = None if math.isnan(iv_rank_raw) else iv_rank_raw
         iv_percentile: Optional[float] = None if math.isnan(iv_pct_raw) else iv_pct_raw
-        vol_supports = compute_volume_support(df)
+        trend_persistence = compute_trend_persistence(df)
+        vol_supports = compute_volume_resistance(df)
 
         # Pre-compute HV sigma fallback
         import numpy as np
@@ -217,14 +219,15 @@ def process_ditm_symbol(
                         leverage_val = round(current_price / prem, 2) if prem > 0 else 0.0
 
                         env_s = compute_ditm_env_score(
-                            iv_rank=iv_rank,
                             iv_hv_ratio=iv_hv_ratio_val,
                             price_above_sma50=trend["price_above_sma50"],
                             sma50_above_sma200=trend["sma50_above_sma200"],
+                            sma50_slope_pct=trend["sma50_slope_pct"],
                             dist_from_52w_high_pct=dist_52w,
-                            rsi=rsi,
+                            trend_persistence=trend_persistence,
                             chain_median_oi=chain_median_oi,
                             days_to_earnings=days_to_earnings,
+                            iv_rank=iv_rank,
                         )
                         strike_s = compute_ditm_strike_score(
                             delta=d,
@@ -272,9 +275,9 @@ def process_ditm_symbol(
                     iv_percentile=iv_percentile,
                     earnings_date=earnings_date,
                     earnings_within_dte=earnings_within_dte,
-                    vol_support_1=vol_supports[0] if len(vol_supports) > 0 else None,
-                    vol_support_2=vol_supports[1] if len(vol_supports) > 1 else None,
-                    vol_support_3=vol_supports[2] if len(vol_supports) > 2 else None,
+                    vol_resistance_1=vol_supports[0] if len(vol_supports) > 0 else None,
+                    vol_resistance_2=vol_supports[1] if len(vol_supports) > 1 else None,
+                    vol_resistance_3=vol_supports[2] if len(vol_supports) > 2 else None,
                     dte=dte,
                     expiration=expiration,
                     strikes=strike_results,

@@ -25,9 +25,9 @@ export interface DitmResult {
   iv_percentile: number | null
   earnings_date: string | null
   earnings_within_dte: boolean
-  vol_support_1: number | null
-  vol_support_2: number | null
-  vol_support_3: number | null
+  vol_resistance_1: number | null
+  vol_resistance_2: number | null
+  vol_resistance_3: number | null
   dte: number
   expiration: string
   strikes: DitmStrikeInfo[]
@@ -53,9 +53,9 @@ export interface GroupedDitmResult {
   iv_percentile: number | null
   earnings_date: string | null
   earnings_within_dte: boolean
-  vol_support_1: number | null
-  vol_support_2: number | null
-  vol_support_3: number | null
+  vol_resistance_1: number | null
+  vol_resistance_2: number | null
+  vol_resistance_3: number | null
   best_score: number
   using_hv_fallback: boolean
   expirations: DitmExpirationRow[]

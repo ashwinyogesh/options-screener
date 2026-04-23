@@ -5,39 +5,30 @@ const UNIVERSE_SIZE = 75
 
 const SCORE_LEGEND = [
   { factor: '— ENV SCORE (×0.35) —', weight: null, detail: '', why: '', formula: '' },
-  { factor: 'IV Rank (inverted)',   weight: 25, detail: '<20=25 · 20–40 linear→15 · 40–60→7 · 60–80→2 · ≥80=0.',
-    why: 'You are BUYING options — low IV means cheap premium, less extrinsic you overpay. High IV rank means options are historically expensive; buying inflated premium destroys edge.',
-    formula: 'IV Rank = (HV_today − HV_min_252) / (HV_max_252 − HV_min_252) × 100\n  INVERTED: low rank = high score\n  HV = std(log(Closeₜ / Closeₜ₋₁), 30d) × √252' },
-  { factor: 'IV / HV Ratio (inv.)', weight: 20, detail: '<0.8=20 · 0.8–1.0→12 · 1.0–1.3→5 · 1.3–1.6→1 · ≥1.6=0.',
-    why: 'IV < HV means the options market is pricing in LESS movement than the stock actually delivers. You are getting a discount relative to realized volatility — the buyer\'s edge.',
-    formula: 'iv_hv_ratio = yfinance_IV / HV_30d\n  INVERTED: ratio < 1.0 = IV cheaper than realized vol' },
-  { factor: 'SMA Alignment',        weight: 20, detail: 'Price>SMA50>SMA200=20 · Price>SMA50=12 · SMA50>SMA200=6.',
-    why: 'DITM calls are long-delta positions — you need an uptrend to profit. A full SMA alignment (price > SMA50 > SMA200) confirms the multi-timeframe uptrend is intact before buying leveraged exposure.',
-    formula: 'SMA50  = rolling mean of Close over last 50 days\n  SMA200 = rolling mean of Close over last 200 days\n  Categorical: price > SMA50 and SMA50 > SMA200' },
-  { factor: '52W High Dist.',       weight: 15, detail: '≤5%=15 · ≤10%→11 · ≤20%→4 · ≤30%→0 · >30%=0.',
-    why: 'Stocks near their highs are in momentum; they tend to continue higher. A DITM call on a stock 40% below its 52-week high has no momentum tailwind and large downside exposure.',
-    formula: 'dist = (Close − max(Close, 252d)) / max(Close, 252d) × 100\n  pct_below = abs(min(dist, 0))' },
-  { factor: 'RSI(14)',              weight: 10, detail: '45–68=10 · 68–78 linear→4 · 35–45 linear→10 · 30–35=2 · <30 or >78=0.',
-    why: 'RSI 45–68 = sustained uptrend momentum without being dangerously overbought. Buying a call on an overbought stock risks a sharp pullback immediately reducing the option\'s delta.',
-    formula: 'Wilder-smoothed RSI(14)\n  Asymmetric: downtrend (<30) disqualifies; overbought (>78) penalized' },
+  { factor: 'IV / HV Ratio (inv.)', weight: 45, detail: '<0.7=45 · 0.7–0.9→27 · 0.9–1.1→13 · 1.1–1.5→2 · ≥1.5=0.',
+    why: 'The sole IV metric — measures buyer\'s edge relative to realized vol. IV < HV means the market is pricing in LESS movement than the stock actually delivers. IV Rank was removed to avoid double-counting; IV/HV is more statistically precise and directly actionable.',
+    formula: 'iv_hv_ratio = yfinance_IV / HV_30d\n  HV_30d = std(log(Closeₜ / Closeₜ₋₁), 30d) × √252\n  INVERTED: ratio < 1.0 = IV cheaper than realized vol\n  Used directly in earnings penalty: high IVR softens penalty' },
+  { factor: 'Trend Strength',       weight: 30, detail: 'SMA Align(15) + SMA50 Slope(7) + 52W Prox(8).',
+    why: 'Composite replacing the old SMA Alignment + 52W Distance split. Three independent signals: alignment (direction), SMA50 slope (momentum of the trend), and 52W proximity (strength). A stock can be in alignment but with a flattening SMA50 — the slope catches that deterioration earlier.',
+    formula: 'SMA Alignment: Price>SMA50>SMA200=15 · Price>SMA50=9 · SMA50>SMA200=4\n  SMA50 Slope: pct change in SMA50 over 10 days → >1%=7 · >0.3%=5+ · >0%=2+ · <-0.5%=0\n  52W Proximity: ≤5%=8 · ≤15%→3 · ≤30%→0' },
+  { factor: 'Trend Persistence',    weight: 10, detail: '≥75%=10 · ≥60%→6 · ≥50%→3 · ≥40%=1 · <40%=0.',
+    why: 'Replaces RSI(14) for LEAPS. RSI reacts to 2–3 week swings, which is noise for a 180–365 DTE position. Trend persistence measures what % of the last 60 sessions the stock closed above its SMA50 — directly relevant to whether the uptrend will persist over your holding period.',
+    formula: '% of last 60 sessions where Close > SMA50\n  ≥75% = stock reliably above trend\n  <40% = choppy/downtrend, avoid' },
   { factor: 'Chain Median OI',      weight: 10, detail: 'log₁₀ scale · log₁₀(OI)/log₁₀(5000) × 10.',
     why: 'Deep ITM calls are illiquid by nature. Minimum chain OI confirms a real market exists, enabling a fair entry and an exit when you want to close or roll the position.',
     formula: 'Filters to 0.65 < delta < 0.95 (DITM call range)\n  chain_median_oi = np.median([oi for candidates])\n  pts = min(log10(OI) / log10(5000), 1.0) × 10' },
-  { factor: 'Earnings Proximity',   weight: -15, detail: '<14d=−15 · 14–30d=−8 · 30–60d=−3 · >60d=0.',
-    why: 'Buying right before earnings means IV is already elevated and gap-down risk is imminent. With 90–210 DTE windows, almost every stock has earnings somewhere in range — a binary within-DTE flag fires on nearly all results and adds no signal. Tiering by calendar proximity targets the real risk: the 2–4 week window before the event.',
-    formula: 'days_to_earnings = (earnings_date − today).days\n  < 14 days  → −15 pts\n  14–30 days → −8 pts\n  30–60 days → −3 pts\n  > 60 days  → 0 pts (no penalty)' },
+  { factor: 'Earnings Proximity',   weight: -15, detail: '<14d=−15/−8 · 14–30d=−8/−4 · 30–60d=−3/−1 · >60d=0.',
+    why: 'Tiered by calendar proximity AND softened when IV Rank >50 (earnings already priced in). The left value is for IVR ≤50, right for IVR >50. Immediate earnings (<14 days) are always penalized heavily — gap-down risk destroys intrinsic value regardless of IV.',
+    formula: 'days_to_earnings = (earnings_date − today).days\n  IVR ≤ 50 : < 14d→−15 · 14–30d→−8 · 30–60d→−3\n  IVR > 50 : < 14d→−8  · 14–30d→−4 · 30–60d→−1\n  > 60 days → 0 (no penalty)' },
   { factor: '— STRIKE SCORE (×0.65) —', weight: null, detail: '', why: '', formula: '' },
-  { factor: 'Delta',                weight: 30, detail: '0.80–0.85=30 · ±band=24 · further out=15/8 · <0.65=0.',
-    why: 'Delta 0.80–0.85 is the DITM sweet spot: 80–85% correlation to stock movement (near stock substitute), while still paying less than 100% of the stock price. Higher delta = deeper but lower leverage. Lower delta = more extrinsic time premium paid.',
+  { factor: 'Delta',                weight: 35, detail: '0.80–0.85=35 · ±band=28 · further out=18/9 · <0.65=0.',
+    why: 'Delta 0.80–0.85 is the DITM sweet spot: 80–85% correlation to stock movement while paying less than 100% of the stock price. Moneyness% was removed — it is mathematically derived from delta for a given IV/expiry and was double-counting this same information.',
     formula: 'Black-Scholes call delta:\n  d1 = (ln(S/K) + (r + 0.5σ²)T) / (σ√T)\n  call_delta = N(d1)\n  σ = yfinance IV; falls back to HV_30d if IV < 15%' },
-  { factor: 'Extrinsic %',          weight: 30, detail: '≤1%=30 · ≤2%→22 · ≤4%→12 · ≤6%→4 · ≤9%→0 · >9%=0.',
-    why: 'Extrinsic value is the time premium you pay that will DECAY to zero by expiration regardless of stock direction. Every dollar of extrinsic is a sunk cost. Minimizing extrinsic % is the core efficiency metric of DITM buying.',
-    formula: 'intrinsic = max(0, price − strike)\n  extrinsic = max(0, premium − intrinsic)\n  extrinsic_pct = extrinsic / stock_price × 100\n  NOT extrinsic / premium — normalizes across different stock prices' },
-  { factor: 'Moneyness %',          weight: 15, detail: '≥15%=15 · ≥10%→11 · ≥7%→7 · ≥4%→3 · ≥1%→0.',
-    why: 'Moneyness % = how far ITM the strike is relative to current price. Deeper ITM = more intrinsic, less extrinsic ratio, better stock substitution. Shallow ITM calls still behave partly like speculative options.',
-    formula: 'moneyness_pct = (price − strike) / price × 100\n  A 10% moneyness means strike is 10% below current price\n  More moneyness = more intrinsic, lower extrinsic ratio' },
-  { factor: 'Bid-Ask Spread',       weight: 15, detail: '≤1%=15 · ≤3%→10 · ≤5%→5 · ≤8%→1 · >12%=0.',
-    why: 'Deep ITM calls are notoriously illiquid — spreads of 5–15% on the premium are common. A wide spread on entry costs you immediately and makes exit even worse. For a position you may hold for months, spread quality compounds in importance.',
+  { factor: 'Extrinsic %',          weight: 35, detail: '≤1%=35 · ≤2%→26 · ≤4%→14 · ≤6%→5 · ≤9%→0 · >9%=0.',
+    why: 'Extrinsic value is the time premium you pay that will DECAY to zero by expiration regardless of stock direction. Every dollar of extrinsic is a sunk cost. This is the core efficiency metric of DITM buying — minimizing what you pay above intrinsic value.',
+    formula: 'intrinsic = max(0, price − strike)\n  extrinsic = max(0, premium − intrinsic)\n  extrinsic_pct = extrinsic / stock_price × 100\n  Normalized by stock price, not premium — comparable across price levels' },
+  { factor: 'Bid-Ask Spread',       weight: 20, detail: '≤1%=20 · ≤3%→13 · ≤5%→7 · ≤8%→2 · >12%=0.',
+    why: 'Deep ITM calls are notoriously illiquid — spreads of 5–15% on the premium are common. A wide spread costs you on entry AND exit. For a position held for months, spread quality compounds in importance. Weight raised to 20 to reflect this.',
     formula: 'spread_pct = (ask − bid) / mid × 100\n  Per-strike bid/ask from yfinance call chain' },
   { factor: 'OI / Volume',          weight: 10, detail: '≥500=10 · ≥200→6 · ≥100→3 · ≥50→1 · <50=0.',
     why: 'Open interest at this specific deep strike. Low OI on deep ITM calls means you may be the only participant. Closing a position at mid becomes difficult — you face the full spread on exit.',
@@ -62,13 +53,13 @@ export function DitmInput({ onScan, onCustom, loading }: Props) {
   const [expandedFactor, setExpandedFactor] = useState<string | null>(null)
 
   const [topN, setTopN] = useState(15)
-  const [scanMinDTE, setScanMinDTE] = useState(90)
-  const [scanMaxDTE, setScanMaxDTE] = useState(210)
+  const [scanMinDTE, setScanMinDTE] = useState(180)
+  const [scanMaxDTE, setScanMaxDTE] = useState(365)
 
   const [chips, setChips] = useState<string[]>([])
   const [inputValue, setInputValue] = useState('')
-  const [minDTE, setMinDTE] = useState(90)
-  const [maxDTE, setMaxDTE] = useState(210)
+  const [minDTE, setMinDTE] = useState(180)
+  const [maxDTE, setMaxDTE] = useState(365)
   const [dteError, setDteError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 

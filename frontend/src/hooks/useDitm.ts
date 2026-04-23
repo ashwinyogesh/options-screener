@@ -60,7 +60,7 @@ export function useDitm(): UseDitmReturn {
     }
   }
 
-  async function scan(topN = 15, minDTE = 90, maxDTE = 210) {
+  async function scan(topN = 15, minDTE = 180, maxDTE = 365) {
     setLoading(true)
     setIsScanMode(true)
     setErrorMessage(null)

@@ -82,9 +82,9 @@ class DitmResultOut(BaseModel):
     iv_percentile: Optional[float]
     earnings_date: Optional[str]
     earnings_within_dte: bool
-    vol_support_1: Optional[float]
-    vol_support_2: Optional[float]
-    vol_support_3: Optional[float]
+    vol_resistance_1: Optional[float]
+    vol_resistance_2: Optional[float]
+    vol_resistance_3: Optional[float]
     dte: int
     expiration: str
     strikes: List[DitmStrikeResultOut]
@@ -116,9 +116,9 @@ def _to_result_out(r: DitmResult) -> DitmResultOut:
         iv_percentile=r.iv_percentile,
         earnings_date=r.earnings_date,
         earnings_within_dte=r.earnings_within_dte,
-        vol_support_1=r.vol_support_1,
-        vol_support_2=r.vol_support_2,
-        vol_support_3=r.vol_support_3,
+        vol_resistance_1=r.vol_resistance_1,
+        vol_resistance_2=r.vol_resistance_2,
+        vol_resistance_3=r.vol_resistance_3,
         dte=r.dte,
         expiration=r.expiration,
         strikes=[

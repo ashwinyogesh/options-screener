@@ -20,10 +20,10 @@ function fmt2(n: number | null | undefined): string {
 const COLUMNS = [
   col.accessor('symbol',    { header: 'Symbol',   cell: () => null }),
   col.accessor('price',     { header: 'Price',    cell: () => null }),
-  col.accessor('vol_support_1', {
+  col.accessor('vol_resistance_1', {
     header: () => (
-      <span className="col-tip" title="Volume Profile support levels below current price (top-3 high-volume bins)">
-        Vol Support ⓘ
+      <span className="col-tip" title="Volume Profile resistance levels above current price (top-3 high-volume bins)">
+        Vol Resistance ⓘ
       </span>
     ),
     cell: () => null,
@@ -70,9 +70,9 @@ function groupResults(results: DitmResult[]): GroupedDitmResult[] {
         iv_percentile: r.iv_percentile,
         earnings_date: r.earnings_date,
         earnings_within_dte: false,
-        vol_support_1: r.vol_support_1,
-        vol_support_2: r.vol_support_2,
-        vol_support_3: r.vol_support_3,
+        vol_resistance_1: r.vol_resistance_1,
+        vol_resistance_2: r.vol_resistance_2,
+        vol_resistance_3: r.vol_resistance_3,
         best_score: 0,
         using_hv_fallback: false,
         expirations: [],
@@ -252,7 +252,7 @@ export function DitmTable({ data }: Props) {
                   <td rowSpan={totalRows}>{fmt2(r.price)}</td>
                   <td rowSpan={totalRows}>
                     {(() => {
-                      const levels = [r.vol_support_1, r.vol_support_2, r.vol_support_3]
+                      const levels = [r.vol_resistance_1, r.vol_resistance_2, r.vol_resistance_3]
                         .filter((v): v is number => v != null)
                       if (levels.length === 0) return <span className="dim">—</span>
                       return (
