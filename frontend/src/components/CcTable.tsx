@@ -34,7 +34,7 @@ function envSub(pts: Record<string, number>, key: string) {
   const v = pts[key], max = ENV_MAX[key]
   if (v == null || max == null) return null
   const ratio = v / max
-  const color = ratio >= 0.75 ? '#4ade80' : ratio >= 0.4 ? '#fbbf24' : '#f87171'
+  const color = ratio >= 0.70 ? '#4ade80' : ratio >= 0.45 ? '#fbbf24' : '#f87171'
   return <span style={{ fontSize: '10px', color, display: 'block', lineHeight: 1.2 }}>{Math.round(v)}/{max}</span>
 }
 
