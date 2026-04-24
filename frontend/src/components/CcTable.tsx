@@ -431,7 +431,7 @@ export function CcTable({ data }: Props) {
                   <span className="dte-num">{exp.dte}</span><br />
                   <span className="expiry-date">{exp.expiration}</span>
                   {exp.earnings_within_dte && <span className="earnings-warn"> ⚠</span>}
-                  <span className="expiry-date" style={{ display: 'block' }}>{exp.chain_median_oi > 0 ? (exp.chain_median_oi >= 1000 ? (exp.chain_median_oi / 1000).toFixed(1) + 'k' : Math.round(exp.chain_median_oi)) : <span className="dim">—</span>}{envSubInline(parseEnvDetail(bestStrike.env_detail), 'OI')}</span>
+                  <span className="oi-badge">{exp.chain_median_oi > 0 ? (exp.chain_median_oi >= 1000 ? (exp.chain_median_oi / 1000).toFixed(1) + 'k' : Math.round(exp.chain_median_oi)) : <span className="dim">—</span>}{envSubInline(parseEnvDetail(bestStrike.env_detail), 'OI')}</span>
                 </td>
                 <td className="em-cell" rowSpan={dteCellRows}>
                   {exp.expected_move > 0
