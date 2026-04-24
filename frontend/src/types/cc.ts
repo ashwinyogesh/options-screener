@@ -69,6 +69,7 @@ export interface GroupedCcResult {
   expirations: CcExpirationRow[]
   dist_from_52w_high_pct: number
   iv_hv_ratio: number | null
+  env_detail: string
 }
 
 export interface CcError {

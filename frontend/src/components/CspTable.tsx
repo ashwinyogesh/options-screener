@@ -25,6 +25,21 @@ function fmtDelta(n: number | null | undefined): string {
   return n.toFixed(3)
 }
 
+function parseEnvDetail(detail: string): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const part of (detail ?? '').split(' ')) {
+    const idx = part.indexOf(':')
+    if (idx > 0) out[part.slice(0, idx)] = Number(part.slice(idx + 1))
+  }
+  return out
+}
+const ENV_MAX: Record<string, number> = { IV: 25, IH: 20, SMA: 15, '52W': 15, RSI: 10 }
+function envSub(pts: Record<string, number>, key: string) {
+  const v = pts[key], max = ENV_MAX[key]
+  if (v == null || max == null) return null
+  return <span className="expiry-date">{Math.round(v)}/{max}</span>
+}
+
 // Ticker-level columns — for header rendering + sorting only.
 // Cells are rendered manually in the tbody via rowSpan.
 const COLUMNS = [
@@ -113,6 +128,7 @@ function groupResults(results: CspResult[]): GroupedCspResult[] {
         vol_support_126_3: r.vol_support_126_3,
         dist_from_52w_high_pct: r.dist_from_52w_high_pct,
         iv_hv_ratio: null,
+        env_detail: '',
         best_score: 0,
         using_hv_fallback: false,
         expirations: [],
@@ -136,6 +152,7 @@ function groupResults(results: CspResult[]): GroupedCspResult[] {
     g.best_score = Math.max(...g.expirations.map(e => e.best_score))
     const bs = g.expirations.flatMap(e => e.strikes).find(s => s.is_best) ?? g.expirations[0]?.strikes[0]
     g.iv_hv_ratio = bs?.iv_hv_ratio ?? null
+    g.env_detail = bs?.env_detail ?? ''
   }
   return [...map.values()].sort((a, b) => b.best_score - a.best_score)
 }
@@ -302,8 +319,7 @@ export function CspTable({ data }: Props) {
             const altStrikes = exp.strikes.filter(s => !s.is_best)
             const dteCellRows = 1 + (showAlts ? altStrikes.length : 0)
             const isFirstRow = absRowIdx === 0
-
-            // ── Main row (best strike) ────────────────────────────────────
+            const envPts = isFirstRow ? parseEnvDetail(r.env_detail) : {}
             rows.push(
               <tr key={`${expIdx}-best`} className={isFirstRow ? 'first-exp-row' : 'sub-exp-row'}>
 
@@ -323,37 +339,37 @@ export function CspTable({ data }: Props) {
                   <td rowSpan={totalRows}>
                     {r.sma_ratio == null || isNaN(r.sma_ratio)
                       ? <span className="dim">—</span>
-                      : <span className={r.sma_ratio >= 1 ? 'positive' : 'negative'}>{r.sma_ratio.toFixed(4)}</span>
+                      : <><span className={r.sma_ratio >= 1 ? 'positive' : 'negative'}>{r.sma_ratio.toFixed(4)}</span><br />{envSub(envPts, 'SMA')}</>
                     }
                   </td>
                   <td rowSpan={totalRows}>
                     {isNaN(r.dist_from_52w_high_pct)
                       ? <span className="dim">—</span>
-                      : <span className={r.dist_from_52w_high_pct >= -5 ? 'score-good' : r.dist_from_52w_high_pct >= -15 ? 'score-caution' : 'score-bad'}>
+                      : <><span className={r.dist_from_52w_high_pct >= -5 ? 'score-good' : r.dist_from_52w_high_pct >= -15 ? 'score-caution' : 'score-bad'}>
                           {r.dist_from_52w_high_pct.toFixed(1)}%
-                        </span>
+                        </span><br />{envSub(envPts, '52W')}</>
                     }
                   </td>
                   <td rowSpan={totalRows}>
                     {r.iv_rank == null
                       ? <span className="dim">N/A</span>
-                      : <span className={r.iv_rank >= 50 ? 'badge badge-green' : r.iv_rank >= 30 ? 'badge badge-yellow' : 'badge badge-red'}>
+                      : <><span className={r.iv_rank >= 50 ? 'badge badge-green' : r.iv_rank >= 30 ? 'badge badge-yellow' : 'badge badge-red'}>
                             {r.iv_rank.toFixed(0)}
-                          </span>
+                          </span><br />{envSub(envPts, 'IV')}</>
                     }
                   </td>
                   <td rowSpan={totalRows}>
                     {r.iv_hv_ratio == null
                       ? <span className="dim">—</span>
-                      : <span className={r.iv_hv_ratio >= 1.4 ? 'score-good' : r.iv_hv_ratio >= 1.0 ? 'score-caution' : 'score-bad'}>
+                      : <><span className={r.iv_hv_ratio >= 1.4 ? 'score-good' : r.iv_hv_ratio >= 1.0 ? 'score-caution' : 'score-bad'}>
                           {r.iv_hv_ratio.toFixed(2)}×
-                        </span>
+                        </span><br />{envSub(envPts, 'IH')}</>
                     }
                   </td>
                   <td rowSpan={totalRows}>
                     {r.rsi == null || isNaN(r.rsi)
                       ? <span className="dim">—</span>
-                      : <span className={r.rsi >= 70 ? 'rsi-high' : r.rsi <= 30 ? 'rsi-low' : 'rsi-ok'}>{r.rsi.toFixed(1)}</span>
+                      : <><span className={r.rsi >= 70 ? 'rsi-high' : r.rsi <= 30 ? 'rsi-low' : 'rsi-ok'}>{r.rsi.toFixed(1)}</span><br />{envSub(envPts, 'RSI')}</>
                     }
                   </td>
                   <td rowSpan={totalRows}>
