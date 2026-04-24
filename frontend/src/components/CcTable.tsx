@@ -226,11 +226,12 @@ export function CcTable({ data }: Props) {
 
   const scoreFmt = (env: number | undefined, strike: number | undefined, final: number | undefined, envDetail?: string, strikeDetail?: string, highlight = false) => {
     if (final == null || isNaN(final)) return <span className="dim">—</span>
+    const rounded = Math.round(final)
     const cls =
-      final >= 75 ? 'score-strong'
-      : final >= 65 ? 'score-good'
-      : final >= 55 ? 'score-caution'
-      : final >= 45 ? 'score-warn'
+      rounded >= 75 ? 'score-strong'
+      : rounded >= 65 ? 'score-good'
+      : rounded >= 55 ? 'score-caution'
+      : rounded >= 45 ? 'score-warn'
       : 'score-bad'
     return (
       <span
