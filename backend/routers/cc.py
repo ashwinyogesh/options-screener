@@ -102,6 +102,7 @@ class CcResultOut(BaseModel):
     using_hv_fallback: bool
     expected_move: float
     dist_from_52w_high_pct: float
+    chain_median_oi: float
 
 
 class CcErrorOut(BaseModel):
@@ -235,4 +236,5 @@ def _to_out(r: CcResult) -> CcResultOut:
         using_hv_fallback=r.using_hv_fallback,
         expected_move=r.expected_move,
         dist_from_52w_high_pct=r.dist_from_52w_high_pct,
+        chain_median_oi=r.chain_median_oi,
     )

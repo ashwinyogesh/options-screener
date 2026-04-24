@@ -75,6 +75,7 @@ class CspResult:
     using_hv_fallback: bool = False  # True when any strike in this row used hv_sigma
     expected_move: float = 0.0       # price × hv_sigma × √(dte/365)
     dist_from_52w_high_pct: float = 0.0  # 0 = at 52w high, -10 = 10% below
+    chain_median_oi: float = 0.0     # median OI in 0.10–0.40 delta range
 
 
 @dataclass
@@ -292,6 +293,7 @@ def process_symbol(
                     using_hv_fallback=any(sr.iv_fallback for sr in strike_results),
                     expected_move=round(current_price * hv_sigma * math.sqrt(dte / 365.0), 2),
                     dist_from_52w_high_pct=round(dist_52w, 2),
+                    chain_median_oi=chain_median_oi,
                 ))
             except Exception as exc:
                 logger.debug("Skipping expiration %s for %s: %s", opts.get("expiration"), sym, exc)

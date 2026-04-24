@@ -74,6 +74,7 @@ class CcResult:
     using_hv_fallback: bool = False
     expected_move: float = 0.0
     dist_from_52w_high_pct: float = 0.0  # 0 = at 52w high, -10 = 10% below
+    chain_median_oi: float = 0.0     # median OI in 0.20–0.40 delta range (CC)
 
 
 @dataclass
@@ -286,6 +287,7 @@ def process_cc_symbol(
                     using_hv_fallback=any(s.iv_fallback for s in strike_results),
                     expected_move=expected_move,
                     dist_from_52w_high_pct=round(dist_52w, 2),
+                    chain_median_oi=chain_median_oi,
                 ))
             except Exception as e:
                 logger.debug("Error processing expiration %s for %s: %s", opts.get("expiration", "?"), sym, e)

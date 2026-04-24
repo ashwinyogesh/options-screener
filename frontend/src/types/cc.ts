@@ -37,6 +37,7 @@ export interface CcResult {
   using_hv_fallback: boolean
   expected_move: number
   dist_from_52w_high_pct: number
+  chain_median_oi: number
 }
 
 export interface CcExpirationRow {
@@ -47,6 +48,7 @@ export interface CcExpirationRow {
   best_score: number
   using_hv_fallback: boolean
   expected_move: number
+  chain_median_oi: number
 }
 
 export interface GroupedCcResult {

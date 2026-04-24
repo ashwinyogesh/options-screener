@@ -30,6 +30,15 @@ function parseEnvDetail(detail: string): Record<string, number> {
   return out
 }
 const ENV_MAX: Record<string, number> = { IV: 25, IH: 20, SMA: 15, '52W': 15, RSI: 10 }
+const STRIKE_MAX: Record<string, number> = { 'Δ': 18, 'BA': 22 }
+function strikeSub(detail: string, key: string) {
+  const pts = parseEnvDetail(detail)
+  const v = pts[key], max = STRIKE_MAX[key]
+  if (v == null || max == null) return null
+  const ratio = v / max
+  const color = ratio >= 0.70 ? '#4ade80' : ratio >= 0.45 ? '#fbbf24' : '#f87171'
+  return <span style={{ fontSize: '10px', color, display: 'block', lineHeight: 1.2 }}>{Math.round(v)}/{max}</span>
+}
 function envSub(pts: Record<string, number>, key: string) {
   const v = pts[key], max = ENV_MAX[key]
   if (v == null || max == null) return null
@@ -146,6 +155,7 @@ function groupResults(results: CcResult[]): GroupedCcResult[] {
       best_score: r.best_cc_score,
       using_hv_fallback: r.using_hv_fallback,
       expected_move: r.expected_move,
+      chain_median_oi: r.chain_median_oi,
     })
   }
   for (const g of map.values()) {
@@ -392,6 +402,7 @@ export function CcTable({ data }: Props) {
                   <span className="dte-num">{exp.dte}</span><br />
                   <span className="expiry-date">{exp.expiration}</span>
                   {exp.earnings_within_dte && <span className="earnings-warn"> ⚠</span>}
+                  {exp.chain_median_oi > 0 && <span className="expiry-date" style={{ display: 'block' }}>OI: {exp.chain_median_oi >= 1000 ? (exp.chain_median_oi / 1000).toFixed(1) + 'k' : Math.round(exp.chain_median_oi)}</span>}
                 </td>
                 <td className="em-cell" rowSpan={dteCellRows}>
                   {exp.expected_move > 0
@@ -418,8 +429,9 @@ export function CcTable({ data }: Props) {
                     +{bestStrike.delta.toFixed(3)}
                   </span>
                   {bestStrike.iv_fallback && <span className="hv-tag" title="Delta estimated from 30d HV (IV unavailable)"> ~HV</span>}
+                  {strikeSub(bestStrike.strike_detail, 'Δ')}
                 </td>
-                <td>{fmtSpread(bestStrike.bid_ask_spread_pct)}</td>
+                <td>{fmtSpread(bestStrike.bid_ask_spread_pct)}{strikeSub(bestStrike.strike_detail, 'BA')}</td>
                 <td>{fmtAnn(bestStrike.annualized_return)}</td>
                 <td>{scoreFmt(bestStrike.env_score, bestStrike.strike_score, bestStrike.cc_score, bestStrike.env_detail, bestStrike.strike_detail, true)}</td>
               </tr>
@@ -439,8 +451,9 @@ export function CcTable({ data }: Props) {
                         +{s.delta.toFixed(3)}
                       </span>
                       {s.iv_fallback && <span className="hv-tag"> ~HV</span>}
+                      {strikeSub(s.strike_detail, 'Δ')}
                     </td>
-                    <td>{fmtSpread(s.bid_ask_spread_pct)}</td>
+                    <td>{fmtSpread(s.bid_ask_spread_pct)}{strikeSub(s.strike_detail, 'BA')}</td>
                     <td>{fmtAnn(s.annualized_return)}</td>
                     <td>{scoreFmt(s.env_score, s.strike_score, s.cc_score, s.env_detail, s.strike_detail)}</td>
                   </tr>
