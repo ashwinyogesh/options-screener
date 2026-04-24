@@ -247,6 +247,14 @@ export function CcInput({ onScan, onCustom, loading }: Props) {
                 </ul>
               </div>
             ))}
+            <div className="thumb-rule">
+              <span className="thumb-rule-label">Thumb rule</span>
+              <span className="thumb-rule-text">
+                At 21 DTE ask: <em>“Am I being paid enough remaining premium to accept fast-moving delta?”</em>
+                &nbsp;Close if near-the-money with meaningful extrinsic left, or if you don’t want the shares called away.
+                Run it only when deep OTM with thin extrinsic, or when strike ≥ cost basis and you’re happy to be called away at this price.
+              </span>
+            </div>
           </div>
           <div className="score-legend-factors">
             <div className="score-legend-header">Score breakdown — Final = 0.4 × Env + 0.6 × Strike</div>

@@ -341,6 +341,27 @@ body {
 .exit-action-assign  { color: #60a5fa; }
 .exit-action-roll    { color: #fb923c; }
 
+.thumb-rule {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: #1e293b;
+  border-left: 3px solid #60a5fa;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #cbd5e1;
+}
+.thumb-rule-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #60a5fa;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.thumb-rule-text em { color: #e2e8f0; font-style: italic; }
+
 .score-legend-factors { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 260px; }
 .score-legend-header  { font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.05em; }
 .score-factor-row              { display: flex; align-items: baseline; gap: 8px; }
