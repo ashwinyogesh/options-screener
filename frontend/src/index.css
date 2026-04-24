@@ -341,7 +341,8 @@ body {
 .dte-cell { white-space: nowrap; }
 .dte-num { font-size: 14px; font-weight: 700; color: #e2e8f0; }
 .oi-badge {
-  display: inline-flex;
+  display: flex;
+  width: fit-content;
   align-items: center;
   gap: 3px;
   margin-top: 5px;
