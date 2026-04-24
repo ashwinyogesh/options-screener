@@ -10,7 +10,7 @@ interface UseCspReturn {
   symbolCount: number
   isScanMode: boolean
   errorMessage: string | null
-  run: (req: ScreenerRequest) => Promise<void>
+  run: (req: CspRequest) => Promise<void>
   scan: (topN?: number, minDTE?: number, maxDTE?: number) => Promise<void>
 }
 
