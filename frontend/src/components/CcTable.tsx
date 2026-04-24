@@ -330,9 +330,6 @@ export function CcTable({ data }: Props) {
                   <td rowSpan={totalRows}>
                     {r.sma_ratio == null || isNaN(r.sma_ratio)
                       ? <span className="dim">—</span>
-                  <td rowSpan={totalRows}>
-                    {r.sma_ratio == null || isNaN(r.sma_ratio)
-                      ? <span className="dim">—</span>
                       : <><span style={{ color: envColor(envPts, 'SMA') }}>{r.sma_ratio.toFixed(4)}</span><br />{envSub(envPts, 'SMA')}</>
                     }
                   </td>
