@@ -29,7 +29,7 @@ function parseEnvDetail(detail: string): Record<string, number> {
   }
   return out
 }
-const ENV_MAX: Record<string, number> = { IV: 25, IH: 20, SMA: 15, '52W': 15, RSI: 10 }
+const ENV_MAX: Record<string, number> = { IV: 25, IH: 20, SMA: 15, '52W': 15, RSI: 10, OI: 15 }
 const STRIKE_MAX: Record<string, number> = { 'Δ': 18, 'Res': 13, 'EM': 15, 'OTM': 12, 'BA': 22, 'LQ': 20 }
 function strikeSub(detail: string, key: string) {
   const pts = parseEnvDetail(detail)
@@ -424,7 +424,7 @@ export function CcTable({ data }: Props) {
                   <span className="dte-num">{exp.dte}</span><br />
                   <span className="expiry-date">{exp.expiration}</span>
                   {exp.earnings_within_dte && <span className="earnings-warn"> ⚠</span>}
-                  <span className="expiry-date" style={{ display: 'block' }}>{exp.chain_median_oi > 0 ? 'OI: ' + (exp.chain_median_oi >= 1000 ? (exp.chain_median_oi / 1000).toFixed(1) + 'k' : Math.round(exp.chain_median_oi)) : <span className="dim">—</span>}</span>
+                  <span className="expiry-date" style={{ display: 'block' }}>{exp.chain_median_oi > 0 ? 'OI: ' + (exp.chain_median_oi >= 1000 ? (exp.chain_median_oi / 1000).toFixed(1) + 'k' : Math.round(exp.chain_median_oi)) : <span className="dim">—</span>}{envSub(parseEnvDetail(bestStrike.env_detail), 'OI')}</span>
                 </td>
                 <td className="em-cell" rowSpan={dteCellRows}>
                   {exp.expected_move > 0
