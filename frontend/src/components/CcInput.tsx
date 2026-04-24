@@ -28,7 +28,7 @@ const SCORE_LEGEND = [
   { factor: 'Chain Median OI', weight: 5,   detail: 'Circuit-breaker only · log₁₀(OI)/log₁₀(5000) × 5 · near-always maxed on liquid tickers.',
     definition: 'The median open interest across all call strikes in the 0.10–0.40 delta range. Open interest is the total number of outstanding contracts — a measure of how actively traded the options chain is.',
     why: 'Thin chains mean wide spreads on entry and difficulty rolling if the stock moves against you. Liquid chains = trade near fair value, clean exits, and rolling to a later expiry without hunting for a counterparty.',
-    formula: 'Filters candidates to 0.1 < delta < 0.4 first (call chain).\n  chain_median_oi = np.median([oi for candidates if 0.1 < delta < 0.4])\n  pts = min(log10(OI) / log10(5000), 1.0) × 15' },
+    formula: 'Filters candidates to 0.1 < delta < 0.4 first (call chain).\n  chain_median_oi = np.median([oi for candidates if 0.1 < delta < 0.4])\n  pts = min(log10(OI) / log10(5000), 1.0) × 5' },
   { factor: 'Earnings in DTE', weight: -15, detail: 'Hard penalty if earnings fall within the expiry window.',
     definition: 'A binary flag — true if the company\'s next earnings announcement date falls within the option\'s expiration window (between today and the expiry date).',
     why: 'Earnings create gap risk in both directions. A post-earnings surge can call your shares away; a collapse damages your underlying. Avoid unless you specifically want to sell a call ahead of earnings.',
