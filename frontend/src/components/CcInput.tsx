@@ -5,11 +5,11 @@ const UNIVERSE_SIZE = 75
 
 const SCORE_LEGEND = [
   { factor: '— ENV SCORE (×0.4) —', weight: null, detail: '', definition: '', why: '', formula: '' },
-  { factor: 'IV Rank',         weight: 25,  detail: '<20=0 · 20–40 linear→8 · 40–60→15 · 60–80→21 · ≥80=25.',
+  { factor: 'IV Rank',         weight: 30,  detail: '<20=0 · 20–40 linear→9 · 40–60→18 · 60–80→25 · ≥80=30.',
     definition: 'A percentile (0–100) showing where today\'s implied volatility sits within its 252-day range. 100 = highest IV of the past year; 0 = lowest.',
     why: 'Sell premium when options are historically expensive. High IV rank = inflated call prices → more premium collected for the same risk. This is the primary edge in premium selling.',
     formula: 'Uses 30-day rolling HV as IV proxy.\n  iv_rank = (HV_today − HV_min_252) / (HV_max_252 − HV_min_252) × 100\n  HV = std(log(Closeₜ / Closeₜ₋₁), 30d) × √252' },
-  { factor: 'IV / HV Ratio',   weight: 20,  detail: '<0.8=0 · 0.8–0.9→2 · 0.9–1.1→5 · 1.1–1.4→10 · 1.4–1.7→16 · ≥1.7=20.',
+  { factor: 'IV / HV Ratio',   weight: 25,  detail: '<0.8=0 · 0.8–0.9→2.5 · 0.9–1.1→6 · 1.1–1.4→12.5 · 1.4–1.7→20 · ≥1.7=25.',
     definition: 'Implied Volatility divided by 30-day realized (Historical) Volatility. Measures whether options are priced rich or cheap relative to actual recent movement in the stock.',
     why: "IV > HV means the market is pricing in more movement than the stock actually makes — the seller's edge. IV < HV = options are cheap; you'd be giving away premium below fair value.",
     formula: 'iv_hv_ratio = yfinance_IV / HV_30d\n  Falls back to HV if IV < 15% (stale market-closed data)' },
@@ -25,7 +25,7 @@ const SCORE_LEGEND = [
     definition: 'Relative Strength Index: a momentum oscillator (0–100) measuring the magnitude of recent gains vs. losses over the last 14 trading sessions. Above 70 = overbought; below 30 = oversold.',
     why: 'Neutral-to-moderate RSI = steady trend without sharp reversal risk. Very overbought stocks might pull back sharply, damaging your underlying position while the premium provides only limited offset.',
     formula: 'Wilder-smoothed RSI(14)\n  Smooth decay 62→75: pts = 10 × (75 − RSI) / 13' },
-  { factor: 'Chain Median OI', weight: 15,  detail: 'log₁₀ scale · log₁₀(OI)/log₁₀(5000) × 15 · capped at 15.',
+  { factor: 'Chain Median OI', weight: 5,   detail: 'Circuit-breaker only · log₁₀(OI)/log₁₀(5000) × 5 · near-always maxed on liquid tickers.',
     definition: 'The median open interest across all call strikes in the 0.10–0.40 delta range. Open interest is the total number of outstanding contracts — a measure of how actively traded the options chain is.',
     why: 'Thin chains mean wide spreads on entry and difficulty rolling if the stock moves against you. Liquid chains = trade near fair value, clean exits, and rolling to a later expiry without hunting for a counterparty.',
     formula: 'Filters candidates to 0.1 < delta < 0.4 first (call chain).\n  chain_median_oi = np.median([oi for candidates if 0.1 < delta < 0.4])\n  pts = min(log10(OI) / log10(5000), 1.0) × 15' },
@@ -38,11 +38,11 @@ const SCORE_LEGEND = [
     definition: 'The rate of change of the option\'s price per $1 move in the stock. For calls, delta ranges from 0 to +1. It approximates the market-implied probability the call expires in-the-money (stock gets called away).',
     why: 'Call delta approximates the probability of expiring in-the-money (stock being called away). +0.20–+0.25 ≈ 20–25% assignment chance — the sweet spot for premium vs. keeping your shares. Higher delta = more premium but higher chance of losing the position.',
     formula: 'Black-Scholes call delta:\n  d1 = (ln(S/K) + (r + 0.5σ²)T) / (σ√T)\n  call_delta = N(d1)\n  σ = yfinance IV; falls back to HV_30d if IV < 15%' },
-  { factor: 'Dist vs Resistance', weight: 13,  detail: 'Strike ≥ nearest resistance=13 · +5 if all R below strike · 0–5% below→8 · 5–10%→0 · >10%=0.',
+  { factor: 'Dist vs Resistance', weight: 18,  detail: 'Strike ≥ nearest resistance=18 · +5 if all R below strike · 0–5% below→10 · 5–10%→0 · >10%=0.',
     definition: 'The gap between the call strike and the nearest high-volume price level above current price. Volume-profile resistance is a price zone where heavy selling has historically occurred, acting as a natural ceiling on the stock\'s advance.',
     why: 'A volume-profile resistance level between current price and your strike means the stock faces a ceiling before reaching assignment. If ALL resistance levels sit below your strike, the stock must punch through every one sequentially — that multi-layer ceiling earns a +5 bonus on top of the base 13 pts.',
     formula: 'Volume Profile resistance — 6M (126-day) lookback for scoring (1Y shown in table for reference):\n  typical_price = (High + Low + Close) / 3\n  Bins 126d into 50 buckets; takes top-3 bins above current price\n  nearest_R = min(resistances above current price)\n  gap_pct = (nearest_R − strike) / strike × 100\n  gap ≤ 0 (strike above nearest R) = 13 pts\n  Bonus: all resistance levels ≤ strike → +5 (multi-layer ceiling below strike)' },
-  { factor: 'Exp Move Buffer', weight: 15,  detail: '≥0.2σ above ceiling=15 · 0–0.2σ→10 · −0.1–0σ→4 · deeper inside=0.',
+  { factor: 'Exp Move Buffer', weight: 20,  detail: '≥0.2σ above ceiling=20 · 0–0.2σ→13 · −0.1–0σ→5 · deeper inside=0.',
     definition: 'How far above the options-implied 1-standard-deviation expected move the strike sits, measured in units of that expected move. Positive = strike is beyond the statistical ceiling; negative = inside it.',
     why: 'Selling above the 1σ upward expected move gives >68% theoretical probability the stock stays below your strike. Every 0.1σ of additional buffer above the ceiling directly improves the statistical edge at that strike.',
     formula: 'Expected move (1σ upside):\n  EM = S × σ × √T    where T = DTE/365\n  EM_upper = S + EM\n  sigmas_outside = (strike − EM_upper) / EM\n  Positive = strike is above the 1σ ceiling' },
@@ -50,11 +50,11 @@ const SCORE_LEGEND = [
     definition: 'The raw percentage gap between the strike and current stock price. For a call, this is how far the stock must rise before the option goes in-the-money and your shares risk being called away.',
     why: 'Raw distance above current price before assignment risk begins. More room before the stock reaches your strike is a concrete margin of safety independent of IV or time.',
     formula: 'otm_pct = (K − S) / S × 100\n  Raw distance cushion from current price to strike\n  Independent of delta (delta also uses σ and T)' },
-  { factor: 'Bid-Ask Spread',  weight: 22,  detail: '≤1%=22 · ≤3%→15 · ≤5%→8 · ≤8%→2 · >8%=0.',
+  { factor: 'Bid-Ask Spread',  weight: 27,  detail: '≤1%=27 · ≤3%→18 · ≤5%→10 · ≤8%→2.5 · >8%=0.',
     definition: 'The percentage difference between the ask and bid prices relative to the option midpoint: (ask − bid) / mid × 100. Lower means a tighter market and cheaper execution.',
     why: 'Wide spreads directly erode realized premium. A 10% spread on a $1.00 call loses $0.05–$0.10 on entry alone, and you pay it again on every roll. Execution quality determines what you actually collect vs. what the screen shows.',
     formula: 'spread_pct = (ask − bid) / mid × 100\n  Per-strike bid/ask from yfinance call options chain' },
-  { factor: 'OI / Volume',      weight: 20,  detail: '≥1000=20 · ≥500→14 · ≥200→8 · ≥100→0 · <100=0.',
+  { factor: 'OI / Volume',      weight: 5,   detail: 'Circuit-breaker · ≥1000=5 · ≥500→3.5 · ≥200→2 · ≥100→0 · <100=0.',
     definition: 'Open interest (total outstanding contracts, used when market is closed) or today\'s volume (used when market is open) at this specific strike — a direct count of active participants.',
     why: 'High OI/volume at this specific strike = efficient price discovery, fast fills near mid, and a liquid exit if the stock surges toward your strike. Low OI = you may be the only participant, making rolling or closing costly.',
     formula: 'Uses volume if US market is open (9:30–16:00 ET weekday)\n  Otherwise uses openInterest at this specific call strike' },
@@ -191,9 +191,17 @@ export function CcInput({ onScan, onCustom, loading }: Props) {
                       <span className="score-factor-name">{f.factor}</span>
                       <span
                         className="score-factor-weight"
-                        style={{ color: f.weight < 0 ? '#f87171' : '#4ade80' }}
+                        style={{ color: f.weight < 0 ? '#f87171' : f.weight >= 20 ? '#4ade80' : f.weight >= 10 ? '#fbbf24' : '#94a3b8' }}
                       >
                         {f.weight > 0 ? `+${f.weight}` : f.weight} pts
+                      </span>
+                      <div className="score-factor-bar-wrap">
+                        <div className="score-factor-bar" style={{
+                          width: f.weight <= 0 ? '0%' : `${Math.min(Math.abs(f.weight) / 30 * 100, 100)}%`,
+                          background: f.weight >= 20 ? '#4ade80' : f.weight >= 10 ? '#fbbf24' : '#94a3b8'
+                        }} />
+                      </div>
+                      <span className="score-factor-detail">{f.detail}</span>
                       </span>
                       <span className="score-factor-detail">{f.detail}</span>
                     </div>
