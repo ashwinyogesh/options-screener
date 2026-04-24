@@ -69,9 +69,11 @@ const SCORE_LEGEND = [
 ]
 
 const SCORE_TIERS = [
-  { range: '≥ 70', label: 'Strong',   color: '#4ade80', desc: 'All signals aligned and chain is liquid — high-quality, executable CSP setup' },
-  { range: '45–69', label: 'Moderate', color: '#facc15', desc: 'Most signals ok; some weakness in environment or execution quality' },
-  { range: '< 45',  label: 'Weak',     color: '#f87171', desc: 'Poor IV environment, execution risk, earnings overlap, or illiquid chain' },
+  { range: '≥ 75', label: 'Take it',       color: '#4ade80', desc: 'All signals aligned, rare',                  action: 'Take it, normal size' },
+  { range: '65–74', label: 'Take it',       color: '#86efac', desc: 'Solid trade with minor weakness',           action: 'Take it, understand the weakness' },
+  { range: '55–64', label: 'Directional',   color: '#facc15', desc: 'Mechanically fine, thesis-dependent',       action: 'Only if you have a directional view' },
+  { range: '45–54', label: 'Usually skip',  color: '#fb923c', desc: 'Something structural is off',               action: 'Usually skip' },
+  { range: '< 45',  label: 'Skip',          color: '#f87171', desc: 'Multiple red flags',                        action: 'Skip' },
 ]
 
 const DECISION_STEPS = [
@@ -184,11 +186,16 @@ export function CspInput({ onScan, onCustom, loading }: Props) {
       {showLegend && (
         <div className="score-legend">
           <div className="score-legend-tiers">
+            <div className="score-tier-table-header">
+              <span>Score</span>
+              <span>Interpretation</span>
+              <span>Action</span>
+            </div>
             {SCORE_TIERS.map(t => (
               <div key={t.range} className="score-tier">
-                <span className="score-tier-badge" style={{ color: t.color }}>{t.label}</span>
-                <span className="score-tier-range">{t.range}</span>
+                <span className="score-tier-range" style={{ color: t.color, fontWeight: 700 }}>{t.range}</span>
                 <span className="score-tier-desc">{t.desc}</span>
+                <span className="score-tier-action">{t.action}</span>
               </div>
             ))}
           </div>
