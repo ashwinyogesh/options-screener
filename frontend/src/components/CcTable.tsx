@@ -59,7 +59,7 @@ const COLUMNS = [
   }),
   col.accessor('iv_rank',       {
     header: () => (
-      <span className="col-tip col-scored" title="IV Rank: where today's implied volatility sits within its 252-day min–max range (0 = historically cheap, 100 = historically expensive)&#10;IV Percentile (P:): % of past days where IV was lower than today">
+      <span className="col-tip col-scored" title="IV Rank: where today's implied volatility sits within its 252-day min–max range (0 = historically cheap, 100 = historically expensive)">
         IV Rank ⓘ
       </span>
     ),
@@ -343,12 +343,9 @@ export function CcTable({ data }: Props) {
                   <td rowSpan={totalRows}>
                     {r.iv_rank == null
                       ? <span className="dim">N/A</span>
-                      : <>
-                          <span className={r.iv_rank >= 50 ? 'badge badge-green' : r.iv_rank >= 30 ? 'badge badge-yellow' : 'badge badge-red'}>
+                      : <span className={r.iv_rank >= 50 ? 'badge badge-green' : r.iv_rank >= 30 ? 'badge badge-yellow' : 'badge badge-red'}>
                             {r.iv_rank.toFixed(0)}
-                          </span><br />
-                          <span className="expiry-date">P:{r.iv_percentile != null ? r.iv_percentile.toFixed(0) : '—'}</span>
-                        </>
+                          </span>
                     }
                   </td>
                   <td rowSpan={totalRows}>

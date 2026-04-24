@@ -47,7 +47,7 @@ const COLUMNS = [
   }),
   col.accessor('iv_rank', {
     header: () => (
-      <span className="col-tip" title="IV Rank: where today's implied volatility sits within its 252-day min–max range (0 = historically cheap, 100 = historically expensive)&#10;IV Percentile (P:): % of past days where IV was lower than today">
+      <span className="col-tip" title="IV Rank: where today's implied volatility sits within its 252-day min–max range (0 = historically cheap, 100 = historically expensive)">
         IV Rank ⓘ
       </span>
     ),
@@ -327,8 +327,7 @@ export function DitmTable({ data }: Props) {
                           {/* For DITM: LOW IV rank is good — invert badge colors */}
                           <span className={r.iv_rank < 30 ? 'badge badge-green' : r.iv_rank < 50 ? 'badge badge-yellow' : 'badge badge-red'}>
                             {r.iv_rank.toFixed(0)}
-                          </span><br />
-                          <span className="expiry-date">P:{r.iv_percentile != null ? r.iv_percentile.toFixed(0) : '—'}</span>
+                          </span>
                         </>
                     }
                   </td>
@@ -444,7 +443,7 @@ export function DitmTable({ data }: Props) {
         })}
       </table>
       <div className="table-footer-note">
-        IV Rank/Percentile = HV-based proxy (252-day window). For DITM: <strong>low IV rank = cheaper options</strong> (inverted badge — green = low). P: = IV Percentile. Extrinsic% = time premium paid as % of stock price. Best strike per expiry highlighted.
+        IV Rank = HV-based proxy (252-day window). For DITM: <strong>low IV rank = cheaper options</strong> (inverted badge — green = low). Extrinsic% = time premium paid as % of stock price. Best strike per expiry highlighted.
       </div>
     </div>
   )
