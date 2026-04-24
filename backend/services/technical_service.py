@@ -673,6 +673,18 @@ def compute_cc_strike_score(
     score += p; bk['Δ'] = p
 
     # --- Distance vs Nearest Resistance Above Current Price (18 pts) ---
+    # gap_pct = (nearest_R - strike) / strike * 100
+    #   negative  → resistance below strike (ceiling between price and strike)
+    #   positive  → resistance above strike (cushion above the call)
+    #
+    # Scoring with distance decay:
+    #   gap_pct ≤ −20%           → 3 pts  (resistance far below strike, uncharted territory)
+    #   −20% < gap_pct ≤ −10%   → 3→18 linear  (partial ceiling, approaching strike)
+    #   −10% < gap_pct ≤ 0%     → 18 pts  (effective ceiling just below strike)
+    #                              +5 bonus if ALL resistances are ≤ strike (multi-layer ceiling)
+    #   0% < gap_pct ≤ 5%       → 18→10  (resistance just above — some cushion)
+    #   5% < gap_pct ≤ 10%      → 10→0
+    #   gap_pct > 10%            → 0 pts  (resistance too far above, irrelevant)
     p = 0.0
     _cc_dist_pct: float | None = None
     resistances = [r for r in [vol_resistance_1, vol_resistance_2, vol_resistance_3] if r is not None]
@@ -681,10 +693,15 @@ def compute_cc_strike_score(
         nearest_R = min(resistances_above_price)
         gap_pct = (nearest_R - strike) / strike * 100.0
         _cc_dist_pct = round(gap_pct, 2)
-        if gap_pct <= 0:
+        if gap_pct <= -20:
+            p = 3.0
+        elif gap_pct <= -10:
+            # linear 3 → 18 as gap_pct goes from −20 → −10
+            p = 3.0 + (gap_pct + 20.0) / 10.0 * 15.0
+        elif gap_pct <= 0:
             p = 18.0
             if all(r <= strike for r in resistances_above_price):
-                p += 5.0
+                p += 5.0  # multi-layer ceiling: all resistance between price and strike
         elif gap_pct <= 5:
             p = 18.0 - gap_pct / 5.0 * 8.0
         elif gap_pct <= 10:

@@ -38,10 +38,10 @@ const SCORE_LEGEND = [
     definition: 'The rate of change of the option\'s price per $1 move in the stock. For calls, delta ranges from 0 to +1. It approximates the market-implied probability the call expires in-the-money (stock gets called away).',
     why: 'Call delta approximates the probability of expiring in-the-money (stock being called away). +0.20–+0.25 ≈ 20–25% assignment chance — the sweet spot for premium vs. keeping your shares. Higher delta = more premium but higher chance of losing the position.',
     formula: 'Black-Scholes call delta:\n  d1 = (ln(S/K) + (r + 0.5σ²)T) / (σ√T)\n  call_delta = N(d1)\n  σ = yfinance IV; falls back to HV_30d if IV < 15%' },
-  { factor: 'Dist vs Resistance', weight: 18,  detail: 'Strike ≥ nearest resistance=18 · +5 if all R below strike · 0–5% below→10 · 5–10%→0 · >10%=0.',
+  { factor: 'Dist vs Resistance', weight: 18,  detail: 'R within 10% below strike=18 · 10–20% below→3–18 · >20% below=3 · 0–5% above→10 · >10%=0 · all R ≤ strike & within 10%=+5.',
     definition: 'The gap between the call strike and the nearest high-volume price level above current price. Volume-profile resistance is a price zone where heavy selling has historically occurred, acting as a natural ceiling on the stock\'s advance.',
-    why: 'A volume-profile resistance level between current price and your strike means the stock faces a ceiling before reaching assignment. If ALL resistance levels sit below your strike, the stock must punch through every one sequentially — that multi-layer ceiling earns a +5 bonus on top of the base 13 pts.',
-    formula: 'Volume Profile resistance — 6M (126-day) lookback for scoring (1Y shown in table for reference):\n  typical_price = (High + Low + Close) / 3\n  Bins 126d into 50 buckets; takes top-3 bins above current price\n  nearest_R = min(resistances above current price)\n  gap_pct = (nearest_R − strike) / strike × 100\n  gap ≤ 0 (strike above nearest R) = 13 pts\n  Bonus: all resistance levels ≤ strike → +5 (multi-layer ceiling below strike)' },
+    why: 'A resistance level close below your strike acts as an effective ceiling — the stock must break through it to reach you, and sellers typically defend those levels. If resistance is far below (>20%), it sat in the stock\'s old range and is irrelevant to a strike in uncharted territory. All resistance stacked below the strike within 10% earns a +5 multi-layer ceiling bonus.',
+    formula: 'Volume Profile resistance — 6M (126-day) lookback:\n  nearest_R = min(resistances above current price)\n  gap_pct = (nearest_R − strike) / strike × 100  (negative = R below strike)\n  gap ≤ −20%          → 3 pts  (uncharted territory)\n  −20% < gap ≤ −10%   → 3→18 linear\n  −10% < gap ≤ 0%     → 18 pts  (+5 if all R ≤ strike)\n  0% < gap ≤ 5%       → 18→10\n  5% < gap ≤ 10%      → 10→0\n  gap > 10%           → 0 pts' },
   { factor: 'Exp Move Buffer', weight: 20,  detail: '≥0.2σ above ceiling=20 · 0–0.2σ→13 · −0.1–0σ→5 · deeper inside=0.',
     definition: 'How far above the options-implied 1-standard-deviation expected move the strike sits, measured in units of that expected move. Positive = strike is beyond the statistical ceiling; negative = inside it.',
     why: 'Selling above the 1σ upward expected move gives >68% theoretical probability the stock stays below your strike. Every 0.1σ of additional buffer above the ceiling directly improves the statistical edge at that strike.',
@@ -201,8 +201,6 @@ export function CcInput({ onScan, onCustom, loading }: Props) {
                           background: f.weight >= 20 ? '#4ade80' : f.weight >= 10 ? '#fbbf24' : '#94a3b8'
                         }} />
                       </div>
-                      <span className="score-factor-detail">{f.detail}</span>
-                      </span>
                       <span className="score-factor-detail">{f.detail}</span>
                     </div>
                     {expandedFactor === f.factor && (f.definition || f.why || f.formula) && (
