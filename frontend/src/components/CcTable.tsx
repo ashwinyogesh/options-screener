@@ -33,7 +33,9 @@ const ENV_MAX: Record<string, number> = { IV: 25, IH: 20, SMA: 15, '52W': 15, RS
 function envSub(pts: Record<string, number>, key: string) {
   const v = pts[key], max = ENV_MAX[key]
   if (v == null || max == null) return null
-  return <span className="expiry-date">{Math.round(v)}/{max}</span>
+  const ratio = v / max
+  const color = ratio >= 0.75 ? '#4ade80' : ratio >= 0.4 ? '#fbbf24' : '#f87171'
+  return <span style={{ fontSize: '10px', color, display: 'block', lineHeight: 1.2 }}>{Math.round(v)}/{max}</span>
 }
 
 const COLUMNS = [
