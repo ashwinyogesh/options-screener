@@ -33,8 +33,8 @@ function parseEnvDetail(detail: string): Record<string, number> {
   }
   return out
 }
-const ENV_MAX: Record<string, number> = { IV: 25, IH: 20, SMA: 15, '52W': 15, RSI: 10, OI: 15 }
-const STRIKE_MAX: Record<string, number> = { 'Δ': 18, 'Sup': 13, 'EM': 15, 'OTM': 12, 'BA': 22, 'LQ': 20 }
+const ENV_MAX: Record<string, number> = { IV: 30, IH: 25, SMA: 15, '52W': 15, RSI: 10, OI: 5 }
+const STRIKE_MAX: Record<string, number> = { 'Δ': 18, 'Sup': 18, 'EM': 20, 'OTM': 12, 'BA': 27, 'LQ': 5 }
 function strikeSub(detail: string, key: string) {
   const pts = parseEnvDetail(detail)
   const v = pts[key], max = STRIKE_MAX[key]
@@ -324,7 +324,7 @@ export function CspTable({ data }: Props) {
                 className="sortable"
                 onClick={() => scoreCol?.toggleSorting(scoreSorted === 'asc')}
               >
-                <span className="col-tip" title="Final Score = 0.4×Env + 0.6×Strike&#10;&#10;ENV SCORE (100 pts)&#10;  IV Rank         25 pts  ≥20=linear, ≥80=full&#10;  IV / HV Ratio   20 pts  ≥1.7×=full&#10;  SMA Alignment   15 pts  Price>SMA50>SMA200&#10;  52W High Dist.  15 pts  ≤5% below=full&#10;  RSI(14)         10 pts  42–62=full&#10;  Chain Median OI 15 pts  ≥2000=full&#10;  Earnings in DTE −15 pts  penalty&#10;&#10;STRIKE SCORE (100 pts)&#10;  Delta           20 pts  peak −0.20→−0.25&#10;  Dist vs Support 20 pts  strike ≤ support=full&#10;  Exp Move Buffer 20 pts  ≥1.2σ outside=full&#10;  % OTM from Spot 15 pts  ≥15%=full&#10;  Bid-Ask Spread  15 pts  ≤1%=full&#10;  OI / Volume     10 pts  ≥1000=full">
+                <span className="col-tip" title="Final Score = 0.4×Env + 0.6×Strike&#10;&#10;ENV SCORE (100 pts)&#10;  IV Rank         30 pts  ≥20=linear, ≥80=full&#10;  IV / HV Ratio   25 pts  ≥1.7×=full&#10;  SMA Alignment   15 pts  Price>SMA50>SMA200&#10;  52W High Dist.  15 pts  ≤5% below=full&#10;  RSI(14)         10 pts  42–62=full&#10;  Chain Median OI  5 pts  circuit-breaker&#10;  Earnings in DTE −15 pts  penalty&#10;&#10;STRIKE SCORE (100 pts)&#10;  Delta           18 pts  peak −0.20→−0.25&#10;  Dist vs Support 18 pts  strike ≤ support=full&#10;  Exp Move Buffer 20 pts  ≥0.2σ outside=full&#10;  % OTM from Spot 12 pts  ≥15%=full&#10;  Bid-Ask Spread  27 pts  ≤1%=full&#10;  OI / Volume      5 pts  circuit-breaker">
                   Score ⓘ
                 </span>
                 {scoreSorted === 'asc' && ' ↑'}
