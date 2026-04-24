@@ -439,7 +439,7 @@ export function CspTable({ data }: Props) {
                   <span className="dte-num">{exp.dte}</span><br />
                   <span className="expiry-date">{exp.expiration}</span>
                   {exp.earnings_within_dte && <span className="earnings-warn"> ⚠</span>}
-                  <span className="oi-badge">{exp.chain_median_oi > 0 ? (exp.chain_median_oi >= 1000 ? (exp.chain_median_oi / 1000).toFixed(1) + 'k' : Math.round(exp.chain_median_oi)) : <span className="dim">—</span>}{envSubInline(parseEnvDetail(bestStrike.env_detail), 'OI')}</span>
+                  <div className="oi-badge">OI: {exp.chain_median_oi > 0 ? (exp.chain_median_oi >= 1000 ? (exp.chain_median_oi / 1000).toFixed(1) + 'k' : Math.round(exp.chain_median_oi)) : <span className="dim">—</span>}{envSubInline(parseEnvDetail(bestStrike.env_detail), 'OI')}</div>
                 </td>
                 {/* Expected Move cell — same rowSpan as DTE */}
                 <td className="em-cell" rowSpan={dteCellRows}>
