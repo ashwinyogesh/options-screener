@@ -22,7 +22,7 @@ const COLUMNS = [
   col.accessor('price',     { header: 'Price',    cell: () => null }),
   col.accessor('vol_resistance_1', {
     header: () => (
-      <span className="col-tip" title="Volume Profile resistance levels above current price (top-3 high-volume bins)">
+      <span className="col-tip" title="Volume Profile resistance levels above current price (top-3 high-volume bins, 252-day lookback)  ·  Upside ceiling for your long call  ·  ≥15% clear air = room to run  ·  NOT scored — use as context for entry/target">
         Vol Resistance ⓘ
       </span>
     ),

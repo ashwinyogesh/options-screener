@@ -24,15 +24,6 @@ function fmtAnn(n: number | null | undefined): string {
 const COLUMNS = [
   col.accessor('symbol',        { header: 'Symbol',     cell: () => null }),
   col.accessor('price',         { header: 'Price',      cell: () => null }),
-  col.accessor('vol_resistance_1', {
-    header: () => (
-      <span className="col-tip" title="Volume Profile resistance levels above current price (252-day / 1Y lookback)  ·  Top-3 high-volume bins above price">
-        Vol Resistance 1Y ⓘ
-      </span>
-    ),
-    cell: () => null,
-    enableSorting: false,
-  }),
   col.accessor('vol_resistance_126_1', {
     header: () => (
       <span className="col-tip col-scored" title="Volume Profile resistance levels above current price (126-day / 6M lookback)  ·  Same method using only the most recent 6 months  ·  Better reflects current institutional memory  ·  Used in scoring: Dist vs Resistance (13 pts)">
@@ -99,9 +90,6 @@ function groupResults(results: CcResult[]): GroupedCcResult[] {
         iv_percentile: r.iv_percentile,
         earnings_date: r.earnings_date,
         earnings_within_dte: false,
-        vol_resistance_1: r.vol_resistance_1,
-        vol_resistance_2: r.vol_resistance_2,
-        vol_resistance_3: r.vol_resistance_3,
         vol_resistance_126_1: r.vol_resistance_126_1,
         vol_resistance_126_2: r.vol_resistance_126_2,
         vol_resistance_126_3: r.vol_resistance_126_3,
@@ -305,23 +293,6 @@ export function CcTable({ data }: Props) {
                     <strong>{r.symbol}</strong>
                   </td>
                   <td rowSpan={totalRows}>{fmt2(r.price)}</td>
-                  <td rowSpan={totalRows}>
-                    {(() => {
-                      const levels = [r.vol_resistance_1, r.vol_resistance_2, r.vol_resistance_3]
-                        .filter((v): v is number => v != null)
-                      if (levels.length === 0) return <span className="dim">—</span>
-                      return (
-                        <span className="vol-support">
-                          {levels.map((lvl, i) => (
-                            <span key={i} className="vol-support-level">
-                              {fmt2(lvl)}
-                              <span className="vol-support-pct"> {((lvl - r.price) / r.price * 100).toFixed(1)}%</span>
-                            </span>
-                          ))}
-                        </span>
-                      )
-                    })()}
-                  </td>
                   <td rowSpan={totalRows}>
                     {(() => {
                       const levels = [r.vol_resistance_126_1, r.vol_resistance_126_2, r.vol_resistance_126_3]

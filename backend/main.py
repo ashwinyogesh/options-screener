@@ -7,7 +7,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers.screener import router as screener_router
+from routers.csp import router as csp_router
 from routers.ditm import router as ditm_router
 from routers.momentum import router as momentum_router
 from routers.cc import router as cc_router
@@ -39,7 +39,7 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-app.include_router(screener_router)
+app.include_router(csp_router)
 app.include_router(ditm_router)
 app.include_router(momentum_router)
 app.include_router(cc_router)

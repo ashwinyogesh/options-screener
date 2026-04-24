@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, field_validator
 
 from services.data_service import get_risk_free_rate
-from services.screener_service import ScreenerError, ScreenerResult, StrikeResult, process_symbol
+from services.csp_service import CspError, CspResult, CspStrikeResult, process_symbol
 from services.universe import MOMENTUM_UNIVERSE, UNIVERSE_SIZE
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ _CONCURRENCY = 5  # max parallel yfinance fetches
 # Request / Response schemas
 # ---------------------------------------------------------------------------
 
-class ScreenerRequest(BaseModel):
+class CspRequest(BaseModel):
     symbols: List[str]
     minDTE: int = 30
     maxDTE: int = 60
@@ -65,7 +65,7 @@ class ScreenerRequest(BaseModel):
         return v
 
 
-class StrikeResultOut(BaseModel):
+class CspStrikeResultOut(BaseModel):
     strike: float
     delta: float
     premium: float
@@ -82,7 +82,7 @@ class StrikeResultOut(BaseModel):
     iv_hv_ratio: Optional[float]
 
 
-class ScreenerResultOut(BaseModel):
+class CspResultOut(BaseModel):
     symbol: str
     price: float
     bb_upper: float
@@ -94,37 +94,34 @@ class ScreenerResultOut(BaseModel):
     iv_percentile: Optional[float]
     earnings_date: Optional[str]
     earnings_within_dte: bool
-    vol_support_1: Optional[float]
-    vol_support_2: Optional[float]
-    vol_support_3: Optional[float]
     vol_support_126_1: Optional[float]
     vol_support_126_2: Optional[float]
     vol_support_126_3: Optional[float]
     dte: int
     expiration: str
-    strikes: List[StrikeResultOut]
+    strikes: List[CspStrikeResultOut]
     best_csp_score: float
     using_hv_fallback: bool
     expected_move: float
     dist_from_52w_high_pct: float
 
 
-class ScreenerErrorOut(BaseModel):
+class CspErrorOut(BaseModel):
     symbol: str
     reason: str
 
 
-class ScreenerResponse(BaseModel):
-    results: List[ScreenerResultOut]
-    errors: List[ScreenerErrorOut]
+class CspResponse(BaseModel):
+    results: List[CspResultOut]
+    errors: List[CspErrorOut]
 
 
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
 
-@router.post("/csp", response_model=ScreenerResponse)
-async def run_csp_screener(request: ScreenerRequest) -> ScreenerResponse:
+@router.post("/csp", response_model=CspResponse)
+async def run_csp_screener(request: CspRequest) -> CspResponse:
     """
     Runs the CSP screener for the provided symbols.
     Symbols that fail are returned in the errors list; others still appear in results.
@@ -151,24 +148,24 @@ async def run_csp_screener(request: ScreenerRequest) -> ScreenerResponse:
 
     pairs = await asyncio.gather(*[process_one(s) for s in request.symbols])
 
-    results: list[ScreenerResultOut] = []
-    errors: list[ScreenerErrorOut] = []
+    results: list[CspResultOut] = []
+    errors: list[CspErrorOut] = []
     for result_list, error in pairs:
         for result in result_list:
             results.append(_to_out(result))
         if error is not None:
-            errors.append(ScreenerErrorOut(symbol=error.symbol, reason=error.reason))
+            errors.append(CspErrorOut(symbol=error.symbol, reason=error.reason))
 
     logger.info("Screener complete: %d results, %d errors", len(results), len(errors))
-    return ScreenerResponse(results=results, errors=errors)
+    return CspResponse(results=results, errors=errors)
 
 
-@router.get("/csp/scan", response_model=ScreenerResponse)
+@router.get("/csp/scan", response_model=CspResponse)
 async def run_csp_scan(
     top_n: int = Query(default=20, ge=1, le=50),
     min_dte: int = Query(default=30, ge=1, le=90),
     max_dte: int = Query(default=60, ge=1, le=90),
-) -> ScreenerResponse:
+) -> CspResponse:
     """
     Scans the full curated universe (~75 stocks) and returns the
     top_n results ranked by CSP composite score descending.
@@ -190,13 +187,13 @@ async def run_csp_scan(
 
     pairs = await asyncio.gather(*[process_one(s) for s in MOMENTUM_UNIVERSE])
 
-    results: list[ScreenerResultOut] = []
-    errors: list[ScreenerErrorOut] = []
+    results: list[CspResultOut] = []
+    errors: list[CspErrorOut] = []
     for result_list, error in pairs:
         for result in result_list:
             results.append(_to_out(result))
         if error is not None:
-            errors.append(ScreenerErrorOut(symbol=error.symbol, reason=error.reason))
+            errors.append(CspErrorOut(symbol=error.symbol, reason=error.reason))
 
     results.sort(key=lambda r: r.best_csp_score, reverse=True)
     top_results = results[:top_n]
@@ -205,11 +202,11 @@ async def run_csp_scan(
         "CSP scan complete: returning top %d of %d (errors=%d)",
         len(top_results), UNIVERSE_SIZE, len(errors),
     )
-    return ScreenerResponse(results=top_results, errors=errors)
+    return CspResponse(results=top_results, errors=errors)
 
 
-def _to_out(r: ScreenerResult) -> ScreenerResultOut:
-    return ScreenerResultOut(
+def _to_out(r: CspResult) -> CspResultOut:
+    return CspResultOut(
         symbol=r.symbol,
         price=r.price,
         bb_upper=r.bb_upper,
@@ -221,16 +218,13 @@ def _to_out(r: ScreenerResult) -> ScreenerResultOut:
         iv_percentile=r.iv_percentile,
         earnings_date=r.earnings_date,
         earnings_within_dte=r.earnings_within_dte,
-        vol_support_1=r.vol_support_1,
-        vol_support_2=r.vol_support_2,
-        vol_support_3=r.vol_support_3,
         vol_support_126_1=r.vol_support_126_1,
         vol_support_126_2=r.vol_support_126_2,
         vol_support_126_3=r.vol_support_126_3,
         dte=r.dte,
         expiration=r.expiration,
         strikes=[
-            StrikeResultOut(
+            CspStrikeResultOut(
                 strike=s.strike,
                 delta=s.delta,
                 premium=s.premium,

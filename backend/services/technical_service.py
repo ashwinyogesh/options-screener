@@ -451,7 +451,7 @@ def compute_env_score(
     return round(score, 1), detail
 
 
-def compute_strike_score(
+def compute_csp_strike_score(
     *,
     delta: float,
     current_price: float,

@@ -8,9 +8,9 @@ import {
 } from '@tanstack/react-table'
 import { useState, useMemo } from 'react'
 import type { ReactElement } from 'react'
-import type { ScreenerResult, GroupedScreenerResult } from '../types/screener'
+import type { CspResult, GroupedCspResult } from '../types/csp'
 
-const col = createColumnHelper<GroupedScreenerResult>()
+const col = createColumnHelper<GroupedCspResult>()
 
 function fmt2(n: number | null | undefined): string {
   if (n == null) return '—'
@@ -37,15 +37,6 @@ const COLUMNS = [
       </span>
     ),
     cell: () => null,
-  }),
-  col.accessor('vol_support_1', {
-    header: () => (
-      <span className="col-tip" title="Volume Profile Support (252-day / 1Y lookback)  ·  Top-3 high-volume price bins below current price  ·  Where the most shares traded historically">
-        Vol Support 1Y ⓘ
-      </span>
-    ),
-    cell: () => null,
-    enableSorting: false,
   }),
   col.accessor('vol_support_126_1', {
     header: () => (
@@ -101,8 +92,8 @@ const COLUMNS = [
   col.accessor('best_score', { header: () => null, cell: () => null }),
 ]
 
-function groupResults(results: ScreenerResult[]): GroupedScreenerResult[] {
-  const map = new Map<string, GroupedScreenerResult>()
+function groupResults(results: CspResult[]): GroupedCspResult[] {
+  const map = new Map<string, GroupedCspResult>()
   for (const r of results) {
     if (!map.has(r.symbol)) {
       map.set(r.symbol, {
@@ -117,9 +108,6 @@ function groupResults(results: ScreenerResult[]): GroupedScreenerResult[] {
         iv_percentile: r.iv_percentile,
         earnings_date: r.earnings_date,
         earnings_within_dte: false,
-        vol_support_1: r.vol_support_1,
-        vol_support_2: r.vol_support_2,
-        vol_support_3: r.vol_support_3,
         vol_support_126_1: r.vol_support_126_1,
         vol_support_126_2: r.vol_support_126_2,
         vol_support_126_3: r.vol_support_126_3,
@@ -153,10 +141,10 @@ function groupResults(results: ScreenerResult[]): GroupedScreenerResult[] {
 }
 
 interface Props {
-  data: ScreenerResult[]
+  data: CspResult[]
 }
 
-export function ScreenerTable({ data }: Props) {
+export function CspTable({ data }: Props) {
   const groupedData = useMemo(() => groupResults(data), [data])
   const [sorting, setSorting] = useState<SortingState>([{ id: 'best_score', desc: true }])
   const [strikeExpanded, setStrikeExpanded] = useState<Set<string>>(new Set())
@@ -331,23 +319,6 @@ export function ScreenerTable({ data }: Props) {
                       <span className="bb-middle">{fmt2(r.bb_middle)}</span>
                       <span className="bb-lower">{fmt2(r.bb_lower)}</span>
                     </span>
-                  </td>
-                  <td rowSpan={totalRows}>
-                    {(() => {
-                      const levels = [r.vol_support_1, r.vol_support_2, r.vol_support_3]
-                        .filter((v): v is number => v != null)
-                      if (levels.length === 0) return <span className="dim">—</span>
-                      return (
-                        <span className="vol-support">
-                          {levels.map((lvl, i) => (
-                            <span key={i} className="vol-support-level">
-                              {fmt2(lvl)}
-                              <span className="vol-support-pct"> {((lvl - r.price) / r.price * 100).toFixed(1)}%</span>
-                            </span>
-                          ))}
-                        </span>
-                      )
-                    })()}
                   </td>
                   <td rowSpan={totalRows}>
                     {(() => {

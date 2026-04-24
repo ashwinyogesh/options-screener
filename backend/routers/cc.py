@@ -89,9 +89,6 @@ class CcResultOut(BaseModel):
     iv_percentile: Optional[float]
     earnings_date: Optional[str]
     earnings_within_dte: bool
-    vol_resistance_1: Optional[float]
-    vol_resistance_2: Optional[float]
-    vol_resistance_3: Optional[float]
     vol_resistance_126_1: Optional[float]
     vol_resistance_126_2: Optional[float]
     vol_resistance_126_3: Optional[float]
@@ -204,9 +201,6 @@ def _to_out(r: CcResult) -> CcResultOut:
         iv_percentile=r.iv_percentile,
         earnings_date=r.earnings_date,
         earnings_within_dte=r.earnings_within_dte,
-        vol_resistance_1=r.vol_resistance_1,
-        vol_resistance_2=r.vol_resistance_2,
-        vol_resistance_3=r.vol_resistance_3,
         vol_resistance_126_1=r.vol_resistance_126_1,
         vol_resistance_126_2=r.vol_resistance_126_2,
         vol_resistance_126_3=r.vol_resistance_126_3,

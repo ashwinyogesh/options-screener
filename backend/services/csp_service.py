@@ -21,7 +21,7 @@ from services.options_service import (
 from services.technical_service import (
     compute_bollinger,
     compute_env_score,
-    compute_strike_score,
+    compute_csp_strike_score,
     compute_csp_final_score,
     compute_iv_rank_percentile,
     compute_price_vs_52w_high,
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class StrikeResult:
+class CspStrikeResult:
     strike: float
     delta: float
     premium: float
@@ -53,7 +53,7 @@ class StrikeResult:
 
 
 @dataclass
-class ScreenerResult:
+class CspResult:
     symbol: str
     price: float
     bb_upper: float
@@ -65,15 +65,12 @@ class ScreenerResult:
     iv_percentile: Optional[float]  # % of days HV < today's HV
     earnings_date: Optional[str]
     earnings_within_dte: bool
-    vol_support_1: Optional[float]
-    vol_support_2: Optional[float]
-    vol_support_3: Optional[float]
     vol_support_126_1: Optional[float]
     vol_support_126_2: Optional[float]
     vol_support_126_3: Optional[float]
     dte: int
     expiration: str
-    strikes: list[StrikeResult] = field(default_factory=list)
+    strikes: list[CspStrikeResult] = field(default_factory=list)
     best_csp_score: float = 0.0
     using_hv_fallback: bool = False  # True when any strike in this row used hv_sigma
     expected_move: float = 0.0       # price × hv_sigma × √(dte/365)
@@ -81,7 +78,7 @@ class ScreenerResult:
 
 
 @dataclass
-class ScreenerError:
+class CspError:
     symbol: str
     reason: str
 
@@ -91,7 +88,7 @@ def process_symbol(
     min_dte: int = 30,
     max_dte: int = 60,
     rf_rate: float = 0.045,
-) -> tuple[list[ScreenerResult], Optional[ScreenerError]]:
+) -> tuple[list[CspResult], Optional[CspError]]:
     """
     Processes a single symbol across all valid expirations in [min_dte, max_dte].
     Returns (list_of_results, None) on success or ([], error) on failure.
@@ -111,7 +108,6 @@ def process_symbol(
         iv_rank_raw, iv_pct_raw = compute_iv_rank_percentile(df)
         iv_rank: Optional[float] = None if math.isnan(iv_rank_raw) else iv_rank_raw
         iv_percentile: Optional[float] = None if math.isnan(iv_pct_raw) else iv_pct_raw
-        vol_supports = compute_volume_support(df)
         vol_supports_126 = compute_volume_support(df, lookback=126)
 
         # Pre-compute HV sigma fallback once
@@ -137,7 +133,7 @@ def process_symbol(
         # 3. All expirations in range
         all_exps = get_all_expirations_data(sym, min_dte, max_dte)
 
-        results: list[ScreenerResult] = []
+        results: list[CspResult] = []
         for opts in all_exps:
             try:
                 dte = opts["dte"]
@@ -213,7 +209,7 @@ def process_symbol(
                 if not in_range and candidates:
                     in_range = sorted(candidates, key=lambda x: abs(x[1] - _IDEAL_DELTA))[:5]
 
-                strike_results: list[StrikeResult] = []
+                strike_results: list[CspStrikeResult] = []
                 for sp, d, prem, used_hv, stale_prem, iv_hv_ratio_val, sig_used, oi_val, vol_val in in_range:
                     try:
                         spread_raw = get_bid_ask_spread_pct(puts_df, sp)
@@ -233,7 +229,7 @@ def process_symbol(
                             chain_median_oi=chain_median_oi,
                             earnings_within_dte=earnings_within_dte,
                         )
-                        strike_s, strike_detail = compute_strike_score(
+                        strike_s, strike_detail = compute_csp_strike_score(
                             delta=d,
                             current_price=current_price,
                             strike=sp,
@@ -248,7 +244,7 @@ def process_symbol(
                             volume=vol_val,
                         )
                         final_s = compute_csp_final_score(env_s_strike, strike_s)
-                        strike_results.append(StrikeResult(
+                        strike_results.append(CspStrikeResult(
                             strike=sp,
                             delta=d,
                             premium=round(prem, 4),
@@ -274,7 +270,7 @@ def process_symbol(
                 strike_results[best_idx].is_best = True
                 best_score_val = strike_results[best_idx].csp_score
 
-                results.append(ScreenerResult(
+                results.append(CspResult(
                     symbol=sym,
                     price=round(current_price, 4),
                     bb_upper=bb["bb_upper"],
@@ -286,9 +282,6 @@ def process_symbol(
                     iv_percentile=iv_percentile,
                     earnings_date=earnings_date,
                     earnings_within_dte=earnings_within_dte,
-                    vol_support_1=vol_supports[0] if len(vol_supports) > 0 else None,
-                    vol_support_2=vol_supports[1] if len(vol_supports) > 1 else None,
-                    vol_support_3=vol_supports[2] if len(vol_supports) > 2 else None,
                     vol_support_126_1=vol_supports_126[0] if len(vol_supports_126) > 0 else None,
                     vol_support_126_2=vol_supports_126[1] if len(vol_supports_126) > 1 else None,
                     vol_support_126_3=vol_supports_126[2] if len(vol_supports_126) > 2 else None,
@@ -305,9 +298,9 @@ def process_symbol(
                 continue
 
         if not results:
-            return [], ScreenerError(symbol=sym, reason="No valid expirations processed")
+            return [], CspError(symbol=sym, reason="No valid expirations processed")
         return results, None
 
     except Exception as exc:
         logger.warning("Failed to process '%s': %s", sym, exc)
-        return [], ScreenerError(symbol=sym, reason=str(exc))
+        return [], CspError(symbol=sym, reason=str(exc))

@@ -1,12 +1,12 @@
-import type { FilterState } from '../types/screener'
+import type { CspFilterState } from '../types/csp'
 
 interface Props {
-  filters: FilterState
-  onChange: (f: FilterState) => void
+  filters: CspFilterState
+  onChange: (f: CspFilterState) => void
 }
 
-export function FilterPanel({ filters, onChange }: Props) {
-  function set<K extends keyof FilterState>(key: K, value: FilterState[K]) {
+export function CspFilterPanel({ filters, onChange }: Props) {
+  function set<K extends keyof CspFilterState>(key: K, value: CspFilterState[K]) {
     onChange({ ...filters, [key]: value })
   }
 

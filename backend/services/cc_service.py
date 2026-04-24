@@ -60,9 +60,6 @@ class CcResult:
     iv_percentile: Optional[float]
     earnings_date: Optional[str]
     earnings_within_dte: bool
-    vol_resistance_1: Optional[float]
-    vol_resistance_2: Optional[float]
-    vol_resistance_3: Optional[float]
     vol_resistance_126_1: Optional[float]
     vol_resistance_126_2: Optional[float]
     vol_resistance_126_3: Optional[float]
@@ -105,7 +102,6 @@ def process_cc_symbol(
         iv_rank_raw, iv_pct_raw = compute_iv_rank_percentile(df)
         iv_rank: Optional[float] = None if math.isnan(iv_rank_raw) else iv_rank_raw
         iv_percentile: Optional[float] = None if math.isnan(iv_pct_raw) else iv_pct_raw
-        vol_resistances = compute_volume_resistance(df)
         vol_resistances_126 = compute_volume_resistance(df, lookback=126)
 
         # Pre-compute HV sigma fallback once
@@ -272,9 +268,6 @@ def process_cc_symbol(
                     iv_percentile=iv_percentile,
                     earnings_date=earnings_date,
                     earnings_within_dte=earnings_within_dte,
-                    vol_resistance_1=vol_resistances[0] if len(vol_resistances) > 0 else None,
-                    vol_resistance_2=vol_resistances[1] if len(vol_resistances) > 1 else None,
-                    vol_resistance_3=vol_resistances[2] if len(vol_resistances) > 2 else None,
                     vol_resistance_126_1=vol_resistances_126[0] if len(vol_resistances_126) > 0 else None,
                     vol_resistance_126_2=vol_resistances_126[1] if len(vol_resistances_126) > 1 else None,
                     vol_resistance_126_3=vol_resistances_126[2] if len(vol_resistances_126) > 2 else None,

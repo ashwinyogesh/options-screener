@@ -24,9 +24,6 @@ export interface CcResult {
   iv_percentile: number | null
   earnings_date: string | null
   earnings_within_dte: boolean
-  vol_resistance_1: number | null
-  vol_resistance_2: number | null
-  vol_resistance_3: number | null
   vol_resistance_126_1: number | null
   vol_resistance_126_2: number | null
   vol_resistance_126_3: number | null
@@ -58,9 +55,6 @@ export interface GroupedCcResult {
   iv_percentile: number | null
   earnings_date: string | null
   earnings_within_dte: boolean
-  vol_resistance_1: number | null
-  vol_resistance_2: number | null
-  vol_resistance_3: number | null
   vol_resistance_126_1: number | null
   vol_resistance_126_2: number | null
   vol_resistance_126_3: number | null

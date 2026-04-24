@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { CspInput } from './components/CspInput'
-import { FilterPanel } from './components/FilterPanel'
-import { ScreenerTable } from './components/ScreenerTable'
+import { CspFilterPanel } from './components/CspFilterPanel'
+import { CspTable } from './components/CspTable'
 import { CcInput } from './components/CcInput'
 import { CcTable } from './components/CcTable'
 import { CcFilterPanel } from './components/CcFilterPanel'
@@ -11,16 +11,16 @@ import { DitmFilterPanel } from './components/DitmFilterPanel'
 import { MomentumFilterPanel } from './components/MomentumFilterPanel'
 import { MomentumTable } from './components/MomentumTable'
 import { MomentumInput } from './components/MomentumInput'
-import { useScreener } from './hooks/useScreener'
+import { useCsp } from './hooks/useCsp'
 import { useCc } from './hooks/useCc'
 import { useDitm } from './hooks/useDitm'
 import { useMomentum } from './hooks/useMomentum'
-import type { FilterState, ScreenerResult } from './types/screener'
+import type { CspFilterState, CspResult } from './types/csp'
 import type { CcFilterState, CcResult } from './types/cc'
 import type { DitmFilterState, DitmResult } from './types/ditm'
 import type { MomentumFilterState, MomentumResult } from './types/momentum'
 
-const DEFAULT_FILTERS: FilterState = {
+const DEFAULT_CSP_FILTERS: CspFilterState = {
   smaRatioBullishOnly: false,
   maxSpreadPct: 0,
   excludeEarningsWithinDte: false,
@@ -64,7 +64,7 @@ function applyMomentumFilters(results: MomentumResult[], filters: MomentumFilter
   })
 }
 
-function applyFilters(results: ScreenerResult[], filters: FilterState): ScreenerResult[] {
+function applyCspFilters(results: CspResult[], filters: CspFilterState): CspResult[] {
   return results.filter(r => {
     const best = r.strikes.find(s => s.is_best) ?? r.strikes[0]
     if (filters.smaRatioBullishOnly && r.sma_ratio <= 1.0) return false
@@ -103,9 +103,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'csp' | 'cc' | 'ditm' | 'momentum'>('csp')
 
   // CSP state
-  const { results: cspResults, errors: cspErrors, loading: cspLoading, symbolCount: cspSymbolCount, isScanMode: cspIsScanMode, errorMessage: cspErrorMessage, run: runCsp, scan: scanCsp } = useScreener()
-  const [cspFilters, setCspFilters] = useState<FilterState>(DEFAULT_FILTERS)
-  const filteredCsp = useMemo(() => applyFilters(cspResults, cspFilters), [cspResults, cspFilters])
+  const { results: cspResults, errors: cspErrors, loading: cspLoading, symbolCount: cspSymbolCount, isScanMode: cspIsScanMode, errorMessage: cspErrorMessage, run: runCsp, scan: scanCsp } = useCsp()
+  const [cspFilters, setCspFilters] = useState<CspFilterState>(DEFAULT_CSP_FILTERS)
+  const filteredCsp = useMemo(() => applyCspFilters(cspResults, cspFilters), [cspResults, cspFilters])
 
   // CC state
   const { results: ccResults, errors: ccErrors, loading: ccLoading, symbolCount: ccSymbolCount, isScanMode: ccIsScanMode, errorMessage: ccErrorMessage, run: runCc, scan: scanCc } = useCc()
@@ -163,7 +163,7 @@ export default function App() {
               loading={cspLoading}
             />
             {cspResults.length > 0 && (
-              <FilterPanel filters={cspFilters} onChange={setCspFilters} />
+              <CspFilterPanel filters={cspFilters} onChange={setCspFilters} />
             )}
             {cspLoading && (
               <div className="loading-state">
@@ -190,7 +190,7 @@ export default function App() {
                 {filteredCsp.length < cspResults.length && ' (filters active)'}
               </div>
             )}
-            <ScreenerTable data={filteredCsp} />
+            <CspTable data={filteredCsp} />
             {!cspLoading && cspResults.length === 0 && !cspErrorMessage && (
               <div className="empty-state">
                 <p>Click <strong>⚡ Scan Now</strong> to automatically find the top CSP opportunities, or switch to Custom Symbols.</p>

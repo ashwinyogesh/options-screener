@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import type { ScreenerRequest, ScreenerResponse, ScreenerResult, ScreenerError } from '../types/screener'
+import type { CspRequest, CspResponse, CspResult, CspError } from '../types/csp'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 
-interface UseScreenerReturn {
-  results: ScreenerResult[]
-  errors: ScreenerError[]
+interface UseCspReturn {
+  results: CspResult[]
+  errors: CspError[]
   loading: boolean
   symbolCount: number
   isScanMode: boolean
@@ -14,15 +14,15 @@ interface UseScreenerReturn {
   scan: (topN?: number, minDTE?: number, maxDTE?: number) => Promise<void>
 }
 
-export function useScreener(): UseScreenerReturn {
-  const [results, setResults] = useState<ScreenerResult[]>([])
-  const [errors, setErrors] = useState<ScreenerError[]>([])
+export function useCsp(): UseCspReturn {
+  const [results, setResults] = useState<CspResult[]>([])
+  const [errors, setErrors] = useState<CspError[]>([])
   const [loading, setLoading] = useState(false)
   const [symbolCount, setSymbolCount] = useState(0)
   const [isScanMode, setIsScanMode] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  async function run(req: ScreenerRequest) {
+  async function run(req: CspRequest) {
     setLoading(true)
     setIsScanMode(false)
     setErrorMessage(null)
@@ -53,7 +53,7 @@ export function useScreener(): UseScreenerReturn {
         return
       }
 
-      const data: ScreenerResponse = await response.json()
+      const data: CspResponse = await response.json()
       setResults(data.results)
       setErrors(data.errors)
     } catch (err: unknown) {
@@ -88,7 +88,7 @@ export function useScreener(): UseScreenerReturn {
         return
       }
 
-      const data: ScreenerResponse = await response.json()
+      const data: CspResponse = await response.json()
       setResults(data.results)
       setErrors(data.errors)
     } catch (err: unknown) {
