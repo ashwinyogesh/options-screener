@@ -53,6 +53,13 @@ function envSub(pts: Record<string, number>, key: string) {
   const color = ratio >= 0.70 ? '#4ade80' : ratio >= 0.45 ? '#fbbf24' : '#f87171'
   return <span style={{ fontSize: '10px', color, display: 'block', lineHeight: 1.2 }}>{Math.round(v)}/{max}</span>
 }
+function envSubInline(pts: Record<string, number>, key: string) {
+  const v = pts[key], max = ENV_MAX[key]
+  if (v == null || max == null) return null
+  const ratio = v / max
+  const color = ratio >= 0.70 ? '#4ade80' : ratio >= 0.45 ? '#fbbf24' : '#f87171'
+  return <span style={{ fontSize: '10px', color, marginLeft: 3 }}>{Math.round(v)}/{max}</span>
+}
 function envColor(pts: Record<string, number>, key: string): string {
   const v = pts[key], max = ENV_MAX[key]
   if (v == null || max == null) return ''
@@ -424,7 +431,7 @@ export function CcTable({ data }: Props) {
                   <span className="dte-num">{exp.dte}</span><br />
                   <span className="expiry-date">{exp.expiration}</span>
                   {exp.earnings_within_dte && <span className="earnings-warn"> ⚠</span>}
-                  <span className="expiry-date" style={{ display: 'block' }}>{exp.chain_median_oi > 0 ? 'OI: ' + (exp.chain_median_oi >= 1000 ? (exp.chain_median_oi / 1000).toFixed(1) + 'k' : Math.round(exp.chain_median_oi)) : <span className="dim">—</span>}{envSub(parseEnvDetail(bestStrike.env_detail), 'OI')}</span>
+                  <span className="expiry-date" style={{ display: 'block' }}>{exp.chain_median_oi > 0 ? <>{(exp.chain_median_oi >= 1000 ? (exp.chain_median_oi / 1000).toFixed(1) + 'k' : Math.round(exp.chain_median_oi))}{envSubInline(parseEnvDetail(bestStrike.env_detail), 'OI')}</> : <span className="dim">—</span>}</span>
                 </td>
                 <td className="em-cell" rowSpan={dteCellRows}>
                   {exp.expected_move > 0
