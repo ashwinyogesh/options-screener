@@ -58,18 +58,8 @@ The LLM gets **rich, real numbers**, not vague descriptions. This is the single 
 | `revenue_history` | `t.financials` | LLM must anchor base case to actual CAGR |
 | `revenue_cagr_5y` | computed | Sanity check on growth assumption |
 | `operating_margin_ttm` | `info.operatingMargins` | Sanity check on margin |
-| `operating_margin_history` (3y) | `t.financials` | Trajectory > snapshot. Detects expanding vs compressing margin |
-| `gross_margin_ttm` | `info.grossMargins` | Stable indicator of unit economics; separates investment-mode from structural-low-margin |
-| `rnd_pct_revenue` | `t.financials` | Distinguishes investment spend from structural cost |
-| `ebitda_ttm` | `info.ebitda` | Used by multiples cross-check (§10) |
 | `tax_rate` | `Tax Provision / Pretax Income` | Effective rate; falls back to 21% |
-| `buyback_yield` (gross) | `balance_sheet` share count | 5y avg share-count change |
-| `sbc_pct_revenue` | `t.cashflow` | SBC as % of revenue (silent dilution) |
-| `sbc_dilution_yield` | `SBC / market_cap` | % dilution if all SBC issued at market |
-| `net_buyback_yield` | gross − sbc_dilution | **What the share count actually does net.** Used in the DCF math, not the gross. |
-| `roic` | NOPAT / (debt + book_equity − cash) | Capital efficiency; feeds franchise warning |
-| `forward_pe_market` | `info.forwardPE` | For multiples cross-check |
-| `ev_ebitda_market` | `info.enterpriseToEbitda` | For multiples cross-check |
+| `buyback_yield` | `balance_sheet` share count | Captures hidden EPS growth (see §6) |
 | `risk_free_rate` | `^TNX` 10y Treasury | Live, not hardcoded |
 | `wacc_buildup` | computed (CAPM) | Auditable, not LLM guesswork |
 
@@ -134,47 +124,30 @@ A single FV is overconfident. Real uncertainty lives in the *spread*. The 3 scen
 
 ---
 
-## 6. Net buyback yield — the silent value driver
+## 6. Buyback yield — the silent value driver
 
 Most retail DCFs miss this. Mature compounders (AAPL, GOOG, META) shrink share count 2–4% annually. Ignoring this **understates per-share fair value by 10–20%** over 5 years.
 
-But **gross buyback yield is misleading without SBC**. SaaS companies often "buy back" 2% while issuing 4% in stock-based compensation. The gross number tells you they're disciplined; the net number tells you they're actually diluting.
+### How it's computed
 
-### Two numbers, one used in the math
-
-```
-gross_buyback_yield = -annual_change_in_share_count   (from balance sheet)
-sbc_dilution_yield  = SBC / market_cap                 (from cash flow stmt)
-net_buyback_yield   = gross - sbc_dilution             # what we actually use
-```
-
-Gross is from `t.balance_sheet` row "Ordinary Shares Number":
+From `t.balance_sheet` row "Ordinary Shares Number":
 
 $$\text{annual\_change} = \left(\frac{\text{shares}_{last}}{\text{shares}_{first}}\right)^{1/n} - 1$$
 
-SBC dilution is `Stock Based Compensation / market_cap` from `t.cashflow`. Both are surfaced to the LLM and shown in the UI; **only `net_buyback_yield` enters the DCF math**.
+$$\text{buyback\_yield} = -\text{annual\_change}$$
 
-Clipped: gross to ±8%, net to ±10%.
+Positive = shares declining (buybacks). Negative = dilution. Clipped to ±8%.
 
 ### How it enters the math
 
 Effective share count decays each year:
 
 ```
-effective_shares = shares_out × average_of[(1 - net_bb)^t for t in 1..5]
+effective_shares = shares_out × average_of[(1 - bb)^t for t in 1..5]
 fair_value_per_share = equity_value / effective_shares
 ```
 
-### Calibration examples (from live AAPL grounding)
-
-| Metric | AAPL value |
-|---|---|
-| Gross buyback yield | 2.51% |
-| SBC % of revenue | 2.95% |
-| SBC dilution yield (vs mkt cap) | 0.32% |
-| **Net buyback yield (used in math)** | **2.19%** |
-
-For a SaaS name with SBC at 15% of revenue, the net buyback yield can flip from positive to negative — changing FV materially. This was the §6 fix that came out of the Apr 2026 design review.
+Deliberate simplification — a fully accurate model would discount buyback FCF outflow inside FCFF. Doing the share-count adjustment instead is **simpler and almost exactly equivalent** for steady programs, and avoids double-counting capital allocation.
 
 ---
 
@@ -291,55 +264,6 @@ Keep `key_assumption_to_monitor` from the LLM — that's genuinely qualitative.
 
 ---
 
-## 10b. Multiples cross-check — reframing "overvalued"
-
-When DCF says $115 and the market says $271, "overvalued" is the lazy answer. The honest one is **"my model implies a 12× P/E exit; market is at 28×. The disagreement is on growth durability, not valuation."**
-
-After the base scenario is computed, the backend derives:
-
-- **Implied forward P/E** = base FV / projected Y1 EPS
-- **Implied EV/EBITDA** = base enterprise value / TTM EBITDA
-
-These are compared to `info.forwardPE` and `info.enterpriseToEbitda`. Average delta drives a flag:
-
-| `flag` | Trigger | What it means |
-|---|---|---|
-| `aligned` | \|Δ\| ≤ 20% | Model multiples within ~20% of market — valuation conclusion is robust |
-| `model_conservative` | Δ > +20% | Market pays richer multiples than your model implies; likely sources: terminal growth too low, margin expansion not modeled, growth runway underestimated |
-| `model_aggressive` | Δ < −20% | Market pays lower multiples than your model implies; market sees risk you're missing, or assumptions too generous |
-| `insufficient_data` | no fwdPE/EV-EBITDA | Cross-check skipped |
-
-The diagnostic is rendered as a colored panel above the scenario cards. **No LLM call** — pure deterministic arithmetic.
-
-### Why this matters
-
-Without this lens, every result looks like "the model says X, market says Y, who's right?" With it, you immediately see *where* the disagreement lives. If implied P/E is 12× and market is 28×, the question becomes "can growth/margin justify 28×?" — a thesis you can interrogate, not a vibe.
-
----
-
-## 10c. ROIC vs WACC franchise flag
-
-Gordon-growth terminal value can systematically **understate** the value of high-ROIC franchises. If a company earns 35% ROIC on incremental capital and your model assumes only 3% terminal growth (= reinvestment at WACC by construction), you've quietly modeled the franchise into mediocrity.
-
-### Trigger
-
-```
-if ROIC > 1.5 × WACC AND base_terminal_growth < 3%:
-    show yellow "franchise warning" banner
-```
-
-The banner shows ROIC, WACC, the spread, and recommends sensitivity testing terminal growth at 3.5–4.5%. **It does not change the math** — it surfaces a known limitation of the Gordon-growth method for high-ROIC names so the user can apply judgment.
-
-### ROIC computation
-
-$$\text{ROIC} = \frac{\text{NOPAT}}{\text{Total Debt} + \text{Book Equity} - \text{Cash}}$$
-
-Using **book equity**, not market cap. Market cap inflates the denominator on premium-multiple names and crushes the metric. Book equity from `t.balance_sheet` row "Stockholders Equity" (with fallbacks).
-
-Side effect: aggressive-buyback names (AAPL) report extreme ROIC (>100%) because book equity has been returned to shareholders. This is **technically correct** — they're earning very high returns on a small remaining capital base — and is the right signal for franchise warning purposes.
-
----
-
 ## 11. Why a single LLM call
 
 A multi-call agentic flow (research → critique → revise) was rejected:
@@ -432,9 +356,8 @@ Percentile stability across 1k/5k/20k trials: ±$1–2. Verdict internally consi
 ## 18. Open issues / future work
 
 1. **Verdict determinism** (§10) — highest-leverage upgrade.
-2. **Conditional 10-year forecast for high-growth names** — two-phase fade (Y1–Y5 fast, Y6–Y10 normalization). Triggered by `revenue_cagr_5y > 20%` or LLM Optimistic > 20%. Reduces terminal-value dominance for genuine compounders.
-3. **`operating_margin_y5` schema field** — explicit margin expansion input, linearly interpolated Y1→Y5. The base/bull/bear spread on this single input would be the most informative number for growth names.
-4. **Deferred revenue YoY signal** in grounding — simple leading indicator for SaaS/subscription names.
+2. **Multiples cross-check** — compare base FV's implied forward P/E vs `info.forwardPE`; flag if delta > 30%.
+3. **Quality scorecard** — ROIC vs WACC spread, reinvestment efficiency, moat score from LLM. Feeds into confidence.
+4. **Consensus delta** — LLM Y1 revenue growth vs `info.revenueGrowth` analyst expectation.
 5. **Cost of debt from real bond yields** — replace 5.5% default with issuer credit spread.
-6. **Cyclical normalization** — anchor base margin to mid-cycle, not TTM.
-7. **Sector multiple comps** for the multiples cross-check (§10b) — currently compares to per-name `info.forwardPE`; adding a sector median would catch "the whole sector trades rich" cases.
+6. **Cyclical normalization** — for cyclicals, anchor base margin to mid-cycle, not TTM.

@@ -26,21 +26,11 @@ export interface DcfGrounding {
   revenue_history: Array<{ year: number; revenue: number }>
   revenue_cagr_5y: number | null
   operating_margin_ttm: number | null
-  operating_margin_history: Array<{ year: number; margin: number }>
-  gross_margin_ttm: number | null
-  rnd_pct_revenue: number | null
-  ebitda_ttm: number | null
   tax_rate: number | null
   sector: string | null
   industry: string | null
   buyback_yield: number | null
-  sbc_pct_revenue: number | null
-  sbc_dilution_yield: number | null
-  net_buyback_yield: number | null
   share_history: Array<{ year: number; shares: number }>
-  roic: number | null
-  forward_pe_market: number | null
-  ev_ebitda_market: number | null
   wacc_buildup: WaccBuildup
   as_of: string
 }
@@ -111,28 +101,6 @@ export interface Verdict {
   margin_of_safety_pct: number
 }
 
-export type MultiplesFlag = 'aligned' | 'model_conservative' | 'model_aggressive' | 'insufficient_data'
-
-export interface MultiplesCheck {
-  implied_forward_pe: number | null
-  market_forward_pe: number | null
-  pe_delta_pct: number | null
-  implied_ev_ebitda: number | null
-  market_ev_ebitda: number | null
-  ev_ebitda_delta_pct: number | null
-  diagnostic: string
-  flag: MultiplesFlag
-}
-
-export interface RoicFlag {
-  roic: number | null
-  wacc: number
-  spread: number | null
-  base_terminal_growth: number
-  triggered: boolean
-  message: string
-}
-
 export interface Distribution {
   shape: 'normal' | 'triangular' | 'uniform'
   params: Record<string, number>
@@ -148,8 +116,6 @@ export interface DcfData {
   reverse_dcf: ReverseDcfResult
   sensitivity: SensitivityMatrix
   verdict: Verdict
-  multiples_check: MultiplesCheck
-  roic_flag: RoicFlag
   risks: string[]
   key_drivers: string[]
   model: string
