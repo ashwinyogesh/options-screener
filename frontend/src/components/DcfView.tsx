@@ -11,6 +11,8 @@ import type {
   Verdict,
   WaccBuildup,
   Recommendation,
+  MultiplesCheck,
+  RoicFlag,
 } from '../types/dcf'
 
 // ----------------------------------------------------------------- Utils ---
@@ -185,6 +187,68 @@ function ReverseDcfPanel({ r }: { r: ReverseDcfResult }) {
       </div>
       <div style={{ fontSize: 13, color: '#cbd5e1', marginTop: 10, lineHeight: 1.5 }}>
         {r.interpretation}
+      </div>
+    </div>
+  )
+}
+
+// ====================================================== MULTIPLES CHECK ==
+function MultiplesPanel({ m }: { m: MultiplesCheck }) {
+  const flagColors: Record<string, { bg: string; border: string; text: string; label: string }> = {
+    aligned: { bg: '#064e3b', border: '#10b981', text: '#a7f3d0', label: 'ALIGNED' },
+    model_conservative: { bg: '#78350f', border: '#f59e0b', text: '#fde68a', label: 'MODEL CONSERVATIVE' },
+    model_aggressive: { bg: '#7f1d1d', border: '#ef4444', text: '#fecaca', label: 'MODEL AGGRESSIVE' },
+    insufficient_data: { bg: '#1f2937', border: '#475569', text: '#94a3b8', label: 'NO MARKET DATA' },
+  }
+  const c = flagColors[m.flag]
+  const cell = (label: string, implied: number | null, market: number | null, delta: number | null) => (
+    <div style={{ background: '#0f172a', borderRadius: 6, padding: '8px 10px', border: '1px solid #334155' }}>
+      <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4 }}>
+        <span style={{ fontSize: 14, color: '#f8fafc', fontWeight: 600 }}>{implied == null ? '—' : `${implied.toFixed(1)}×`}</span>
+        <span style={{ fontSize: 11, color: '#64748b' }}>vs market</span>
+        <span style={{ fontSize: 14, color: '#cbd5e1' }}>{market == null ? '—' : `${market.toFixed(1)}×`}</span>
+        {delta != null && (
+          <span style={{ fontSize: 11, color: delta > 0 ? '#fde68a' : delta < 0 ? '#fecaca' : '#94a3b8', marginLeft: 'auto' }}>
+            {delta > 0 ? '+' : ''}{fmtPct(delta)}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+  return (
+    <div style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: 8, padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ fontSize: 13, color: c.text, fontWeight: 600 }}>📊 Multiples cross-check</div>
+        <div style={{ fontSize: 11, padding: '2px 8px', background: c.border, color: '#0f172a', borderRadius: 4, fontWeight: 700, letterSpacing: 0.3 }}>
+          {c.label}
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+        {cell('Forward P/E (implied → market)', m.implied_forward_pe, m.market_forward_pe, m.pe_delta_pct)}
+        {cell('EV / EBITDA (implied → market)', m.implied_ev_ebitda, m.market_ev_ebitda, m.ev_ebitda_delta_pct)}
+      </div>
+      <div style={{ fontSize: 13, color: c.text, lineHeight: 1.5 }}>{m.diagnostic}</div>
+    </div>
+  )
+}
+
+// ====================================================== ROIC FRANCHISE ==
+function RoicWarningBanner({ f }: { f: RoicFlag }) {
+  return (
+    <div style={{ background: '#78350f', border: '1px solid #f59e0b', borderRadius: 8, padding: 12, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+      <div style={{ fontSize: 20 }}>⚡</div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, color: '#fde68a', fontWeight: 600, marginBottom: 4 }}>
+          High-ROIC franchise — terminal value may be understated
+        </div>
+        <div style={{ fontSize: 12, color: '#fef3c7', lineHeight: 1.5 }}>{f.message}</div>
+        <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 11, color: '#fcd34d' }}>
+          <span>ROIC: <strong>{f.roic == null ? '—' : fmtPct(f.roic)}</strong></span>
+          <span>WACC: <strong>{fmtPct(f.wacc)}</strong></span>
+          <span>Spread: <strong>{f.spread == null ? '—' : `${(f.spread * 100).toFixed(1)}pp`}</strong></span>
+          <span>Terminal g: <strong>{fmtPct(f.base_terminal_growth)}</strong></span>
+        </div>
       </div>
     </div>
   )
@@ -551,10 +615,12 @@ export function DcfView() {
         <>
           <VerdictBanner v={orderedData.verdict} price={orderedData.grounding.current_price} />
           <HeaderCard d={orderedData} />
+          {orderedData.roic_flag.triggered && <RoicWarningBanner f={orderedData.roic_flag} />}
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(260px, 1fr)', gap: 10 }}>
             <WaccPanel b={orderedData.grounding.wacc_buildup} />
             <ReverseDcfPanel r={orderedData.reverse_dcf} />
           </div>
+          <MultiplesPanel m={orderedData.multiples_check} />
           <ScenarioCards d={orderedData} />
           <AssumptionsTable scenarios={orderedData.scenarios} />
           <SensitivityHeatmap s={orderedData.sensitivity} currentPrice={orderedData.grounding.current_price} />
