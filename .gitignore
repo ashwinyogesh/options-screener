@@ -29,3 +29,8 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Build/cache artifacts
+backend/cache/
+frontend/build_log.txt
+frontend/tsconfig.tsbuildinfo

@@ -4,12 +4,22 @@ Run: uvicorn main:app --reload --port 8000
 """
 import logging
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
+# Load .env before importing routers (env vars must exist when modules init)
+load_dotenv()
+
+from limiter import limiter
 from routers.csp import router as csp_router
 from routers.cc import router as cc_router
 from routers.ditm import router as ditm_router
+from routers.supply_chain import router as supply_chain_router
+from routers.dcf import router as dcf_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,6 +31,11 @@ app = FastAPI(
     description="Cash Secured Put screener using technical + options signals.",
     version="1.0.0",
 )
+
+# Rate limiting (slowapi). Per-IP limits; 429 returned when exceeded.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # Allow the Vite dev server and any localhost port during development.
 app.add_middleware(
@@ -41,6 +56,8 @@ app.add_middleware(
 app.include_router(csp_router)
 app.include_router(cc_router)
 app.include_router(ditm_router)
+app.include_router(supply_chain_router)
+app.include_router(dcf_router)
 
 
 @app.get("/health", tags=["meta"])

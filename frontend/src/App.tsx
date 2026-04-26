@@ -8,6 +8,8 @@ import { CcFilterPanel } from './components/CcFilterPanel'
 import { DitmInput } from './components/DitmInput'
 import { DitmFilterPanel } from './components/DitmFilterPanel'
 import { DitmTable } from './components/DitmTable'
+import { SupplyChainView } from './components/SupplyChainView'
+import { DcfView } from './components/DcfView'
 import { useCsp } from './hooks/useCsp'
 import { useCc } from './hooks/useCc'
 import { useDitm } from './hooks/useDitm'
@@ -70,7 +72,7 @@ function applyDitmFilters(results: DitmResult[], filters: DitmFilterState): Ditm
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'csp' | 'cc' | 'ditm'>('csp')
+  const [activeTab, setActiveTab] = useState<'csp' | 'cc' | 'ditm' | 'supply' | 'dcf'>('csp')
 
   // CSP state
   const { results: cspResults, errors: cspErrors, loading: cspLoading, symbolCount: cspSymbolCount, isScanMode: cspIsScanMode, errorMessage: cspErrorMessage, run: runCsp, scan: scanCsp } = useCsp()
@@ -109,6 +111,18 @@ export default function App() {
             onClick={() => setActiveTab('ditm')}
           >
             DITM — Long Call
+          </button>
+          <button
+            className={`tab-btn${activeTab === 'supply' ? ' tab-btn-active' : ''}`}
+            onClick={() => setActiveTab('supply')}
+          >
+            Supply Chain
+          </button>
+          <button
+            className={`tab-btn${activeTab === 'dcf' ? ' tab-btn-active' : ''}`}
+            onClick={() => setActiveTab('dcf')}
+          >
+            DCF Valuation
           </button>
         </div>
       </header>
@@ -245,6 +259,9 @@ export default function App() {
             )}
           </>
         )}
+
+        {activeTab === 'supply' && <SupplyChainView />}
+        {activeTab === 'dcf' && <DcfView />}
       </main>
     </div>
   )
