@@ -27,6 +27,12 @@ export interface DcfGrounding {
   revenue_cagr_5y: number | null
   operating_margin_ttm: number | null
   operating_margin_3y: Array<{ year: number; margin: number }>
+  historical_metrics: Array<{
+    year: number
+    revenue_growth: number | null
+    operating_margin: number | null
+    capex_pct_revenue: number | null
+  }>
   gross_margin_ttm: number | null
   rnd_pct_revenue: number | null
   sbc_ttm: number | null
@@ -114,6 +120,9 @@ export interface Verdict {
   confidence: number
   key_assumption_to_monitor: string
   margin_of_safety_pct: number
+  data_quality_score: number
+  deterministic: boolean
+  rationale: string
 }
 
 export interface Distribution {
@@ -144,6 +153,27 @@ export interface FranchiseFlag {
   message: string
 }
 
+export interface HorizonSnapshot {
+  forecast_years: number
+  base_fair_value: number
+  base_pv_of_fcfs: number
+  base_pv_of_terminal: number
+  tv_concentration: number
+  p25: number
+  p50: number
+  p75: number
+  prob_above_current: number
+}
+
+export interface HorizonComparison {
+  primary_horizon: number
+  horizon_5y: HorizonSnapshot
+  horizon_10y: HorizonSnapshot
+  runway_value_pct: number
+  tv_concentration_delta: number
+  diagnostic: string
+}
+
 export interface DcfData {
   ticker: string
   grounding: DcfGrounding
@@ -156,6 +186,7 @@ export interface DcfData {
   verdict: Verdict
   multiples: MultiplesCrossCheck
   franchise_flag: FranchiseFlag
+  horizon_comparison: HorizonComparison
   forecast_years_used: number
   risks: string[]
   key_drivers: string[]

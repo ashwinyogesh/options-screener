@@ -13,7 +13,7 @@ from pydantic import BaseModel, field_validator
 
 from services.data_service import get_risk_free_rate
 from services.cc_service import CcError, CcResult, CcStrikeResult, process_cc_symbol
-from services.universe import MOMENTUM_UNIVERSE, UNIVERSE_SIZE
+from services.universe import MOMENTUM_UNIVERSE, UNIVERSE_SIZE, UNIVERSES, get_universe
 
 logger = logging.getLogger(__name__)
 
@@ -164,15 +164,17 @@ async def run_cc_scan(
     top_n: int = Query(default=20, ge=1, le=50),
     min_dte: int = Query(default=30, ge=1, le=90),
     max_dte: int = Query(default=60, ge=1, le=90),
+    universe: str = Query(default="all", description=f"Universe key: one of {sorted(UNIVERSES)}"),
 ) -> CcResponse:
-    """Scans the full curated universe and returns the top_n CC results by score."""
+    """Scans the selected universe and returns the top_n CC results by score."""
     if min_dte > max_dte:
         raise HTTPException(status_code=422, detail="min_dte must be <= max_dte")
 
+    universe_key, symbols = get_universe(universe)
     rf_rate = await asyncio.to_thread(get_risk_free_rate)
     logger.info(
-        "Starting CC universe scan (%d stocks), DTE %d\u2013%d, top_n=%d",
-        UNIVERSE_SIZE, min_dte, max_dte, top_n,
+        "Starting CC scan universe=%s (%d stocks), DTE %d\u2013%d, top_n=%d",
+        universe_key, len(symbols), min_dte, max_dte, top_n,
     )
 
     sem = asyncio.Semaphore(10)
@@ -181,7 +183,7 @@ async def run_cc_scan(
         async with sem:
             return await asyncio.to_thread(process_cc_symbol, symbol, min_dte, max_dte, rf_rate)
 
-    pairs = await asyncio.gather(*[process_one(s) for s in MOMENTUM_UNIVERSE])
+    pairs = await asyncio.gather(*[process_one(s) for s in symbols])
 
     results: list[CcResultOut] = []
     errors: list[CcErrorOut] = []
@@ -195,8 +197,8 @@ async def run_cc_scan(
     top_results = results[:top_n]
 
     logger.info(
-        "CC scan complete: returning top %d of %d (errors=%d)",
-        len(top_results), UNIVERSE_SIZE, len(errors),
+        "CC scan complete: universe=%s returning top %d of %d (errors=%d)",
+        universe_key, len(top_results), len(symbols), len(errors),
     )
     return CcResponse(results=top_results, errors=errors)
 

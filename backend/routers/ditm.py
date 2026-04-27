@@ -21,7 +21,7 @@ from services.ditm_service import (
     get_macro_context,
     process_symbol,
 )
-from services.universe import MOMENTUM_UNIVERSE, UNIVERSE_SIZE
+from services.universe import MOMENTUM_UNIVERSE, UNIVERSE_SIZE, UNIVERSES, get_universe
 
 logger = logging.getLogger(__name__)
 
@@ -183,18 +183,20 @@ async def run_ditm_scan(
     top_n: int = Query(default=20, ge=1, le=50),
     min_dte: int = Query(default=180, ge=30, le=730),
     max_dte: int = Query(default=365, ge=30, le=730),
+    universe: str = Query(default="all", description=f"Universe key: one of {sorted(UNIVERSES)}"),
 ) -> DitmResponse:
     """
-    Scans the full curated universe and returns top_n DITM results ranked by score.
+    Scans the selected universe and returns top_n DITM results ranked by score.
     """
     if min_dte > max_dte:
         raise HTTPException(status_code=422, detail="min_dte must be <= max_dte")
 
+    universe_key, symbols = get_universe(universe)
     rf_rate = await asyncio.to_thread(get_risk_free_rate)
     macro_ctx = await asyncio.to_thread(get_macro_context)
     logger.info(
-        "Starting DITM universe scan (%d stocks), DTE %d–%d, top_n=%d",
-        UNIVERSE_SIZE, min_dte, max_dte, top_n,
+        "Starting DITM scan universe=%s (%d stocks), DTE %d–%d, top_n=%d",
+        universe_key, len(symbols), min_dte, max_dte, top_n,
     )
 
     sem = asyncio.Semaphore(10)
@@ -205,7 +207,7 @@ async def run_ditm_scan(
                 process_symbol, symbol, min_dte, max_dte, rf_rate, macro_ctx
             )
 
-    pairs = await asyncio.gather(*[process_one(s) for s in MOMENTUM_UNIVERSE])
+    pairs = await asyncio.gather(*[process_one(s) for s in symbols])
 
     results: list[DitmResultOut] = []
     errors: list[DitmErrorOut] = []
@@ -219,8 +221,8 @@ async def run_ditm_scan(
     top_results = results[:top_n]
 
     logger.info(
-        "DITM scan complete: returning top %d of %d (errors=%d)",
-        len(top_results), UNIVERSE_SIZE, len(errors),
+        "DITM scan complete: universe=%s returning top %d of %d (errors=%d)",
+        universe_key, len(top_results), len(symbols), len(errors),
     )
     return DitmResponse(
         results=top_results,

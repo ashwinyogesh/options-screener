@@ -118,12 +118,14 @@ export default function App() {
           >
             Supply Chain
           </button>
+          {/* DCF tab hidden — verdict calibration in progress.
           <button
             className={`tab-btn${activeTab === 'dcf' ? ' tab-btn-active' : ''}`}
             onClick={() => setActiveTab('dcf')}
           >
             DCF Valuation
           </button>
+          */}
         </div>
       </header>
 
@@ -131,7 +133,7 @@ export default function App() {
         {activeTab === 'csp' && (
           <>
             <CspInput
-              onScan={(topN, minDTE, maxDTE) => scanCsp(topN, minDTE, maxDTE)}
+              onScan={(topN, minDTE, maxDTE, universe) => scanCsp(topN, minDTE, maxDTE, universe)}
               onCustom={(symbols, minDTE, maxDTE) => runCsp({ symbols, minDTE, maxDTE })}
               loading={cspLoading}
             />
@@ -142,7 +144,7 @@ export default function App() {
               <div className="loading-state">
                 <div className="spinner" />
                 {cspIsScanMode
-                  ? <p>Scanning <strong>75 stocks</strong> in parallel &mdash; est. <strong>~20s</strong></p>
+                  ? <p>Scanning <strong>selected universe</strong> in parallel &mdash; est. <strong>~25s</strong></p>
                   : <p>Fetching <strong>{cspSymbolCount}</strong> symbol{cspSymbolCount !== 1 ? 's' : ''} in parallel
                       &nbsp;&mdash; est. <strong>~{Math.ceil(cspSymbolCount / 5) * 4}s</strong></p>
                 }
@@ -175,7 +177,7 @@ export default function App() {
         {activeTab === 'cc' && (
           <>
             <CcInput
-              onScan={(topN, minDTE, maxDTE) => scanCc(topN, minDTE, maxDTE)}
+              onScan={(topN, minDTE, maxDTE, universe) => scanCc(topN, minDTE, maxDTE, universe)}
               onCustom={(symbols, minDTE, maxDTE) => runCc({ symbols, minDTE, maxDTE })}
               loading={ccLoading}
             />
@@ -186,7 +188,7 @@ export default function App() {
               <div className="loading-state">
                 <div className="spinner" />
                 {ccIsScanMode
-                  ? <p>Scanning <strong>75 stocks</strong> in parallel &mdash; est. <strong>~20s</strong></p>
+                  ? <p>Scanning <strong>selected universe</strong> in parallel &mdash; est. <strong>~25s</strong></p>
                   : <p>Fetching <strong>{ccSymbolCount}</strong> symbol{ccSymbolCount !== 1 ? 's' : ''} in parallel
                       &nbsp;&mdash; est. <strong>~{Math.ceil(ccSymbolCount / 5) * 4}s</strong></p>
                 }
@@ -219,7 +221,7 @@ export default function App() {
         {activeTab === 'ditm' && (
           <>
             <DitmInput
-              onScan={(topN, minDTE, maxDTE) => scanDitm(topN, minDTE, maxDTE)}
+              onScan={(topN, minDTE, maxDTE, universe) => scanDitm(topN, minDTE, maxDTE, universe)}
               onCustom={(symbols, minDTE, maxDTE) => runDitm({ symbols, minDTE, maxDTE })}
               loading={ditmLoading}
             />
@@ -230,7 +232,7 @@ export default function App() {
               <div className="loading-state">
                 <div className="spinner" />
                 {ditmIsScanMode
-                  ? <p>Scanning <strong>75 stocks</strong> in parallel &mdash; est. <strong>~25s</strong></p>
+                  ? <p>Scanning <strong>selected universe</strong> in parallel &mdash; est. <strong>~30s</strong></p>
                   : <p>Fetching <strong>{ditmSymbolCount}</strong> symbol{ditmSymbolCount !== 1 ? 's' : ''} in parallel
                       &nbsp;&mdash; est. <strong>~{Math.ceil(ditmSymbolCount / 5) * 5}s</strong></p>
                 }

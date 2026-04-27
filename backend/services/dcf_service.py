@@ -103,6 +103,7 @@ class Grounding:
     operating_margin_ttm: Optional[float]
     gross_margin_ttm: Optional[float]
     operating_margin_3y: list[dict]      # [{year:int, margin:float}]
+    historical_metrics: list[dict]       # [{year, revenue_growth, operating_margin, capex_pct_revenue}] up to 5y
     rnd_pct_revenue: Optional[float]
     sbc_ttm: Optional[float]
     sbc_pct_revenue: Optional[float]
@@ -193,6 +194,9 @@ class Verdict:
     confidence: float                    # 0..1
     key_assumption_to_monitor: str
     margin_of_safety_pct: float          # (P25 - current)/current — informational
+    data_quality_score: float            # 0..1 — how complete is grounding
+    deterministic: bool                  # True if entry/exit/recommendation came from formula
+    rationale: str                       # one-line explanation of the recommendation
 
 
 @dataclass
@@ -221,6 +225,29 @@ class FranchiseFlag:
 
 
 @dataclass
+class HorizonSnapshot:
+    forecast_years: int
+    base_fair_value: float
+    base_pv_of_fcfs: float
+    base_pv_of_terminal: float
+    tv_concentration: float              # pv_of_terminal / enterprise_value
+    p25: float
+    p50: float
+    p75: float
+    prob_above_current: float
+
+
+@dataclass
+class HorizonComparison:
+    primary_horizon: int                 # 5 or 10 — the auto-picked one used in main fields
+    horizon_5y: HorizonSnapshot
+    horizon_10y: HorizonSnapshot
+    runway_value_pct: float              # (FV_10y - FV_5y) / FV_5y
+    tv_concentration_delta: float        # tv_5y - tv_10y (positive = 10y pulls value into explicit period)
+    diagnostic: str
+
+
+@dataclass
 class DcfResult:
     ticker: str
     grounding: Grounding
@@ -233,6 +260,7 @@ class DcfResult:
     verdict: Verdict
     multiples: MultiplesCrossCheck
     franchise_flag: FranchiseFlag
+    horizon_comparison: HorizonComparison
     forecast_years_used: int
     risks: list[str]
     key_drivers: list[str]
@@ -360,6 +388,48 @@ def _compute_operating_margin_3y(t: yf.Ticker) -> list[dict]:
         return out
     except Exception as exc:
         logger.warning("Op margin 3y fetch failed: %s", exc)
+        return []
+
+
+def _compute_historical_metrics(t: yf.Ticker) -> list[dict]:
+    """Per-year history for sanity-checking assumptions: revenue growth (YoY),
+    operating margin, and capex/revenue. Returns up to 5 most recent annual rows,
+    oldest first. Any individual metric may be None if its source row is missing."""
+    try:
+        fin = t.financials
+        cf = t.cashflow
+        rev_row = _financials_row(fin, ["Total Revenue"])
+        op_row = _financials_row(fin, ["Operating Income", "Total Operating Income As Reported"])
+        capex_row = _financials_row(cf, [
+            "Capital Expenditure", "Capital Expenditures", "Purchase Of PPE",
+        ])
+        if rev_row is None or rev_row.empty:
+            return []
+        # Build dated revenue map (sorted oldest -> newest) and use it to compute YoY growth.
+        dated = []
+        for date in rev_row.index:
+            yr = getattr(date, "year", None)
+            rev = _safe_float(rev_row.get(date))
+            if yr and rev and rev > 0:
+                dated.append((int(yr), date, rev))
+        dated.sort(key=lambda x: x[0])
+        out: list[dict] = []
+        for i, (yr, date, rev) in enumerate(dated):
+            prev_rev = dated[i - 1][2] if i > 0 else None
+            growth = ((rev - prev_rev) / prev_rev) if (prev_rev and prev_rev > 0) else None
+            op = _safe_float(op_row.get(date)) if op_row is not None else None
+            margin = (op / rev) if (op is not None) else None
+            capex = _safe_float(capex_row.get(date)) if capex_row is not None else None
+            capex_pct = (abs(capex) / rev) if (capex is not None) else None
+            out.append({
+                "year": yr,
+                "revenue_growth": float(growth) if growth is not None else None,
+                "operating_margin": float(margin) if margin is not None else None,
+                "capex_pct_revenue": float(capex_pct) if capex_pct is not None else None,
+            })
+        return out[-5:]
+    except Exception as exc:
+        logger.warning("Historical metrics fetch failed: %s", exc)
         return []
 
 
@@ -579,6 +649,7 @@ def fetch_grounding(ticker: str) -> Grounding:
     # Other grounding signals
     gross_margin = _compute_gross_margin(t, info)
     op_margin_3y = _compute_operating_margin_3y(t)
+    historical = _compute_historical_metrics(t)
     rnd_pct = _compute_rnd_pct(t, revenue_ttm)
     deferred_yoy = _compute_deferred_revenue_yoy(t)
     book_equity = _compute_book_equity(t)
@@ -618,6 +689,7 @@ def fetch_grounding(ticker: str) -> Grounding:
         operating_margin_ttm=op_margin,
         gross_margin_ttm=gross_margin,
         operating_margin_3y=op_margin_3y,
+        historical_metrics=historical,
         rnd_pct_revenue=rnd_pct,
         sbc_ttm=sbc_dollars,
         sbc_pct_revenue=sbc_pct,
@@ -720,6 +792,7 @@ def _build_user_prompt(g: Grounding) -> str:
         "revenue_cagr_5y": g.revenue_cagr_5y,
         "operating_margin_ttm": g.operating_margin_ttm,
         "operating_margin_3y": g.operating_margin_3y,
+        "historical_metrics": g.historical_metrics,
         "gross_margin_ttm": g.gross_margin_ttm,
         "rnd_pct_revenue": g.rnd_pct_revenue,
         "sbc_pct_revenue": g.sbc_pct_revenue,
@@ -1482,48 +1555,16 @@ def _decide_forecast_years(scenarios_raw: list[dict], rev_cagr_5y: Optional[floa
     return FORECAST_YEARS
 
 
-def get_dcf(ticker: str, refresh: bool = False, trials: int = MC_TRIALS) -> dict:
-    key = f"{ticker.upper()}|{trials}"
-    now = time.time()
-    if not refresh and key in _CACHE:
-        ts, payload = _CACHE[key]
-        if now - ts < _CACHE_TTL_SEC:
-            payload = dict(payload)
-            payload["cached"] = True
-            return payload
-
-    g = fetch_grounding(ticker)
-    if not g.shares_out or not g.revenue_ttm:
-        raise ValueError(
-            f"Insufficient financial data for {ticker} (shares_out={g.shares_out}, "
-            f"revenue_ttm={g.revenue_ttm}). DCF unavailable."
-        )
-
-    raw = _call_llm(g)
-    raw = _validate_assumptions(raw, wacc_capm=g.wacc_buildup.wacc)
-
-    forecast_years = _decide_forecast_years(raw.get("scenarios", []), g.revenue_cagr_5y)
-    logger.info("DCF for %s using %d-year forecast (rev_cagr_5y=%s)",
-                g.ticker, forecast_years, g.revenue_cagr_5y)
-
-    scenarios: list[ScenarioAssumption] = []
+def _compute_for_horizon(
+    g: Grounding,
+    scenarios: list[ScenarioAssumption],
+    distributions: dict,
+    forecast_years: int,
+    trials: int,
+) -> tuple[list[ScenarioResult], MonteCarloResult, MultiplesCrossCheck, ScenarioResult]:
+    """Run scenario DCFs + MC + multiples for a given forecast horizon. Pure compute, no I/O."""
     scenario_values: list[ScenarioResult] = []
-    for sc in raw["scenarios"]:
-        assumption = ScenarioAssumption(
-            label=sc["label"],
-            revenue_growth=sc["revenue_growth"],
-            operating_margin=sc["operating_margin"],
-            operating_margin_y5=sc["operating_margin_y5"],
-            mid_growth=sc["mid_growth"],
-            wacc_risk_adj_bps=sc["wacc_risk_adj_bps"],
-            discount_rate=sc["discount_rate"],
-            terminal_growth=sc["terminal_growth"],
-            capex_pct_revenue=sc["capex_pct_revenue"],
-            rationale=sc["rationale"],
-            strongest_driver=sc["strongest_driver"],
-            narrative=sc["narrative"],
-        )
-        scenarios.append(assumption)
+    for assumption in scenarios:
         out = _compute_dcf(
             revenue_ttm=g.revenue_ttm,
             revenue_growth=assumption.revenue_growth,
@@ -1548,27 +1589,217 @@ def get_dcf(ticker: str, refresh: bool = False, trials: int = MC_TRIALS) -> dict
             pv_of_fcfs=out["pv_of_fcfs"],
             pv_of_terminal=out["pv_of_terminal"],
         ))
-
     base = next((s for s in scenarios if s.label == "Base"), scenarios[0])
     base_value = next((sv for sv in scenario_values if sv.label == base.label), scenario_values[0])
-    reverse = _reverse_dcf(g, base, forecast_years=forecast_years)
-    sensitivity = _sensitivity_matrix(g, base, forecast_years=forecast_years)
-    mc = _run_monte_carlo(g, raw["distributions"], base=base, forecast_years=forecast_years, trials=trials)
-
+    mc = _run_monte_carlo(g, distributions, base=base, forecast_years=forecast_years, trials=trials)
     multiples = _compute_multiples(g, base_value, base, forecast_years)
+    return scenario_values, mc, multiples, base_value
+
+
+def _build_horizon_snapshot(forecast_years: int, base_value: ScenarioResult, mc: MonteCarloResult) -> HorizonSnapshot:
+    ev = base_value.enterprise_value or 1.0
+    return HorizonSnapshot(
+        forecast_years=forecast_years,
+        base_fair_value=base_value.fair_value_per_share,
+        base_pv_of_fcfs=base_value.pv_of_fcfs,
+        base_pv_of_terminal=base_value.pv_of_terminal,
+        tv_concentration=float(base_value.pv_of_terminal / ev) if ev else 0.0,
+        p25=mc.percentiles["p25"],
+        p50=mc.percentiles["p50"],
+        p75=mc.percentiles["p75"],
+        prob_above_current=mc.prob_above_current,
+    )
+
+
+def _build_horizon_comparison(primary: int, snap5: HorizonSnapshot, snap10: HorizonSnapshot) -> HorizonComparison:
+    fv5 = snap5.base_fair_value
+    fv10 = snap10.base_fair_value
+    runway = (fv10 - fv5) / fv5 if fv5 > 0 else 0.0
+    tv_delta = snap5.tv_concentration - snap10.tv_concentration
+    if abs(runway) < 0.05:
+        diag = (
+            "Mature business profile \u2014 5y and 10y models agree within 5%. "
+            "Horizon choice is not material; perpetuity assumption is doing most of the work."
+        )
+    elif runway > 0.20:
+        diag = (
+            f"Significant runway value: 10y FV is {runway*100:.0f}% above 5y FV. "
+            f"5y model is structurally truncating the explicit-growth period; "
+            f"a 10y read better captures the bull thesis."
+        )
+    elif runway > 0.05:
+        diag = (
+            f"Modest runway premium: 10y FV is {runway*100:.0f}% above 5y. "
+            f"Some growth left in the explicit period beyond Y5."
+        )
+    elif runway < -0.10:
+        diag = (
+            f"Negative runway: 10y FV is {abs(runway)*100:.0f}% BELOW 5y. "
+            f"Implies margin or growth fade in Y6-Y10 \u2014 cyclical signature or peak-margin exposure."
+        )
+    else:
+        diag = (
+            f"10y FV is {runway*100:.0f}% vs 5y \u2014 mild fade in extended period."
+        )
+    return HorizonComparison(
+        primary_horizon=primary,
+        horizon_5y=snap5,
+        horizon_10y=snap10,
+        runway_value_pct=float(runway),
+        tv_concentration_delta=float(tv_delta),
+        diagnostic=diag,
+    )
+
+
+def _compute_data_quality_score(g: Grounding) -> float:
+    """0..1 score \u2014 how complete is the grounding for trustworthy verdict?"""
+    checks = [
+        g.beta is not None and abs((g.beta or 1.0) - 1.0) > 1e-9,  # real beta, not default 1.0
+        len(g.revenue_history) >= 4,
+        g.tax_rate is not None,
+        g.buyback_yield is not None,
+        g.roic_ttm is not None,
+        g.market_cap is not None and g.market_cap > 0,
+        g.gross_margin_ttm is not None,
+        g.operating_margin_ttm is not None,
+    ]
+    return sum(1.0 for c in checks if c) / len(checks)
+
+
+def _compute_verdict_deterministic(
+    g: Grounding,
+    mc: MonteCarloResult,
+    base_value: ScenarioResult,
+    multiples: MultiplesCrossCheck,
+    key_assumption_to_monitor: str,
+) -> Verdict:
+    """Deterministic verdict from MC distribution + data quality. Same inputs \u2192 same output."""
+    price = g.current_price or 0.0
+    p25 = mc.percentiles["p25"]
+    p50 = mc.percentiles["p50"]
+    p75 = mc.percentiles["p75"]
+
+    # Margin-of-safety discount on entry depends on data quality + multiples disagreement.
+    dq = _compute_data_quality_score(g)
+    # Larger MoS for low-confidence names; baseline 5% MoS, up to 15% if quality low.
+    mos = 0.05 + (1.0 - dq) * 0.10
+
+    entry = float(p25 * (1.0 - mos))
+    exit_ = float(p75)
+
+    # Confidence: blends spread tightness with data quality.
+    spread_tightness = max(0.0, 1.0 - ((p75 - p25) / p50)) if p50 > 0 else 0.0
+    confidence = max(0.0, min(1.0, 0.5 * spread_tightness + 0.5 * dq))
+
+    # Decision tree.
+    if price <= entry and confidence >= 0.6:
+        rec = "STRONG_BUY"
+    elif price <= entry:
+        rec = "BUY"
+    elif price <= p50:
+        rec = "BUY" if confidence >= 0.55 else "HOLD"
+    elif price <= exit_:
+        rec = "HOLD"
+    elif price <= exit_ * 1.10:
+        rec = "AVOID"
+    else:
+        rec = "STRONG_AVOID"
+
+    # Multiples disagreement amplifies AVOID-side calls.
+    if rec in ("HOLD", "AVOID") and multiples.pe_delta_pct is not None and multiples.pe_delta_pct < -0.30:
+        rec = "AVOID" if rec == "HOLD" else "STRONG_AVOID"
+
+    margin_of_safety = (p25 - price) / price if price else 0.0
+
+    rationale_parts: list[str] = []
+    if price <= entry:
+        rationale_parts.append(f"price {price:.2f} \u2264 P25\u00d7(1-MoS) entry {entry:.2f}")
+    elif price <= p50:
+        rationale_parts.append(f"price {price:.2f} between entry and P50 ({p50:.2f})")
+    elif price <= exit_:
+        rationale_parts.append(f"price {price:.2f} between P50 and P75 exit ({exit_:.2f})")
+    else:
+        rationale_parts.append(f"price {price:.2f} above P75 exit ({exit_:.2f})")
+    rationale_parts.append(f"confidence {confidence*100:.0f}% (data quality {dq*100:.0f}%)")
+    rationale = " \u00b7 ".join(rationale_parts)
+
+    return Verdict(
+        recommendation=rec,  # type: ignore[arg-type]
+        suggested_entry_price=entry,
+        suggested_exit_price=exit_,
+        confidence=float(confidence),
+        key_assumption_to_monitor=key_assumption_to_monitor,
+        margin_of_safety_pct=float(margin_of_safety),
+        data_quality_score=float(dq),
+        deterministic=True,
+        rationale=rationale,
+    )
+
+
+def get_dcf(ticker: str, refresh: bool = False, trials: int = MC_TRIALS) -> dict:
+    key = f"{ticker.upper()}|{trials}"
+    now = time.time()
+    if not refresh and key in _CACHE:
+        ts, payload = _CACHE[key]
+        if now - ts < _CACHE_TTL_SEC:
+            payload = dict(payload)
+            payload["cached"] = True
+            return payload
+
+    g = fetch_grounding(ticker)
+    if not g.shares_out or not g.revenue_ttm:
+        raise ValueError(
+            f"Insufficient financial data for {ticker} (shares_out={g.shares_out}, "
+            f"revenue_ttm={g.revenue_ttm}). DCF unavailable."
+        )
+
+    raw = _call_llm(g)
+    raw = _validate_assumptions(raw, wacc_capm=g.wacc_buildup.wacc)
+
+    primary_horizon = _decide_forecast_years(raw.get("scenarios", []), g.revenue_cagr_5y)
+    logger.info("DCF for %s primary horizon = %d years (rev_cagr_5y=%s)",
+                g.ticker, primary_horizon, g.revenue_cagr_5y)
+
+    scenarios: list[ScenarioAssumption] = [
+        ScenarioAssumption(
+            label=sc["label"],
+            revenue_growth=sc["revenue_growth"],
+            operating_margin=sc["operating_margin"],
+            operating_margin_y5=sc["operating_margin_y5"],
+            mid_growth=sc["mid_growth"],
+            wacc_risk_adj_bps=sc["wacc_risk_adj_bps"],
+            discount_rate=sc["discount_rate"],
+            terminal_growth=sc["terminal_growth"],
+            capex_pct_revenue=sc["capex_pct_revenue"],
+            rationale=sc["rationale"],
+            strongest_driver=sc["strongest_driver"],
+            narrative=sc["narrative"],
+        )
+        for sc in raw["scenarios"]
+    ]
+
+    # Compute BOTH horizons; primary becomes the main payload.
+    sv5, mc5, mult5, bv5 = _compute_for_horizon(g, scenarios, raw["distributions"], FORECAST_YEARS, trials)
+    sv10, mc10, mult10, bv10 = _compute_for_horizon(g, scenarios, raw["distributions"], FORECAST_YEARS_HIGH_GROWTH, trials)
+
+    if primary_horizon == FORECAST_YEARS_HIGH_GROWTH:
+        scenario_values, mc, multiples, base_value = sv10, mc10, mult10, bv10
+    else:
+        scenario_values, mc, multiples, base_value = sv5, mc5, mult5, bv5
+
+    base = next((s for s in scenarios if s.label == "Base"), scenarios[0])
+    reverse = _reverse_dcf(g, base, forecast_years=primary_horizon)
+    sensitivity = _sensitivity_matrix(g, base, forecast_years=primary_horizon)
     franchise = _compute_franchise_flag(g, base)
 
-    # Verdict from LLM, supplemented with margin-of-safety stat
-    v_raw = raw["verdict"]
-    margin_of_safety = (mc.percentiles["p25"] - g.current_price) / g.current_price if g.current_price else 0.0
-    verdict = Verdict(
-        recommendation=v_raw["recommendation"],
-        suggested_entry_price=float(v_raw["suggested_entry_price"]),
-        suggested_exit_price=float(v_raw["suggested_exit_price"]),
-        confidence=float(max(0.0, min(1.0, v_raw["confidence"]))),
-        key_assumption_to_monitor=v_raw["key_assumption_to_monitor"],
-        margin_of_safety_pct=float(margin_of_safety),
-    )
+    snap5 = _build_horizon_snapshot(FORECAST_YEARS, bv5, mc5)
+    snap10 = _build_horizon_snapshot(FORECAST_YEARS_HIGH_GROWTH, bv10, mc10)
+    horizon_comparison = _build_horizon_comparison(primary_horizon, snap5, snap10)
+
+    # Deterministic verdict; LLM still supplies key_assumption_to_monitor.
+    v_raw = raw.get("verdict", {})
+    key_assumption = v_raw.get("key_assumption_to_monitor", "(not provided)")
+    verdict = _compute_verdict_deterministic(g, mc, base_value, multiples, key_assumption)
 
     result = DcfResult(
         ticker=g.ticker,
@@ -1582,7 +1813,8 @@ def get_dcf(ticker: str, refresh: bool = False, trials: int = MC_TRIALS) -> dict
         verdict=verdict,
         multiples=multiples,
         franchise_flag=franchise,
-        forecast_years_used=forecast_years,
+        horizon_comparison=horizon_comparison,
+        forecast_years_used=primary_horizon,
         risks=raw.get("risks", []),
         key_drivers=raw.get("key_drivers", []),
         model=AZURE_OPENAI_DEPLOYMENT,

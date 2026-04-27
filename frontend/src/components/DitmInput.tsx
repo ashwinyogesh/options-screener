@@ -1,6 +1,6 @@
 import { useState, useRef, KeyboardEvent } from 'react'
+import { UNIVERSE_OPTIONS, DEFAULT_UNIVERSE, universeSize, type UniverseKey } from '../constants/universes'
 
-const UNIVERSE_SIZE = 75
 const PRESET_BASKET = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'META', 'GOOGL', 'SPY', 'QQQ', 'AMD']
 
 // ---------------------------------------------------------------------------
@@ -142,7 +142,7 @@ const EXIT_STRATEGY: ExitBranch[] = [
 ]
 
 interface Props {
-  onScan: (topN: number, minDTE: number, maxDTE: number) => void
+  onScan: (topN: number, minDTE: number, maxDTE: number, universe: UniverseKey) => void
   onCustom: (symbols: string[], minDTE: number, maxDTE: number) => void
   loading: boolean
 }
@@ -156,6 +156,7 @@ export function DitmInput({ onScan, onCustom, loading }: Props) {
   const [topN, setTopN] = useState(20)
   const [scanMinDTE, setScanMinDTE] = useState(180)
   const [scanMaxDTE, setScanMaxDTE] = useState(365)
+  const [universe, setUniverse] = useState<UniverseKey>(DEFAULT_UNIVERSE)
 
   // Custom mode
   const [chips, setChips] = useState<string[]>([])
@@ -196,7 +197,7 @@ export function DitmInput({ onScan, onCustom, loading }: Props) {
 
   function handleScan() {
     if (scanMinDTE > scanMaxDTE) return
-    onScan(topN, scanMinDTE, scanMaxDTE)
+    onScan(topN, scanMinDTE, scanMaxDTE, universe)
   }
 
   function handleCustomSubmit() {
@@ -363,11 +364,24 @@ export function DitmInput({ onScan, onCustom, loading }: Props) {
         <div className="momentum-scan-row">
           <div className="momentum-scan-info">
             <span className="scan-desc">
-              Scans <strong>{UNIVERSE_SIZE}</strong> stocks across AI · Semis · Cloud · Fintech · Growth
+              Scans <strong>{universeSize(universe)}</strong> stocks — {UNIVERSE_OPTIONS.find(o => o.key === universe)?.hint}
             </span>
             <span className="app-subtitle">Ranked by DITM composite score — returns top DITM long call candidates automatically</span>
           </div>
           <div className="momentum-scan-controls">
+            <label className="filter-item">
+              Universe
+              <select
+                className="filter-select"
+                value={universe}
+                onChange={e => setUniverse(e.target.value as UniverseKey)}
+                disabled={loading}
+              >
+                {UNIVERSE_OPTIONS.map(o => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))}
+              </select>
+            </label>
             <label className="filter-item">
               Top
               <input

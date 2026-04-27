@@ -15,7 +15,7 @@ interface UseDitmReturn {
   vix5dChange: number | null
   spyAboveSma200: boolean
   run: (req: DitmRequest) => Promise<void>
-  scan: (topN?: number, minDTE?: number, maxDTE?: number) => Promise<void>
+  scan: (topN?: number, minDTE?: number, maxDTE?: number, universe?: string) => Promise<void>
 }
 
 export function useDitm(): UseDitmReturn {
@@ -74,7 +74,7 @@ export function useDitm(): UseDitmReturn {
     }
   }
 
-  async function scan(topN: number = 20, minDTE: number = 180, maxDTE: number = 365) {
+  async function scan(topN: number = 20, minDTE: number = 180, maxDTE: number = 365, universe: string = 'all') {
     setLoading(true)
     setIsScanMode(true)
     setErrorMessage(null)
@@ -83,7 +83,7 @@ export function useDitm(): UseDitmReturn {
     setSymbolCount(0)
 
     try {
-      const url = `${API_BASE}/api/screener/ditm/scan?top_n=${topN}&min_dte=${minDTE}&max_dte=${maxDTE}`
+      const url = `${API_BASE}/api/screener/ditm/scan?top_n=${topN}&min_dte=${minDTE}&max_dte=${maxDTE}&universe=${encodeURIComponent(universe)}`
       const response = await fetch(url, { method: 'GET' })
 
       if (!response.ok) {

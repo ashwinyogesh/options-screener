@@ -49,7 +49,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 1600px;
+  max-width: min(2200px, 100%);
   width: 100%;
   margin: 0 auto;
 }
@@ -192,6 +192,26 @@ body {
   font-size: 13px;
 }
 .filter-number-wide { width: 88px; }
+.filter-select {
+  background: #0f1117;
+  border: 1px solid #2d3148;
+  border-radius: 4px;
+  color: #e2e8f0;
+  padding: 3px 22px 3px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.filter-select:hover:not(:disabled) { border-color: #4f6ef7; }
+.filter-select:focus { outline: none; border-color: #4f6ef7; box-shadow: 0 0 0 2px rgba(79,110,247,0.25); }
+.filter-select:disabled { opacity: 0.6; cursor: not-allowed; }
+.filter-select option { background: #1a1d27; color: #e2e8f0; }
 .leverage-badge { color: #a78bfa; font-weight: 600; font-size: 13px; }
 .filter-toggle { cursor: pointer; }
 .filter-toggle input { cursor: pointer; accent-color: #4f6ef7; }
@@ -567,7 +587,32 @@ body {
 }
 
 /* ── Table ────────────────────────────────────────────────────────────────── */
-.table-wrapper { overflow-x: auto; }
+/* Constrain to viewport so the horizontal scrollbar stays visible at the
+   bottom of the screen even when the result set has many rows.
+   Vertical scrolling happens inside the wrapper; the sticky <thead> keeps
+   column headers in view while scrolling. */
+.table-wrapper {
+  overflow: auto;
+  max-height: calc(100vh - 240px);
+  border: 1px solid #1e2235;
+  border-radius: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: #2d3148 #0f1117;
+}
+.table-wrapper::-webkit-scrollbar { width: 10px; height: 10px; }
+.table-wrapper::-webkit-scrollbar-track { background: #0f1117; }
+.table-wrapper::-webkit-scrollbar-thumb {
+  background: #2d3148;
+  border-radius: 5px;
+  border: 2px solid #0f1117;
+}
+.table-wrapper::-webkit-scrollbar-thumb:hover { background: #4f6ef7; }
+.table-wrapper::-webkit-scrollbar-corner { background: #0f1117; }
+.screener-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
 
 .screener-table {
   width: 100%;
@@ -589,6 +634,7 @@ body {
   letter-spacing: .05em;
   white-space: nowrap;
   user-select: none;
+  background: #1a1d27;
 }
 .screener-table th.sortable { cursor: pointer; }
 .screener-table th.sortable:hover { color: #e2e8f0; }

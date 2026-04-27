@@ -11,7 +11,7 @@ interface UseCcReturn {
   isScanMode: boolean
   errorMessage: string | null
   run: (req: CcRequest) => Promise<void>
-  scan: (topN?: number, minDTE?: number, maxDTE?: number) => Promise<void>
+  scan: (topN?: number, minDTE?: number, maxDTE?: number, universe?: string) => Promise<void>
 }
 
 export function useCc(): UseCcReturn {
@@ -60,7 +60,7 @@ export function useCc(): UseCcReturn {
     }
   }
 
-  async function scan(topN: number = 20, minDTE: number = 30, maxDTE: number = 45) {
+  async function scan(topN: number = 20, minDTE: number = 30, maxDTE: number = 45, universe: string = 'all') {
     setLoading(true)
     setIsScanMode(true)
     setErrorMessage(null)
@@ -69,7 +69,7 @@ export function useCc(): UseCcReturn {
     setSymbolCount(0)
 
     try {
-      const url = `${API_BASE}/api/screener/cc/scan?top_n=${topN}&min_dte=${minDTE}&max_dte=${maxDTE}`
+      const url = `${API_BASE}/api/screener/cc/scan?top_n=${topN}&min_dte=${minDTE}&max_dte=${maxDTE}&universe=${encodeURIComponent(universe)}`
       const response = await fetch(url, { method: 'GET' })
 
       if (!response.ok) {

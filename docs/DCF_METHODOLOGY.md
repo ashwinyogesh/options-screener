@@ -23,21 +23,28 @@ Ticker
   ▼
 [1] Grounding (yfinance + ^TNX)         ── all numeric, no LLM
   │     • price, shares, debt, cash, beta, revenue history, margins
-  │     • risk-free rate from 10y Treasury
-  │     • buyback yield from share-count history
-  │     • CAPM WACC build-up (β + D/E + ERP)
+  │     • gross margin, 3y operating margin trajectory, R&D %, SBC %
+  │     • deferred-revenue YoY, ROIC
+  │     • net buyback yield (gross repurchase − SBC dilution)
+  │     • market multiples (forward P/E, EV/EBITDA, EV/Revenue)
+  │     • risk-free rate from 10y Treasury, CAPM WACC build-up
   ▼
 [2] LLM call (Azure OpenAI gpt-4.1, json_schema strict)
   │     Input:  full grounding payload + computed WACC
-  │     Output: 3 scenarios, MC distributions, verdict, risks, drivers
+  │     Output: 3 scenarios (Y1 + Y5 margin, mid-growth), MC distributions,
+  │             verdict, risks, drivers
   │     LLM does NOT supply WACC, only a small risk adjustment in bps.
   ▼
-[3] Validation + clipping              ── reject hallucinated ranges
+[3] Validation + clipping              ── reject hallucinated ranges,
+                                          enforce tg ≤ mid_growth ≤ rg
   ▼
-[4] Per-scenario fair value             ── deterministic Python
-[5] Reverse DCF                          ── what growth does price imply?
-[6] Sensitivity matrix                   ── 5×5 (WACC ±100bp × tg ±50bp)
-[7] Monte Carlo (vectorized numpy, 5,000 trials default)
+[4] Forecast horizon decision           ── 5y vs 10y based on growth profile
+[5] Per-scenario fair value             ── deterministic Python
+[6] Reverse DCF                          ── what growth does price imply?
+[7] Sensitivity matrix                   ── 5×5 (WACC ±100bp × tg ±50bp)
+[8] Monte Carlo (vectorized numpy, 5,000 trials default)
+[9] Multiples cross-check                ── implied vs market P/E, EV/EBITDA, EV/Rev
+[10] Franchise flag                       ── ROIC vs WACC, terminal-growth caveat
   ▼
 DcfResult JSON → frontend
 ```
@@ -56,10 +63,19 @@ The LLM gets **rich, real numbers**, not vague descriptions. This is the single 
 | `market_cap`, `total_debt`, `cash` | `info` | D/E weights for WACC |
 | `beta` | `info.beta` | Cost of equity |
 | `revenue_history` | `t.financials` | LLM must anchor base case to actual CAGR |
-| `revenue_cagr_5y` | computed | Sanity check on growth assumption |
+| `revenue_cagr_5y` | computed | Sanity check on growth assumption; gates 10y forecast |
 | `operating_margin_ttm` | `info.operatingMargins` | Sanity check on margin |
+| `operating_margin_3y` | financials | 3-year op-margin trajectory — distinguishes structural from cyclical |
+| `gross_margin_ttm` | `info.grossMargins` | Structural profitability signal (vs OpEx-driven margin) |
+| `rnd_pct_revenue` | financials | Identifies investment-phase names (high R&D = future leverage) |
+| `sbc_pct_revenue` | cashflow | Real comp cost; feeds net-buyback math |
+| `deferred_revenue_yoy` | balance sheet | Forward-bookings tell for SaaS / subscriptions |
+| `roic_ttm` | NOPAT / (debt + book equity − cash) | Quality signal; drives franchise flag |
 | `tax_rate` | `Tax Provision / Pretax Income` | Effective rate; falls back to 21% |
-| `buyback_yield` | `balance_sheet` share count | Captures hidden EPS growth (see §6) |
+| `buyback_yield` (NET) | gross repurchase − SBC dilution | True per-share accretion (see §6) |
+| `gross_buyback_yield` | share-count history | Pre-SBC repurchase pace |
+| `sbc_dilution_yield` | SBC / market cap | Hidden dilution cost |
+| `forward_pe`, `market_ev_ebitda`, `market_ev_revenue` | `info` | Inputs to the multiples cross-check (§10.5) |
 | `risk_free_rate` | `^TNX` 10y Treasury | Live, not hardcoded |
 | `wacc_buildup` | computed (CAPM) | Auditable, not LLM guesswork |
 
@@ -102,8 +118,10 @@ WACC is then **clipped to [5%, 16%]**.
 Three scenarios: **Conservative / Base / Optimistic**. The LLM supplies:
 
 ```
-revenue_growth        — Year-1 growth; fades linearly to terminal_growth over 5 years
-operating_margin      — flat across 5 years
+revenue_growth        — Year-1 growth
+operating_margin      — Year-1 operating margin
+operating_margin_y5   — Year-5 operating margin (margin trajectory; see §9.1)
+mid_growth            — Y6–Y10 fade target (used only when forecast = 10y; see §9.2)
 wacc_risk_adj_bps     — integer offset around CAPM WACC
 terminal_growth       — Gordon growth rate, capped at 4.5%
 capex_pct_revenue     — flat 5-year average
@@ -112,10 +130,12 @@ strongest_driver      — single most material lever
 narrative             — Damodaran-style story
 ```
 
-### Constraints enforced by the prompt
+### Constraints enforced by the prompt + validator
 
-- **Monotonicity**: Conservative < Base < Optimistic for growth/margin. WACC adjustment runs the opposite direction.
-- **Anchoring**: prompt commands LLM to cite the 5y CAGR, TTM operating margin, and beta. If base growth deviates >300bp from CAGR, must justify why.
+- **Monotonicity**: Conservative < Base < Optimistic for revenue growth. WACC adjustment runs the opposite direction.
+- **Anchoring**: prompt commands LLM to cite the 5y CAGR, TTM operating margin, gross margin, R&D %, and beta. If base growth deviates >300bp from CAGR, must justify why.
+- **Margin trajectory**: for investment-phase names with depressed TTM margin but healthy gross margin and elevated R&D, `operating_margin_y5` must reflect mid-cycle profitability, not TTM.
+- **Mid-growth ordering**: validator enforces `terminal_growth ≤ mid_growth ≤ revenue_growth`.
 - **Terminal growth ≤ 4.5%** — long-run nominal GDP. Anything higher is a category error.
 
 ### Why scenarios instead of point estimates?
@@ -124,30 +144,30 @@ A single FV is overconfident. Real uncertainty lives in the *spread*. The 3 scen
 
 ---
 
-## 6. Buyback yield — the silent value driver
+## 6. Net buyback yield — the silent value driver, done right
 
-Most retail DCFs miss this. Mature compounders (AAPL, GOOG, META) shrink share count 2–4% annually. Ignoring this **understates per-share fair value by 10–20%** over 5 years.
+Most retail DCFs miss this. Mature compounders (AAPL, GOOG, META) shrink share count 2–4% annually. Ignoring this **understates per-share fair value by 10–20%** over 5 years. But growth names with heavy SBC (NVDA, CRWD, SNOW) often have *negative* net buybacks despite reporting big repurchase programs — the buybacks just offset SBC dilution. We compute both.
 
 ### How it's computed
 
-From `t.balance_sheet` row "Ordinary Shares Number":
+```
+gross_buyback_yield = -annual_change_in_shares  (from balance_sheet share count)
+sbc_dilution_yield  = SBC_ttm / market_cap
+net_buyback_yield   = gross_buyback_yield - sbc_dilution_yield   ← used in DCF
+```
 
-$$\text{annual\_change} = \left(\frac{\text{shares}_{last}}{\text{shares}_{first}}\right)^{1/n} - 1$$
-
-$$\text{buyback\_yield} = -\text{annual\_change}$$
-
-Positive = shares declining (buybacks). Negative = dilution. Clipped to ±8%.
+All three clipped to ±8%; the frontend shows them separately.
 
 ### How it enters the math
 
-Effective share count decays each year:
+Effective share count decays each year using **net** buyback:
 
 ```
-effective_shares = shares_out × average_of[(1 - bb)^t for t in 1..5]
+effective_shares = shares_out × average_of[(1 - net_bb)^t for t in 1..forecast_years]
 fair_value_per_share = equity_value / effective_shares
 ```
 
-Deliberate simplification — a fully accurate model would discount buyback FCF outflow inside FCFF. Doing the share-count adjustment instead is **simpler and almost exactly equivalent** for steady programs, and avoids double-counting capital allocation.
+Deliberate simplification — a fully accurate model would discount buyback FCF outflow inside FCFF. Doing the share-count adjustment instead is **simpler and almost exactly equivalent** for steady programs, and avoids double-counting capital allocation. Using *net* (not gross) prevents over-crediting growth names whose buybacks are running treadmill against SBC.
 
 ---
 
@@ -184,7 +204,40 @@ If small WACC moves swing fair value by >30%, your thesis is fragile. Tech-heavy
 
 ---
 
-## 9. Monte Carlo — quantifying uncertainty
+## 9. Forecast horizon, growth path, and margin trajectory
+
+### 9.1 Margin trajectory (always)
+
+Operating margin is **not** held flat. Each scenario specifies Year-1 and Year-5 margins; backend interpolates linearly Y1 → Y5, then holds flat through Y6–Y10 if the forecast extends. This matters most for investment-phase names where TTM margin is depressed but the bull thesis is operating leverage.
+
+```
+margin[t] = op_margin + (op_margin_y5 - op_margin) * (t-1) / 4    for t=1..5
+margin[t] = op_margin_y5                                          for t=6..10
+```
+
+### 9.2 Forecast horizon decision (5y vs 10y)
+
+```
+if revenue_cagr_5y > 18%  OR  any scenario.revenue_growth > 20%:
+    forecast_years = 10
+else:
+    forecast_years = 5
+```
+
+Growth-stage companies cannot be fairly valued in 5 years — too much value is in the explicit period beyond Year 5, but Gordon-growth at 4.5% will severely understate them. Extending to 10 years lets the explicit FCF capture the high-growth runway.
+
+### 9.3 Two-stage growth path (10y forecasts only)
+
+When `forecast_years = 10`, growth fades in two stages around `mid_growth`:
+
+```
+stage 1 (Y1–Y5):  rg → mid_growth      (linear)
+stage 2 (Y6–Y10): mid_growth → tg      (linear)
+```
+
+For 5y forecasts, growth fades linearly from `revenue_growth` to `terminal_growth` and `mid_growth` is unused.
+
+## 10. Monte Carlo — quantifying uncertainty
 
 5,000 trials default; configurable 500–20,000.
 
@@ -193,36 +246,37 @@ If small WACC moves swing fair value by >30%, your thesis is fragile. Tech-heavy
 | Variable | Shape | Why |
 |---|---|---|
 | `revenue_growth` | normal(μ, σ) | Symmetric, plausible business-cycle errors |
-| `operating_margin` | normal(μ, σ) | Same logic |
+| `operating_margin` | normal(μ, σ) | Year-1 margin |
+| `operating_margin_y5` | normal(μ, σ) | Year-5 margin; sampled jointly with Y1 |
 | `discount_rate` | triangular(low, mode, high) | Bounded; mode = CAPM WACC |
 | `terminal_growth` | uniform(low, high) | Coarse — we don't pretend to know the shape |
 | `capex_pct_revenue` | normal(μ, σ) | Same as margin |
 
 Prompt explicitly tells the LLM: σ ≥ ½ × |Optimistic − Conservative|. Most models systematically understate volatility.
 
+`mid_growth` is **not** sampled — it's a Base-scenario constant fed into 10y MC. Sampling it on top of `revenue_growth` and `terminal_growth` would explode variance for no information gain.
+
 ### Implementation — vectorized numpy
 
 ```python
-growth_path     = rg[:, None] + (tg[:, None] - rg[:, None]) * fade[None, :]
-revenue_path    = rev0 * np.cumprod(1 + growth_path, axis=1)
-ebit_path       = revenue_path * om[:, None]
-fcf_path        = ebit_path * (1 - tax) - revenue_path * cx[:, None]
-pv              = (fcf_path / (1 + dr[:, None]) ** yrs).sum(axis=1) + terminal_pv
+# Margin path: linear Y1→Y5, flat thereafter
+for t in range(n_years):
+    margin_path[:, t] = om1 + (om5 - om1) * t/4 if t < 5 else om5
+
+# Growth path: 5y linear OR 10y two-stage
+if n_years <= 5:
+    growth_path = rg + (tg - rg) * fade
+else:
+    stage1 = rg + (mid_g - rg) * fade1   # Y1–Y5
+    stage2 = mid_g + (tg - mid_g) * fade2 # Y6–Y10
+    growth_path = concat(stage1, stage2)
+
+revenue_path = rev0 * cumprod(1 + growth_path)
+fcf_path     = revenue_path * margin_path * (1-tax) - revenue_path * cx
+pv           = (fcf_path / (1+dr)**yrs).sum(axis=1) + terminal_pv
 ```
 
 20,000 trials run in **~0.1s**. No Python loops. LLM call dominates total latency.
-
-### Why 5,000 trials?
-
-Percentile error scales as $1/\sqrt{N}$. Empirically:
-
-| N | P50 stability across runs |
-|---|---|
-| 1,000 | ±$1.5 |
-| 5,000 | ±$0.7 |
-| 20,000 | ±$0.3 |
-
-5,000 is the sweet spot — smooth histograms, stable tails, no latency cost.
 
 ### Outputs
 
@@ -230,37 +284,135 @@ Percentiles (P25/P40/P50/P60/P75), mean, std, `prob_above_current`, 30-bin histo
 
 `prob_above_current` is the headline number for trade conviction.
 
+## 10.5 Multiples cross-check
+
+DCF and trading multiples should *rhyme*. When they don't, the disagreement is the thesis. We compute three implied multiples from the base scenario's fair value and compare to market.
+
+```
+Y1_revenue       = revenue_ttm × (1 + base.revenue_growth)
+Y1_EBIT          = Y1_revenue × base.operating_margin   (Year-1 margin)
+Y1_NOPAT         = Y1_EBIT × (1 - tax)
+Y1_EBITDA        ≈ Y1_EBIT + Y1_revenue × capex_pct     (D&A ≈ capex steady state)
+
+implied_fwd_pe        = base_FV / (Y1_NOPAT / shares)
+implied_ev_ebitda     = base_EV / Y1_EBITDA
+implied_ev_revenue    = base_EV / Y1_revenue
+```
+
+Delta vs market is color-coded: green |Δ| < 15%, yellow < 30%, red ≥ 30%. Backend also generates a one-line diagnostic identifying the largest disagreement.
+
+### Why this matters
+
+- |Δ| < 15%: DCF and tape agree. Higher conviction.
+- DCF implies *lower* multiple than market: market expects more growth or longer duration than your scenarios. Either you're missing something or the stock is rich.
+- DCF implies *higher* multiple than market: your assumptions are likely too bullish, OR market is pricing in real disconfirmation risk.
+
+This is a credibility tax — you cannot publish a DCF that implies 80x P/E when the stock trades at 25x without explaining the gap.
+
+## 10.6 Franchise flag (ROIC vs WACC)
+
+Gordon-growth terminal value implicitly assumes new investments earn the cost of capital. For high-ROIC franchises (ROIC > 1.5× WACC), this **systematically understates value** — reinvestment at above-cost-of-capital returns is exactly what makes the franchise.
+
+```
+is_franchise = (roic_ttm > 1.5 × wacc) AND (terminal_growth < 3%)
+```
+
+When flagged, the frontend shows a yellow banner: *Consider checking sensitivity at terminal_growth = 3.5–4.5%.* This nudges the user toward the upper end of the GDP-cap range rather than punting to the LLM.
+
+Secondary cases:
+- ROIC < WACC: red warning (value-destroying growth; conservative growth assumptions justified).
+- ROIC mid-range: neutral message (standard Gordon treatment OK).
+
 ---
 
-## 10. Verdict — the trade-grade output
+## 10.7 Verdict — the trade-grade output
 
-Currently **LLM-authored**, with one computed field:
+The verdict is **deterministic**: same grounding + same MC seed → same recommendation. Only `key_assumption_to_monitor` is LLM-authored.
 
-| Field | Source | Notes |
+| Field | Source | Formula |
 |---|---|---|
-| `recommendation` | LLM | STRONG_BUY / BUY / HOLD / AVOID / STRONG_AVOID |
-| `suggested_entry_price` | LLM | Typically near P25 with margin-of-safety discount |
-| `suggested_exit_price` | LLM | Typically near P75 |
-| `confidence` | LLM (0..1) | Lower for cyclicals/opaque accounting |
+| `suggested_entry_price` | computed | `P25 × (1 − MoS)` |
+| `suggested_exit_price` | computed | `P75` |
+| `margin_of_safety_pct` | computed | `(P25 − current) / current` |
+| `data_quality_score` | computed | 0..1 from 8 binary checks |
+| `confidence` | computed | `0.5 × spread_tightness + 0.5 × data_quality` |
+| `recommendation` | computed | decision tree over price vs entry/P50/exit, gated by confidence; multiples disagreement amplifies AVOID |
 | `key_assumption_to_monitor` | LLM | The single thesis-killer variable |
-| `margin_of_safety_pct` | computed | (P25 − current) / current |
+| `deterministic` | constant | `true` |
+| `rationale` | computed | Short string: price vs thresholds + confidence + data quality |
 
-### Known limitation
-
-Entry / exit / confidence are **judgment calls**, not deterministic formulas. Two runs of the same ticker can yield different entry prices.
-
-### Future hardening (not yet implemented)
+### Margin-of-safety scaling
 
 ```
-entry_price    = P25 × (1 − margin_of_safety_required)
-exit_price     = P75
-base_conf      = 1 − (P75 − P25) / P50
-data_quality   = sum_of(beta_present, ≥4y_revenue, real_tax_rate, buyback_data) × weights
-confidence     = base_conf × data_quality
-recommendation = decision_tree(current_price, entry, exit, confidence)
+MoS = 5% + (1 − data_quality) × 10%   →   ranges 5%..15%
 ```
 
-Keep `key_assumption_to_monitor` from the LLM — that's genuinely qualitative.
+Higher MoS for low-confidence names (missing beta, sparse history, no buyback data, etc.) makes the recommended entry price more conservative.
+
+### Data quality score (8 checks, equal weight)
+
+1. `beta` present and not the default `1.0`
+2. ≥ 4 years of revenue history
+3. `tax_rate` present
+4. `buyback_yield` present
+5. `roic_ttm` present
+6. `market_cap > 0`
+7. `gross_margin_ttm` present
+8. `operating_margin_ttm` present
+
+### Spread tightness
+
+```
+spread_tightness = max(0, 1 − (P75 − P25) / P50)
+```
+
+Wide MC distributions (cyclicals, story stocks) penalize confidence even when data quality is full.
+
+### Decision tree
+
+```
+if   price ≤ entry  and conf ≥ 0.6   → STRONG_BUY
+elif price ≤ entry                   → BUY
+elif price ≤ P50    and conf ≥ 0.55  → BUY
+elif price ≤ P50                     → HOLD
+elif price ≤ exit                    → HOLD
+elif price ≤ exit × 1.10             → AVOID
+else                                 → STRONG_AVOID
+
+# Multiples cross-check amplifies bear-side calls:
+if rec ∈ {HOLD, AVOID} and pe_delta_pct < −30%:
+    rec → next bear tier (HOLD→AVOID, AVOID→STRONG_AVOID)
+```
+
+The `pe_delta_pct < −30%` guard fires when DCF FV implies a P/E far below the actual trading multiple — i.e. the market is paying a premium the cash-flow model can't justify. In that case, even a HOLD becomes an AVOID.
+
+---
+
+## 10.8 Dual-horizon comparison
+
+Every request runs the full pipeline at **both** 5y and 10y horizons. The auto-picked `primary_horizon` (§9.4) populates the main panels; the other horizon shows up in the side-by-side comparison panel.
+
+| Field | Description |
+|---|---|
+| `primary_horizon` | Which horizon (5 or 10) feeds the main UI panels |
+| `horizon_5y`, `horizon_10y` | Full snapshot per horizon: base FV, P25/P50/P75, TV concentration, prob above current |
+| `runway_value_pct` | `(FV_10y − FV_5y) / FV_5y` — how much explicit-period value the 5y model truncates |
+| `tv_concentration_delta` | `TV_conc_5y − TV_conc_10y` — how much of fair value rides on the perpetuity vs explicit period |
+| `diagnostic` | Plain-language reading of the runway pattern |
+
+### Diagnostic buckets
+
+| Pattern | Reading |
+|---|---|
+| `\|runway\| < 5%` | Mature; horizon doesn't matter. Perpetuity dominates. |
+| `+5..+20%` | Modest runway premium. Some growth left in Y6–Y10. |
+| `> +20%` | Significant runway. 5y model truncates the bull thesis. |
+| `−5..−10%` | Mild fade in extended period. |
+| `< −10%` | Strong fade signal — cyclical or peak-margin exposure. |
+
+### Why this matters
+
+A 5y horizon makes the **terminal-growth assumption** carry too much weight for high-growth names (TV concentration often 70%+). The 10y read forces the model to commit to an explicit medium-term margin path, surfacing fade risk that a clean perpetuity hides. Showing both lets the user see whether the verdict survives horizon choice or hinges on it.
 
 ---
 
@@ -355,9 +507,8 @@ Percentile stability across 1k/5k/20k trials: ±$1–2. Verdict internally consi
 
 ## 18. Open issues / future work
 
-1. **Verdict determinism** (§10) — highest-leverage upgrade.
-2. **Multiples cross-check** — compare base FV's implied forward P/E vs `info.forwardPE`; flag if delta > 30%.
-3. **Quality scorecard** — ROIC vs WACC spread, reinvestment efficiency, moat score from LLM. Feeds into confidence.
-4. **Consensus delta** — LLM Y1 revenue growth vs `info.revenueGrowth` analyst expectation.
-5. **Cost of debt from real bond yields** — replace 5.5% default with issuer credit spread.
-6. **Cyclical normalization** — for cyclicals, anchor base margin to mid-cycle, not TTM.
+1. **Quality scorecard** — ROIC vs WACC spread, reinvestment efficiency, moat score from LLM. Feeds into confidence beyond the current 8-check data-quality score.
+2. **Consensus delta** — LLM Y1 revenue growth vs `info.revenueGrowth` analyst expectation.
+3. **Cost of debt from real bond yields** — replace 5.5% default with issuer credit spread.
+4. **Cyclical normalization** — for cyclicals, anchor base margin to mid-cycle, not TTM.
+5. **Industry-specific terminal multiples** — alternative to Gordon-growth for franchise names where the 3% TG cap binds awkwardly.

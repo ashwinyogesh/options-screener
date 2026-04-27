@@ -1,32 +1,114 @@
 """
 Curated stock universe for the Momentum screener auto-scan.
-~75 liquid, high-momentum names across AI, semis, cloud, fintech, and growth.
+~115 liquid, high-momentum names across AI, semis, cloud, fintech, and growth,
+with explicit AI-buildout coverage (energy, chips, infrastructure, models, apps).
 """
 from __future__ import annotations
 
-MOMENTUM_UNIVERSE: list[str] = [
-    # AI / Semiconductors
-    "NVDA", "AMD", "AVGO", "QCOM", "MRVL", "ARM", "SMCI", "MU",
-    "AMAT", "LRCX", "KLAC", "TSM", "TXN", "ON", "INTC", "MPWR", "ASML",
-    # AI Software / Cloud Security
-    "PLTR", "CRWD", "NET", "SNOW", "DDOG", "ZS", "PANW", "NOW",
-    "CRM", "ORCL", "WDAY", "HUBS", "MDB", "APP", "GTLB", "CFLT",
-    # Mega-cap tech
-    "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA",
-    # Fintech / Crypto-adjacent
+# AI buildout tickers grouped by where they sit in the stack.
+# These are merged into MOMENTUM_UNIVERSE below (deduped, order-preserving).
+AI_BUILDOUT: dict[str, list[str]] = {
+    # Powering the datacenters: nuclear, gas/coal merchant power, grid build,
+    # power management, datacenter cooling, uranium fuel cycle.
+    "energy": [
+        "VST", "CEG", "NRG", "TLN", "NEE", "ETR", "DUK", "SO", "EXC",
+        "OKLO", "SMR", "BWXT", "CCJ",
+        "GEV", "ETN", "VRT", "PWR", "FSLR",
+    ],
+    # Silicon, foundry, equipment, materials, optics, connectivity.
+    "chips": [
+        "NVDA", "AMD", "AVGO", "QCOM", "MRVL", "ARM", "MU", "INTC",
+        "TSM", "ASML", "AMAT", "LRCX", "KLAC", "TXN", "ON", "MPWR",
+        "NXPI", "ADI", "MCHP", "WOLF",
+        "ALAB", "CRDO", "COHR", "LITE",
+    ],
+    # Servers, networking, storage, datacenter REITs, GPU-cloud operators.
+    "infrastructure": [
+        "SMCI", "DELL", "HPE", "IBM", "CSCO",
+        "ANET", "JNPR", "CIEN",
+        "NTAP", "PSTG",
+        "EQIX", "DLR", "IRM",
+        "NBIS", "CRWV", "IREN",
+    ],
+    # Public companies with material foundation-model exposure.
+    "models": [
+        "MSFT", "GOOGL", "META", "AMZN", "AAPL", "TSLA",
+        "BIDU", "BABA",
+    ],
+    # Companies monetizing AI inside their product (data, security, dev, vertical).
+    "applications": [
+        "PLTR", "CRWD", "NET", "SNOW", "DDOG", "ZS", "PANW", "NOW",
+        "CRM", "ORCL", "WDAY", "HUBS", "MDB", "APP", "GTLB", "CFLT",
+        "ADBE", "INTU", "TEAM", "DUOL", "S", "BILL",
+        "AI", "SOUN",
+        "RXRX", "ISRG",
+        "RDDT", "RBLX",
+    ],
+}
+
+# Non-AI core (kept from prior universe).
+_NON_AI_CORE: list[str] = [
+    # Fintech / crypto-adjacent
     "COIN", "HOOD", "SQ", "AFRM", "SOFI", "MSTR", "PYPL",
-    # Growth / Consumer tech
-    "SHOP", "UBER", "ABNB", "RBLX", "RDDT",
-    # Enterprise / Hardware
-    "DELL", "HPE", "IBM", "CSCO",
-    # Emerging momentum / Quantum / Space
-    "NBIS", "IONQ", "RGTI", "OKLO", "SMR", "ACHR",
+    # Growth / consumer tech
+    "SHOP", "UBER", "ABNB",
+    # Quantum / space
+    "IONQ", "RGTI", "ACHR",
     # Healthcare growth
     "LLY", "MRNA", "HIMS",
-    # Power / Energy (AI infrastructure)
-    "VST", "CEG", "NRG", "FSLR",
     # Sector ETFs
     "QQQ", "SOXX", "SMH",
 ]
 
+
+def _build_universe() -> list[str]:
+    """Flatten AI buckets + core, preserving order, deduped."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for bucket in ("energy", "chips", "infrastructure", "models", "applications"):
+        for sym in AI_BUILDOUT[bucket]:
+            if sym not in seen:
+                seen.add(sym)
+                out.append(sym)
+    for sym in _NON_AI_CORE:
+        if sym not in seen:
+            seen.add(sym)
+            out.append(sym)
+    return out
+
+
+MOMENTUM_UNIVERSE: list[str] = _build_universe()
 UNIVERSE_SIZE: int = len(MOMENTUM_UNIVERSE)
+
+
+def _ai_full() -> list[str]:
+    """All AI buckets combined, order-preserving deduped."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for bucket in ("energy", "chips", "infrastructure", "models", "applications"):
+        for sym in AI_BUILDOUT[bucket]:
+            if sym not in seen:
+                seen.add(sym)
+                out.append(sym)
+    return out
+
+
+# Selectable scan universes exposed via the API. Keys are stable identifiers
+# the frontend sends as ?universe=...; values are the resolved ticker lists.
+UNIVERSES: dict[str, list[str]] = {
+    "all": MOMENTUM_UNIVERSE,
+    "ai_full": _ai_full(),
+    "ai_energy": list(AI_BUILDOUT["energy"]),
+    "ai_chips": list(AI_BUILDOUT["chips"]),
+    "ai_infrastructure": list(AI_BUILDOUT["infrastructure"]),
+    "ai_models": list(AI_BUILDOUT["models"]),
+    "ai_applications": list(AI_BUILDOUT["applications"]),
+}
+
+
+def get_universe(name: str | None) -> tuple[str, list[str]]:
+    """Resolve a universe name to (canonical_name, ticker_list). Defaults to 'all'."""
+    key = (name or "all").lower()
+    if key not in UNIVERSES:
+        key = "all"
+    return key, UNIVERSES[key]

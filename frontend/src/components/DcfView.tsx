@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useDcf } from '../hooks/useDcf'
 import type {
   DcfData,
@@ -13,7 +13,27 @@ import type {
   Recommendation,
   MultiplesCrossCheck,
   FranchiseFlag,
+  HorizonComparison,
 } from '../types/dcf'
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
+
+interface ModelConstants {
+  equity_risk_premium: number
+  default_risk_free: number
+  live_risk_free: number | null
+  default_pretax_cost_of_debt: number
+  min_wacc: number
+  max_wacc: number
+  mc_trials_default: number
+  high_growth_threshold: number
+  forecast_years: number
+  forecast_years_high_growth: number
+  last_reviewed: string
+  erp_source: string
+  rf_source: string
+  kd_source: string
+}
 
 // ----------------------------------------------------------------- Utils ---
 const ASSUMPTION_LABELS: Record<AssumptionKey, string> = {
@@ -89,6 +109,14 @@ function VerdictBanner({ v, price }: { v: Verdict; price: number }) {
           </div>
           <div style={{ fontSize: 13, color: '#e2e8f0', fontStyle: 'italic' }}>
             “{v.key_assumption_to_monitor}”
+          </div>
+          <div style={{ fontSize: 11, color: '#64748b', marginTop: 6 }}>
+            {v.deterministic ? '⚙ Deterministic verdict' : '○ LLM verdict'}
+            {' · data quality '}
+            <strong style={{ color: v.data_quality_score >= 0.75 ? '#4ade80' : v.data_quality_score >= 0.5 ? '#fbbf24' : '#f87171' }}>
+              {fmtPct(v.data_quality_score, 0)}
+            </strong>
+            {v.rationale && <> · <span style={{ color: '#94a3b8' }}>{v.rationale}</span></>}
           </div>
         </div>
       </div>
@@ -247,6 +275,178 @@ function ScenarioCards({ d }: { d: DcfData }) {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// ============================================ HISTORICAL METRICS ===
+function HistoricalPanel({ rows }: {
+  rows: Array<{ year: number; revenue_growth: number | null; operating_margin: number | null; capex_pct_revenue: number | null }>
+}) {
+  if (!rows.length) return null
+  const fmt = (v: number | null, d = 1) => v == null ? '—' : `${(v * 100).toFixed(d)}%`
+  const tone = (v: number | null, baseline: number, neg = false) => {
+    if (v == null) return '#94a3b8'
+    const diff = v - baseline
+    return diff > 0 ? (neg ? '#f87171' : '#4ade80') : diff < 0 ? (neg ? '#4ade80' : '#f87171') : '#e2e8f0'
+  }
+  // Compute simple averages for at-a-glance baselines
+  const avg = (k: 'revenue_growth' | 'operating_margin' | 'capex_pct_revenue') => {
+    const xs = rows.map(r => r[k]).filter((x): x is number => x != null)
+    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0
+  }
+  const avgGrowth = avg('revenue_growth')
+  const avgMargin = avg('operating_margin')
+  const avgCapex = avg('capex_pct_revenue')
+  return (
+    <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '12px 16px' }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>
+        Historical · {rows.length}-yr context
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ color: '#94a3b8' }}>
+              <th style={{ ...th, textAlign: 'left' }}>Metric</th>
+              {rows.map((r) => (
+                <th key={r.year} style={{ ...th, textAlign: 'right' }}>{r.year}</th>
+              ))}
+              <th style={{ ...th, textAlign: 'right', color: '#fbbf24' }}>Avg</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style={{ borderTop: '1px solid #334155' }}>
+              <td style={{ ...td, color: '#cbd5e1', fontWeight: 600 }}>Revenue Growth</td>
+              {rows.map((r) => (
+                <td key={r.year} style={{ ...td, textAlign: 'right', color: tone(r.revenue_growth, avgGrowth) }}>
+                  {fmt(r.revenue_growth)}
+                </td>
+              ))}
+              <td style={{ ...td, textAlign: 'right', color: '#fbbf24', fontWeight: 700 }}>{fmt(avgGrowth)}</td>
+            </tr>
+            <tr style={{ borderTop: '1px solid #334155' }}>
+              <td style={{ ...td, color: '#cbd5e1', fontWeight: 600 }}>Operating Margin</td>
+              {rows.map((r) => (
+                <td key={r.year} style={{ ...td, textAlign: 'right', color: tone(r.operating_margin, avgMargin) }}>
+                  {fmt(r.operating_margin)}
+                </td>
+              ))}
+              <td style={{ ...td, textAlign: 'right', color: '#fbbf24', fontWeight: 700 }}>{fmt(avgMargin)}</td>
+            </tr>
+            <tr style={{ borderTop: '1px solid #334155' }}>
+              <td style={{ ...td, color: '#cbd5e1', fontWeight: 600 }}>Capex / Revenue</td>
+              {rows.map((r) => (
+                <td key={r.year} style={{ ...td, textAlign: 'right', color: tone(r.capex_pct_revenue, avgCapex, true) }}>
+                  {fmt(r.capex_pct_revenue)}
+                </td>
+              ))}
+              <td style={{ ...td, textAlign: 'right', color: '#fbbf24', fontWeight: 700 }}>{fmt(avgCapex)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: 11, color: '#64748b', marginTop: 6 }}>
+        Color: green = above {rows.length}-yr average (red for capex \u2014 lower reinvestment is better).
+      </div>
+    </div>
+  )
+}
+
+// ============================================ HORIZON COMPARISON ===
+const HORIZON_REFERENCE_ROWS: Array<{ pattern: string; reading: string; tone: string }> = [
+  { pattern: '|Δ| < 5%', reading: 'Mature business; horizon irrelevant. Perpetuity assumption dominates.', tone: '#94a3b8' },
+  { pattern: '5–20% (10y > 5y)', reading: 'Modest runway. Some growth left in Y6–Y10 the 5y model truncates.', tone: '#4ade80' },
+  { pattern: '> 20% (10y > 5y)', reading: 'Significant runway value. Market may be pricing future cash flows the 5y model ignores. 10y read better captures bull thesis.', tone: '#22c55e' },
+  { pattern: '5y > 10y by 10%+', reading: 'Negative runway: Y6–Y10 fade. Cyclical signature or peak-margin exposure. Be wary of base-case extrapolation.', tone: '#f87171' },
+]
+
+function HorizonPanel({ h, currentPrice }: { h: HorizonComparison; currentPrice: number }) {
+  const fmt = (v: number) => `$${v.toFixed(2)}`
+  const fmtP = (v: number, d = 0) => `${(v * 100).toFixed(d)}%`
+  const runwayTone = h.runway_value_pct > 0.20 ? '#22c55e'
+    : h.runway_value_pct > 0.05 ? '#4ade80'
+    : h.runway_value_pct < -0.10 ? '#f87171'
+    : '#94a3b8'
+  const cellStyle: React.CSSProperties = { padding: '8px 10px', textAlign: 'right' }
+  return (
+    <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '12px 16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+          Horizon comparison · 5y vs 10y
+        </div>
+        <div style={{ fontSize: 11, color: '#94a3b8' }}>
+          Primary used in main panels: <strong style={{ color: '#fbbf24' }}>{h.primary_horizon}y</strong>
+        </div>
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead>
+          <tr style={{ color: '#94a3b8', fontSize: 11, textTransform: 'uppercase' }}>
+            <th style={{ ...th, textAlign: 'left' }}>Metric</th>
+            <th style={{ ...th, textAlign: 'right' }}>5-year</th>
+            <th style={{ ...th, textAlign: 'right' }}>10-year</th>
+            <th style={{ ...th, textAlign: 'right' }}>Δ</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style={{ borderTop: '1px solid #334155' }}>
+            <td style={{ ...td, color: '#cbd5e1', fontWeight: 600 }}>Base FV</td>
+            <td style={{ ...cellStyle, color: '#e2e8f0' }}>{fmt(h.horizon_5y.base_fair_value)}</td>
+            <td style={{ ...cellStyle, color: '#e2e8f0' }}>{fmt(h.horizon_10y.base_fair_value)}</td>
+            <td style={{ ...cellStyle, color: runwayTone, fontWeight: 700 }}>
+              {h.runway_value_pct >= 0 ? '+' : ''}{fmtP(h.runway_value_pct, 1)}
+            </td>
+          </tr>
+          <tr style={{ borderTop: '1px solid #334155' }}>
+            <td style={{ ...td, color: '#cbd5e1', fontWeight: 600 }}>P50 (MC median)</td>
+            <td style={{ ...cellStyle, color: '#e2e8f0' }}>{fmt(h.horizon_5y.p50)}</td>
+            <td style={{ ...cellStyle, color: '#e2e8f0' }}>{fmt(h.horizon_10y.p50)}</td>
+            <td style={{ ...cellStyle, color: '#94a3b8' }}>—</td>
+          </tr>
+          <tr style={{ borderTop: '1px solid #334155' }}>
+            <td style={{ ...td, color: '#cbd5e1', fontWeight: 600 }}>TV concentration</td>
+            <td style={{ ...cellStyle, color: '#e2e8f0' }}>{fmtP(h.horizon_5y.tv_concentration)}</td>
+            <td style={{ ...cellStyle, color: '#e2e8f0' }}>{fmtP(h.horizon_10y.tv_concentration)}</td>
+            <td style={{ ...cellStyle, color: h.tv_concentration_delta > 0.10 ? '#4ade80' : '#94a3b8' }}>
+              {h.tv_concentration_delta >= 0 ? '+' : ''}{(h.tv_concentration_delta * 100).toFixed(1)}pp
+            </td>
+          </tr>
+          <tr style={{ borderTop: '1px solid #334155' }}>
+            <td style={{ ...td, color: '#cbd5e1', fontWeight: 600 }}>P(FV &gt; price)</td>
+            <td style={{ ...cellStyle, color: h.horizon_5y.prob_above_current >= 0.5 ? '#4ade80' : '#f87171' }}>
+              {fmtP(h.horizon_5y.prob_above_current)}
+            </td>
+            <td style={{ ...cellStyle, color: h.horizon_10y.prob_above_current >= 0.5 ? '#4ade80' : '#f87171' }}>
+              {fmtP(h.horizon_10y.prob_above_current)}
+            </td>
+            <td style={{ ...cellStyle, color: '#94a3b8' }}>vs {fmt(currentPrice)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div style={{ fontSize: 12, color: '#cbd5e1', marginTop: 10, lineHeight: 1.5, padding: '8px 10px', background: '#0f172a', borderRadius: 4 }}>
+        {h.diagnostic}
+      </div>
+      {/* Reference table: how to read the runway delta */}
+      <details style={{ marginTop: 8 }}>
+        <summary style={{ cursor: 'pointer', fontSize: 11, color: '#94a3b8' }}>
+          How to read the 5y vs 10y delta
+        </summary>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 6 }}>
+          <thead>
+            <tr style={{ color: '#94a3b8', fontSize: 10, textTransform: 'uppercase' }}>
+              <th style={{ ...th, textAlign: 'left' }}>Pattern</th>
+              <th style={{ ...th, textAlign: 'left' }}>Interpretation</th>
+            </tr>
+          </thead>
+          <tbody>
+            {HORIZON_REFERENCE_ROWS.map((r) => (
+              <tr key={r.pattern} style={{ borderTop: '1px solid #334155' }}>
+                <td style={{ ...td, color: r.tone, fontWeight: 600, whiteSpace: 'nowrap' }}>{r.pattern}</td>
+                <td style={{ ...td, color: '#cbd5e1' }}>{r.reading}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
     </div>
   )
 }
@@ -576,10 +776,86 @@ function Bulletbox({ title, items, accent }: { title: string; items: string[]; a
 }
 
 // =============================================================== MAIN ====
+function ConstantsBanner({ c }: { c: ModelConstants }) {
+  const fmtP = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`
+  const rfDelta = c.live_risk_free != null ? c.live_risk_free - c.default_risk_free : null
+  return (
+    <details style={{
+      background: '#0f172a', border: '1px solid #334155', borderRadius: 6,
+      padding: '8px 12px', fontSize: 12,
+    }}>
+      <summary style={{ cursor: 'pointer', color: '#cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <span style={{ fontWeight: 700, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: 0.6, fontSize: 11 }}>
+          Model constants <span style={{ color: '#64748b', fontWeight: 400, textTransform: 'none' }}>· last reviewed {c.last_reviewed}</span>
+        </span>
+        <span style={{ color: '#94a3b8', fontSize: 11 }}>
+          ERP <strong style={{ color: '#e2e8f0' }}>{fmtP(c.equity_risk_premium, 1)}</strong>
+          {' · '}rf live{' '}
+          <strong style={{ color: c.live_risk_free == null ? '#f87171' : '#4ade80' }}>
+            {c.live_risk_free == null ? 'N/A' : fmtP(c.live_risk_free, 2)}
+          </strong>
+          {' · '}Kd <strong style={{ color: '#e2e8f0' }}>{fmtP(c.default_pretax_cost_of_debt, 1)}</strong>
+          {' · '}WACC band <strong style={{ color: '#e2e8f0' }}>{fmtP(c.min_wacc, 0)}–{fmtP(c.max_wacc, 0)}</strong>
+        </span>
+      </summary>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginTop: 10, color: '#cbd5e1' }}>
+        <div>
+          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase' }}>Equity Risk Premium</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>{fmtP(c.equity_risk_premium, 1)}</div>
+          <div style={{ fontSize: 10, color: '#64748b' }}>{c.erp_source}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase' }}>Risk-Free Rate (live)</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: c.live_risk_free == null ? '#f87171' : '#e2e8f0' }}>
+            {c.live_risk_free == null ? 'fallback' : fmtP(c.live_risk_free, 2)}
+            {rfDelta != null && (
+              <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400, marginLeft: 6 }}>
+                ({rfDelta >= 0 ? '+' : ''}{(rfDelta * 10000).toFixed(0)}bp vs default {fmtP(c.default_risk_free, 1)})
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 10, color: '#64748b' }}>{c.rf_source}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase' }}>Pre-tax Cost of Debt</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>{fmtP(c.default_pretax_cost_of_debt, 1)}</div>
+          <div style={{ fontSize: 10, color: '#64748b' }}>{c.kd_source}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase' }}>WACC Guardrails</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>{fmtP(c.min_wacc, 0)} – {fmtP(c.max_wacc, 0)}</div>
+          <div style={{ fontSize: 10, color: '#64748b' }}>Output clipped to this range</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase' }}>High-Growth Trigger</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>{fmtP(c.high_growth_threshold, 0)}</div>
+          <div style={{ fontSize: 10, color: '#64748b' }}>5y CAGR above → {c.forecast_years_high_growth}y forecast</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase' }}>Monte Carlo Default</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>{c.mc_trials_default.toLocaleString()} trials</div>
+          <div style={{ fontSize: 10, color: '#64748b' }}>Configurable 500–20,000</div>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: '#64748b', marginTop: 8, fontStyle: 'italic' }}>
+        Review quarterly: ERP (Damodaran site), rf (auto from ^TNX), Kd (vs current BBB spread). Edit `backend/services/dcf_service.py` constants block.
+      </div>
+    </details>
+  )
+}
+
 export function DcfView() {
   const [ticker, setTicker] = useState('AAPL')
   const [trials, setTrials] = useState(5000)
+  const [constants, setConstants] = useState<ModelConstants | null>(null)
   const { data, loading, error, fetchTicker } = useDcf()
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/dcf/constants`)
+      .then(r => r.ok ? r.json() : null)
+      .then((c: ModelConstants | null) => { if (c) setConstants(c) })
+      .catch(() => { /* silent */ })
+  }, [])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -638,6 +914,8 @@ export function DcfView() {
         </span>
       </form>
 
+      {constants && <ConstantsBanner c={constants} />}
+
       {error && (
         <div style={{ padding: '10px 14px', background: '#7f1d1d', color: '#fecaca', borderRadius: 6 }}>⚠ {error}</div>
       )}
@@ -658,6 +936,8 @@ export function DcfView() {
             <ReverseDcfPanel r={orderedData.reverse_dcf} />
           </div>
           <ScenarioCards d={orderedData} />
+          <HorizonPanel h={orderedData.horizon_comparison} currentPrice={orderedData.grounding.current_price} />
+          <HistoricalPanel rows={orderedData.grounding.historical_metrics} />
           <AssumptionsTable scenarios={orderedData.scenarios} forecastYears={orderedData.forecast_years_used} />
           <MultiplesPanel m={orderedData.multiples} />
           <SensitivityHeatmap s={orderedData.sensitivity} currentPrice={orderedData.grounding.current_price} />

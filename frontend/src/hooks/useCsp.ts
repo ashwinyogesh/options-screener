@@ -11,7 +11,7 @@ interface UseCspReturn {
   isScanMode: boolean
   errorMessage: string | null
   run: (req: CspRequest) => Promise<void>
-  scan: (topN?: number, minDTE?: number, maxDTE?: number) => Promise<void>
+  scan: (topN?: number, minDTE?: number, maxDTE?: number, universe?: string) => Promise<void>
 }
 
 export function useCsp(): UseCspReturn {
@@ -64,7 +64,7 @@ export function useCsp(): UseCspReturn {
     }
   }
 
-  async function scan(topN: number = 20, minDTE: number = 30, maxDTE: number = 45) {
+  async function scan(topN: number = 20, minDTE: number = 30, maxDTE: number = 45, universe: string = 'all') {
     setLoading(true)
     setIsScanMode(true)
     setErrorMessage(null)
@@ -73,7 +73,7 @@ export function useCsp(): UseCspReturn {
     setSymbolCount(0)
 
     try {
-      const url = `${API_BASE}/api/screener/csp/scan?top_n=${topN}&min_dte=${minDTE}&max_dte=${maxDTE}`
+      const url = `${API_BASE}/api/screener/csp/scan?top_n=${topN}&min_dte=${minDTE}&max_dte=${maxDTE}&universe=${encodeURIComponent(universe)}`
       const response = await fetch(url, { method: 'GET' })
 
       if (!response.ok) {
