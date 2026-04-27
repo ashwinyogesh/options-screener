@@ -19,7 +19,7 @@ from scipy.stats import norm  # type: ignore
 from services.data_service import get_ohlc
 from services.greeks_service import black_scholes_call_delta
 from services.options_service import get_all_expirations_calls_data
-from services.technical_service import (
+from services.indicators import (
     compute_iv_rank_percentile,
     compute_price_vs_52w_high,
     compute_trend_data,

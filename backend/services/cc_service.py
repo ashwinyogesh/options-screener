@@ -17,17 +17,19 @@ from services.options_service import (
     get_implied_volatility,
     get_all_expirations_calls_data,
 )
-from services.technical_service import (
+from services.indicators import (
     compute_bollinger,
-    compute_env_score,
-    compute_cc_strike_score,
-    compute_cc_final_score,
     compute_iv_rank_percentile,
     compute_price_vs_52w_high,
     compute_rsi,
     compute_sma_ratio,
     compute_trend_data,
     compute_volume_resistance,
+)
+from services.scoring.env import compute_env_score
+from services.scoring.strike import (
+    compute_cc_final_score,
+    compute_cc_strike_score,
 )
 
 logger = logging.getLogger(__name__)

@@ -18,17 +18,19 @@ from services.options_service import (
     get_all_expirations_data,
     get_premium,
 )
-from services.technical_service import (
+from services.indicators import (
     compute_bollinger,
-    compute_env_score,
-    compute_csp_strike_score,
-    compute_csp_final_score,
     compute_iv_rank_percentile,
     compute_price_vs_52w_high,
     compute_rsi,
     compute_sma_ratio,
     compute_trend_data,
     compute_volume_support,
+)
+from services.scoring.env import compute_env_score
+from services.scoring.strike import (
+    compute_csp_final_score,
+    compute_csp_strike_score,
 )
 
 logger = logging.getLogger(__name__)
