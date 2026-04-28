@@ -99,8 +99,37 @@ def process_symbol(
     rf_rate: float = 0.045,
 ) -> tuple[list[CspResult], Optional[CspError]]:
     """
+    CSP per-symbol entry point. Now a thin wrapper around the unified
+    `services.screener.runner.run` driven by `CSP_CONFIG`. Behaviour is
+    preserved bit-for-bit relative to the legacy implementation
+    (kept as `_legacy_process_symbol` for one-commit revert).
+    """
+    from services.screener.runner import run as _run
+
+    rows, err = _run(
+        symbol,
+        CSP_CONFIG,
+        min_dte=min_dte,
+        max_dte=max_dte,
+        rf_rate=rf_rate,
+    )
+    if err is not None:
+        return [], CspError(symbol=err.symbol, reason=err.reason)
+    return rows, None
+
+
+def _legacy_process_symbol(
+    symbol: str,
+    min_dte: int = 30,
+    max_dte: int = 60,
+    rf_rate: float = 0.045,
+) -> tuple[list[CspResult], Optional[CspError]]:
+    """
     Processes a single symbol across all valid expirations in [min_dte, max_dte].
     Returns (list_of_results, None) on success or ([], error) on failure.
+
+    Legacy implementation; preserved for one-commit revert. The live entry
+    point is `process_symbol`, which delegates to the unified runner.
     """
     sym = symbol.strip().upper()
     try:
@@ -331,3 +360,254 @@ def process_symbol(
     except Exception as exc:
         logger.warning("Failed to process '%s': %s", sym, exc)
         return [], CspError(symbol=sym, reason=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Phase-3 unified-runner adapters
+# ---------------------------------------------------------------------------
+#
+# `process_symbol` (above) now delegates to `services.screener.runner.run`
+# driven by `CSP_CONFIG`. The legacy body is preserved as
+# `_legacy_process_symbol` for one-commit revert; remove after CC + DITM
+# migrations land in Phase 4.
+
+from services.screener import (  # noqa: E402  (late import keeps wrapper at top)
+    Indicators,
+    ScreenerConfig,
+    StrikeBuildInputs,
+    StrikeContext,
+    SymbolMetrics,
+)
+from services.screener.runner import (  # noqa: E402
+    Candidate,
+    ExpirationContext,
+    StrikeBundle,
+)
+
+
+def _csp_symbol_factory(_sym: str, df, current_price: float) -> tuple[Indicators, SymbolMetrics]:
+    """Build the symbol-level Indicators bundle + render-only SymbolMetrics for
+    CSP-shaped screeners.
+
+    Computes BB, SMA-ratio, RSI, HV-rank, IV-percentile, dist-from-52w,
+    vol-supports, and HV-sigma in one pass over the OHLC frame. Per-expiration
+    fields (`dte`, `earnings_within_dte`, `chain_median_oi`, `iv_hv_ratio`,
+    `iv_stale`) are layered onto Indicators by the runner via
+    `dataclasses.replace`.
+    """
+    import numpy as _np2
+    bb = compute_bollinger(df)
+    sma_r = compute_sma_ratio(df)
+    trend = compute_trend_data(df)
+    rsi = compute_rsi(df)
+    dist_52w = compute_price_vs_52w_high(df)
+    iv_rank_raw, iv_pct_raw = compute_iv_rank_percentile(df)
+    hv_rank = None if math.isnan(iv_rank_raw) else iv_rank_raw
+    iv_pct = None if math.isnan(iv_pct_raw) else iv_pct_raw
+    vol_sups = compute_volume_support(df, lookback=126)
+    log_ret = _np2.log(df["Close"] / df["Close"].shift(1)).dropna()
+    hv_sigma = float(log_ret.iloc[-30:].std(ddof=1) * _np2.sqrt(252)) if len(log_ret) >= 30 else 0.25
+
+    indicators = Indicators(
+        price=current_price,
+        sma50=trend.get("sma50", 0.0),
+        sma200=trend.get("sma200", 0.0),
+        price_above_sma50=trend["price_above_sma50"],
+        sma50_above_sma200=trend["sma50_above_sma200"],
+        dist_from_52w_high_pct=dist_52w,
+        chain_median_oi=0.0,        # filled per-expiration by runner
+        earnings_within_dte=False,  # filled per-expiration by runner
+        days_to_earnings=None,      # filled per-expiration
+        dte=0,                      # filled per-expiration
+        rsi=rsi,
+        hv_rank=hv_rank,
+        vol_support_1=vol_sups[0] if len(vol_sups) > 0 else None,
+        vol_support_2=vol_sups[1] if len(vol_sups) > 1 else None,
+        vol_support_3=vol_sups[2] if len(vol_sups) > 2 else None,
+    )
+    metrics = SymbolMetrics(
+        bb_upper=bb["bb_upper"],
+        bb_middle=bb["bb_middle"],
+        bb_lower=bb["bb_lower"],
+        sma_ratio=sma_r,
+        hv_sigma=hv_sigma,
+        iv_percentile=iv_pct,
+    )
+    return indicators, metrics
+
+
+def _csp_strike_context_builder(
+    inputs: StrikeBuildInputs,
+    indicators: Indicators,
+) -> StrikeContext:
+    """Assemble the per-strike StrikeContext for CSP. Reads vol-supports
+    from `indicators` (computed once per symbol) and bid/ask spread from
+    the chain DataFrame on `inputs`."""
+    cand: Candidate = inputs.candidate
+    spread_raw = get_bid_ask_spread_pct(inputs.chain_df, cand.strike)
+    spread: Optional[float] = None if math.isnan(spread_raw) else spread_raw
+    return StrikeContext(
+        delta=cand.delta,
+        strike=cand.strike,
+        current_price=inputs.current_price,
+        bid_ask_spread_pct=spread,
+        open_interest=cand.open_interest,
+        volume=cand.volume,
+        market_open=inputs.market_open,
+        iv_used=cand.iv_used,
+        dte=indicators.dte,
+        credit=cand.premium,
+        vol_support_1=indicators.vol_support_1,
+        vol_support_2=indicators.vol_support_2,
+        vol_support_3=indicators.vol_support_3,
+    )
+
+
+def _csp_env_scorer(ind: Indicators) -> tuple[float, str]:
+    """Adapter: Indicators bundle → legacy `compute_env_score` kwargs (CSP)."""
+    return compute_env_score(
+        iv_rank=ind.hv_rank,
+        iv_hv_ratio=ind.iv_hv_ratio,
+        price_above_sma50=ind.price_above_sma50,
+        sma50_above_sma200=ind.sma50_above_sma200,
+        dist_from_52w_high_pct=ind.dist_from_52w_high_pct,
+        rsi=ind.rsi if ind.rsi is not None else 0.0,
+        chain_median_oi=ind.chain_median_oi,
+        earnings_within_dte=ind.earnings_within_dte,
+        direction='csp',
+        dte=ind.dte,
+        iv_stale=ind.iv_stale,
+    )
+
+
+def _csp_strike_scorer_adapter(ctx: StrikeContext) -> tuple[float, str, dict]:
+    """Adapter: StrikeContext → legacy `compute_csp_strike_score` kwargs."""
+    return compute_csp_strike_score(
+        delta=ctx.delta,
+        current_price=ctx.current_price,
+        strike=ctx.strike,
+        iv_used=ctx.iv_used,
+        dte=ctx.dte,
+        vol_support_1=ctx.vol_support_1,
+        vol_support_2=ctx.vol_support_2,
+        vol_support_3=ctx.vol_support_3,
+        bid_ask_spread_pct=ctx.bid_ask_spread_pct,
+        open_interest=ctx.open_interest,
+        market_open=ctx.market_open,
+        volume=ctx.volume,
+        credit=ctx.credit,
+    )
+
+
+def _csp_tie_break(bundle) -> float:
+    """Tie-break by ROC annualised (higher is better)."""
+    raw = bundle.strike_raw
+    val = raw.get("roc_annualized")
+    if val is None or (isinstance(val, float) and math.isnan(val)):
+        return 0.0
+    return float(val)
+
+
+def _csp_result_factory(
+    ctx: ExpirationContext,
+    bundles: list[StrikeBundle],
+) -> CspResult:
+    """Builds CspResult + CspStrikeResult list from runner bundle data.
+
+    Mirrors the legacy result-construction block bit-for-bit so the
+    characterization tests keep passing."""
+    ind = ctx.indicators
+    metrics = ctx.metrics
+
+    strike_results: list[CspStrikeResult] = []
+    for b in bundles:
+        c = b.candidate
+        # Annualised return (legacy formula): (premium*100 / collateral) * (365/dte) * 100
+        collateral = round(c.strike * 100.0, 2)
+        ret = round((c.premium * 100) / collateral * 100.0, 4) if collateral > 0 else 0.0
+        ann_ret = round(ret * (365.0 / ctx.dte), 4) if ctx.dte > 0 else 0.0
+
+        em_buf = b.strike_raw.get("em_buffer_pct", float("nan"))
+        em_buf = None if (isinstance(em_buf, float) and math.isnan(em_buf)) else em_buf
+        roc = b.strike_raw.get("roc_annualized", float("nan"))
+        roc = None if (isinstance(roc, float) and math.isnan(roc)) else roc
+
+        strike_results.append(CspStrikeResult(
+            strike=c.strike,
+            delta=c.delta,
+            premium=round(c.premium, 4),
+            annualized_return=ann_ret,
+            bid_ask_spread_pct=b.bid_ask_spread_pct,
+            env_score=b.env_score,
+            strike_score=b.strike_score,
+            csp_score=b.final_score,
+            env_detail=b.env_detail,
+            strike_detail=b.strike_detail,
+            is_best=b.is_best,
+            iv_fallback=c.iv_fallback,
+            stale_premium=c.stale_premium,
+            iv_hv_ratio=c.iv_hv_ratio,
+            dist_pct=b.strike_raw.get("dist_pct"),
+            em_buffer_pct=em_buf,
+            otm_pct=b.strike_raw.get("otm_pct", 0.0),
+            lq_count=int(b.strike_raw.get("lq_count", 0)),
+            roc_annualized=roc,
+            iv_stale=c.iv_stale,
+        ))
+
+    best_score = max((s.csp_score for s in strike_results), default=0.0)
+    return CspResult(
+        symbol=ctx.symbol,
+        price=round(ctx.current_price, 4),
+        bb_upper=metrics.bb_upper or 0.0,
+        bb_middle=metrics.bb_middle or 0.0,
+        bb_lower=metrics.bb_lower or 0.0,
+        sma_ratio=metrics.sma_ratio or 0.0,
+        rsi=ind.rsi if ind.rsi is not None else 0.0,
+        iv_rank=ind.hv_rank,
+        iv_percentile=metrics.iv_percentile,
+        earnings_date=ctx.earnings_date,
+        earnings_within_dte=ctx.earnings_within_dte,
+        vol_support_126_1=ind.vol_support_1,
+        vol_support_126_2=ind.vol_support_2,
+        vol_support_126_3=ind.vol_support_3,
+        dte=ctx.dte,
+        expiration=ctx.expiration,
+        strikes=strike_results,
+        best_csp_score=best_score,
+        using_hv_fallback=any(sr.iv_fallback for sr in strike_results),
+        expected_move=round(ctx.current_price * (metrics.hv_sigma or 0.0) * math.sqrt(ctx.dte / 365.0), 2),
+        dist_from_52w_high_pct=round(ind.dist_from_52w_high_pct, 2),
+        chain_median_oi=ctx.chain_median_oi,
+    )
+
+
+CSP_CONFIG = ScreenerConfig(
+    name="csp",
+    direction="short_put",
+    chain_fetcher=lambda s, lo, hi: get_all_expirations_data(s, lo, hi),
+    delta_fn=black_scholes_put_delta,
+    ohlc_fetcher=lambda s, **kw: get_ohlc(s, **kw),
+    iv_lookup=lambda chain_df, strike: get_implied_volatility(chain_df, strike),
+    strike_filter=lambda price, strike: strike < price * 1.02,
+    delta_range=(-0.35, -0.10),
+    ideal_delta=-0.225,
+    oi_delta_band=(-0.40, -0.10),
+    symbol_factory=_csp_symbol_factory,
+    strike_context_builder=_csp_strike_context_builder,
+    env_scorer=_csp_env_scorer,
+    strike_scorer=_csp_strike_scorer_adapter,
+    final_blend=(0.4, 0.6),
+    tie_break_key=_csp_tie_break,
+    result_factory=_csp_result_factory,
+)
+
+
+__all__ = [
+    "CspError",
+    "CspResult",
+    "CspStrikeResult",
+    "CSP_CONFIG",
+    "process_symbol",
+]
+

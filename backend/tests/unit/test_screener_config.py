@@ -28,7 +28,9 @@ from services.screener import (
     GateResult,
     Indicators,
     ScreenerConfig,
+    StrikeBuildInputs,
     StrikeContext,
+    SymbolMetrics,
 )
 
 
@@ -157,10 +159,6 @@ def _stub_strike_scorer(_ctx: StrikeContext) -> tuple[float, str, dict[str, Any]
     return 80.0, "stub", {"roc_annualized": 12.0}
 
 
-def _stub_capital_basis(ctx: StrikeContext) -> float:
-    return ctx.strike * 100.0
-
-
 def _stub_delta_fn(_s: float, _k: float, _t: float, _sig: float, _r: float) -> float:
     return -0.22
 
@@ -173,19 +171,47 @@ def _stub_strike_filter(price: float, strike: float) -> bool:
     return strike < price * 1.02
 
 
+def _stub_ohlc_fetcher(_sym: str, **_kw: Any) -> Any:
+    return None
+
+
+def _stub_iv_lookup(_chain: Any, _strike: float) -> float:
+    return 0.30
+
+
+def _stub_symbol_factory(_sym: str, _df: Any, _price: float) -> tuple[Indicators, SymbolMetrics]:
+    return Indicators(
+        price=100.0, sma50=99.0, sma200=98.0,
+        price_above_sma50=True, sma50_above_sma200=True,
+        dist_from_52w_high_pct=-2.0, chain_median_oi=0.0,
+        earnings_within_dte=False, days_to_earnings=30, dte=0,
+    ), SymbolMetrics()
+
+
+def _stub_strike_context_builder(_inputs: StrikeBuildInputs, _ind: Indicators) -> StrikeContext:
+    return StrikeContext(
+        delta=-0.22, strike=95.0, current_price=100.0,
+        bid_ask_spread_pct=2.0, open_interest=500, volume=100,
+        market_open=False, iv_used=0.30, dte=30,
+    )
+
+
 def test_screener_config_csp_shape_builds_with_minimal_fields():
     cfg = ScreenerConfig(
         name="csp",
         direction="short_put",
         chain_fetcher=_stub_chain_fetcher,
         delta_fn=_stub_delta_fn,
+        ohlc_fetcher=_stub_ohlc_fetcher,
+        iv_lookup=_stub_iv_lookup,
+        symbol_factory=_stub_symbol_factory,
+        strike_context_builder=_stub_strike_context_builder,
         strike_filter=_stub_strike_filter,
         delta_range=(-0.35, -0.10),
         ideal_delta=-0.225,
         oi_delta_band=(-0.40, -0.10),
         env_scorer=_stub_env_scorer,
         strike_scorer=_stub_strike_scorer,
-        capital_basis_fn=_stub_capital_basis,
         final_blend=(0.4, 0.6),
     )
     # Optional fields default empty / None.
@@ -201,13 +227,16 @@ def test_screener_config_describe_output():
         direction="short_call",
         chain_fetcher=_stub_chain_fetcher,
         delta_fn=_stub_delta_fn,
+        ohlc_fetcher=_stub_ohlc_fetcher,
+        iv_lookup=_stub_iv_lookup,
+        symbol_factory=_stub_symbol_factory,
+        strike_context_builder=_stub_strike_context_builder,
         strike_filter=_stub_strike_filter,
         delta_range=(0.10, 0.35),
         ideal_delta=0.225,
         oi_delta_band=(0.10, 0.40),
         env_scorer=_stub_env_scorer,
         strike_scorer=_stub_strike_scorer,
-        capital_basis_fn=_stub_capital_basis,
         final_blend=(0.5, 0.5),
     )
     out = cfg.describe()
@@ -224,13 +253,16 @@ def test_screener_config_rejects_blend_weights_not_summing_to_one():
             direction="short_put",
             chain_fetcher=_stub_chain_fetcher,
             delta_fn=_stub_delta_fn,
+            ohlc_fetcher=_stub_ohlc_fetcher,
+            iv_lookup=_stub_iv_lookup,
+            symbol_factory=_stub_symbol_factory,
+            strike_context_builder=_stub_strike_context_builder,
             strike_filter=_stub_strike_filter,
             delta_range=(-0.35, -0.10),
             ideal_delta=-0.225,
             oi_delta_band=(-0.40, -0.10),
             env_scorer=_stub_env_scorer,
             strike_scorer=_stub_strike_scorer,
-            capital_basis_fn=_stub_capital_basis,
             final_blend=(0.7, 0.7),
         )
 
@@ -242,13 +274,16 @@ def test_screener_config_rejects_negative_blend_weights():
             direction="short_put",
             chain_fetcher=_stub_chain_fetcher,
             delta_fn=_stub_delta_fn,
+            ohlc_fetcher=_stub_ohlc_fetcher,
+            iv_lookup=_stub_iv_lookup,
+            symbol_factory=_stub_symbol_factory,
+            strike_context_builder=_stub_strike_context_builder,
             strike_filter=_stub_strike_filter,
             delta_range=(-0.35, -0.10),
             ideal_delta=-0.225,
             oi_delta_band=(-0.40, -0.10),
             env_scorer=_stub_env_scorer,
             strike_scorer=_stub_strike_scorer,
-            capital_basis_fn=_stub_capital_basis,
             final_blend=(-0.1, 1.1),
         )
 
@@ -259,13 +294,16 @@ def test_screener_config_is_frozen():
         direction="short_put",
         chain_fetcher=_stub_chain_fetcher,
         delta_fn=_stub_delta_fn,
+        ohlc_fetcher=_stub_ohlc_fetcher,
+        iv_lookup=_stub_iv_lookup,
+        symbol_factory=_stub_symbol_factory,
+        strike_context_builder=_stub_strike_context_builder,
         strike_filter=_stub_strike_filter,
         delta_range=(-0.35, -0.10),
         ideal_delta=-0.225,
         oi_delta_band=(-0.40, -0.10),
         env_scorer=_stub_env_scorer,
         strike_scorer=_stub_strike_scorer,
-        capital_basis_fn=_stub_capital_basis,
         final_blend=(0.4, 0.6),
     )
     with pytest.raises((AttributeError, Exception)):
@@ -283,21 +321,24 @@ def test_screener_config_ditm_shape_with_hooks():
             return GateResult(passed=False, reason="trend_pts<22")
         return GateResult(passed=True)
 
-    def _ditm_tie_break(s: BaseStrikeResult) -> float:
-        return -abs(s.delta - 0.82)
+    def _ditm_tie_break(s: Any) -> float:
+        return -abs(s.candidate.delta - 0.82) if hasattr(s, "candidate") else 0.0
 
     cfg = ScreenerConfig(
         name="ditm",
         direction="long_call",
         chain_fetcher=_stub_chain_fetcher,
         delta_fn=_stub_delta_fn,
+        ohlc_fetcher=_stub_ohlc_fetcher,
+        iv_lookup=_stub_iv_lookup,
+        symbol_factory=_stub_symbol_factory,
+        strike_context_builder=_stub_strike_context_builder,
         strike_filter=lambda p, k: k < p,
         delta_range=(0.70, 0.90),
         ideal_delta=0.82,
         oi_delta_band=(0.60, 0.95),
         env_scorer=_stub_env_scorer,
         strike_scorer=_stub_strike_scorer,
-        capital_basis_fn=_stub_capital_basis,
         final_blend=(0.5, 0.5),
         pre_processors=(_stub_pre,),
         hard_gates=(_stub_gate,),

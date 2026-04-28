@@ -33,12 +33,16 @@ Direction = Literal["short_put", "short_call", "long_call"]
 @dataclass(frozen=True)
 class Indicators:
     """
-    Per-symbol environment inputs.
+    Per-symbol environment inputs consumed by the env scorer.
 
-    Union of every indicator field consumed by the three env scorers
-    (`compute_env_score` for CSP/CC and the inline DITM env scorer). Optional
-    fields default to None so a CSP config can leave `weekly_rsi` unset and a
-    DITM config can leave `iv_rank`/`iv_hv_ratio` unset.
+    Strict scope: only fields a `compute_*_env_score` function reads, plus
+    the per-symbol levels (`vol_support_*`, `vol_resistance_*`) consumed at
+    strike-scoring time via `strike_context_builder`. Render-only metadata
+    (BB, sma_ratio, hv_sigma, iv_percentile, earnings_date) lives on
+    `SymbolMetrics`, not here — see ADR-0007.
+
+    Optional fields default to None so a CSP config can leave `weekly_rsi`
+    unset and a DITM config can leave `iv_hv_ratio` unset.
     """
 
     # Common (all three screeners)
@@ -68,6 +72,34 @@ class Indicators:
     ret_200d_frac: Optional[float] = None  # 200-day median-anchored return as fraction
     trend_pts: Optional[float] = None      # legacy trend strength (used by DITM hard gate)
     macro_hold: bool = False               # macro-context flag (DITM only)
+
+    # Per-symbol levels consumed by strike scorers via strike_context_builder.
+    vol_support_1: Optional[float] = None
+    vol_support_2: Optional[float] = None
+    vol_support_3: Optional[float] = None
+    vol_resistance_1: Optional[float] = None
+    vol_resistance_2: Optional[float] = None
+    vol_resistance_3: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class SymbolMetrics:
+    """
+    Render-only per-symbol metadata.
+
+    Fields here are NOT read by any scorer; they exist so a screener's
+    `result_factory` can populate its concrete result dataclass (BB bands,
+    sma_ratio, hv_sigma, iv_percentile, etc.) without bloating `Indicators`.
+    The runner threads `SymbolMetrics` through `ExpirationContext`.
+    """
+
+    bb_upper: Optional[float] = None
+    bb_middle: Optional[float] = None
+    bb_lower: Optional[float] = None
+    sma_ratio: Optional[float] = None      # SMA50 / SMA200
+    hv_sigma: Optional[float] = None       # 30d log-return volatility (annualised)
+    iv_percentile: Optional[float] = None
+    earnings_date: Optional[str] = None    # ISO YYYY-MM-DD; per-expiration view available on ctx
 
 
 @dataclass(frozen=True)
@@ -118,6 +150,28 @@ class GateResult:
 
     passed: bool
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class StrikeBuildInputs:
+    """
+    Typed payload handed to `strike_context_builder`.
+
+    Replaces the previous untyped `dict` payload. Holds the per-strike
+    candidate plus the per-symbol context the builder needs to assemble
+    a `StrikeContext`. Frozen so builders cannot mutate runner-side state.
+
+    `candidate` is intentionally typed `Any` to avoid a `types.py` →
+    `runner.py` import cycle; the runtime type is `runner.Candidate`.
+    """
+
+    candidate: Any
+    current_price: float
+    hv_sigma: float
+    chain_df: Any
+    market_open: bool
+    rf_rate: float
+    T: float                  # dte / 365.0
 
 
 # --- Generic result base classes -------------------------------------------
@@ -175,10 +229,6 @@ EnvScorer = Callable[[Indicators], tuple[float, str]]
 # etc. so the result_factory can stash them on the concrete result.
 StrikeScorer = Callable[[StrikeContext], tuple[float, str, dict[str, Any]]]
 
-# (StrikeContext) -> capital denominator in dollars per contract.
-# CSP: strike * 100 ; CC: current_price * 100 ; DITM: mid * 100.
-CapitalBasisFn = Callable[[StrikeContext], float]
-
 # (Indicators) -> GateResult. DITM uses these for trend / hv_rank / earnings
 # short-circuits. CSP / CC pass `()` (no gates).
 HardGate = Callable[[Indicators], GateResult]
@@ -187,18 +237,37 @@ HardGate = Callable[[Indicators], GateResult]
 # DITM uses these for macro_context, weekly_rsi, ret_200d enrichment.
 PreProcessor = Callable[[str, Any, Indicators], Indicators]
 
-# (BaseStrikeResult) -> sort key used to pick the best strike.
+# (StrikeBundle) -> sort key used to pick the best strike.
 # CSP / CC: roc_annualized (descending). DITM: -|delta - ideal_delta|.
-TieBreakKey = Callable[[BaseStrikeResult], float]
+# Typed as Callable[[Any], float] because the bundle type lives in `runner`
+# and importing it here would create a cycle. Concrete tie-breakers should
+# read `bundle.candidate.delta` / `bundle.strike_raw["roc_annualized"]`.
+TieBreakKey = Callable[[Any], float]
 
 # Builds the concrete strike-result dataclass from runner-side bundle.
 ResultFactory = Callable[..., Any]
+
+# (symbol[, period]) -> OHLC DataFrame. Per-screener so test monkeypatches on
+# `services.{csp,cc,ditm}_service.get_ohlc` keep working unchanged.
+OhlcFetcher = Callable[..., Any]
+
+# (symbol, df, current_price) -> (Indicators, SymbolMetrics). Single factory
+# computes both the env-input bundle and the render-only metrics in one
+# pass over the OHLC frame.
+SymbolFactory = Callable[[str, Any, float], tuple["Indicators", "SymbolMetrics"]]
+
+# (chain_df, strike) -> implied_vol. Indirected through ScreenerConfig so
+# tests can monkey-patch each screener's IV lookup independently.
+IvLookup = Callable[[Any, float], float]
+
+# (StrikeBuildInputs, indicators) -> StrikeContext. The screener decides
+# which fields of the union StrikeContext bundle to populate.
+StrikeContextBuilder = Callable[["StrikeBuildInputs", "Indicators"], "StrikeContext"]
 
 
 __all__ = [
     "BaseScreenerResult",
     "BaseStrikeResult",
-    "CapitalBasisFn",
     "ChainFetcher",
     "DeltaFn",
     "Direction",
@@ -206,10 +275,16 @@ __all__ = [
     "GateResult",
     "HardGate",
     "Indicators",
+    "IvLookup",
+    "OhlcFetcher",
     "PreProcessor",
     "ResultFactory",
+    "StrikeBuildInputs",
     "StrikeContext",
+    "StrikeContextBuilder",
     "StrikeFilter",
     "StrikeScorer",
+    "SymbolFactory",
+    "SymbolMetrics",
     "TieBreakKey",
 ]

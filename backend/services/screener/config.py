@@ -20,16 +20,19 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .types import (
-    CapitalBasisFn,
     ChainFetcher,
     DeltaFn,
     Direction,
     EnvScorer,
     HardGate,
+    IvLookup,
+    OhlcFetcher,
     PreProcessor,
     ResultFactory,
+    StrikeContextBuilder,
     StrikeFilter,
     StrikeScorer,
+    SymbolFactory,
     TieBreakKey,
 )
 
@@ -51,6 +54,8 @@ class ScreenerConfig:
     # --- External-data adapters -------------------------------------------
     chain_fetcher: ChainFetcher            # puts / calls / itm-calls endpoint
     delta_fn: DeltaFn                      # BS put / call delta
+    ohlc_fetcher: OhlcFetcher              # data_service.get_ohlc (per-screener for test patches)
+    iv_lookup: IvLookup                    # options_service.get_implied_volatility (per-screener for test patches)
 
     # --- Strike selection -------------------------------------------------
     strike_filter: StrikeFilter            # OTM puts / OTM calls / ITM calls
@@ -60,10 +65,13 @@ class ScreenerConfig:
     # --- Open-interest band for chain_median_oi ---------------------------
     oi_delta_band: tuple[float, float]     # (-0.40, -0.10) | (0.10, 0.40) | (0.60, 0.95)
 
+    # --- Indicator + strike-context assembly -----------------------------
+    symbol_factory: SymbolFactory          # (symbol, df, current_price) -> (Indicators, SymbolMetrics)
+    strike_context_builder: StrikeContextBuilder  # (StrikeBuildInputs, Indicators) -> StrikeContext
+
     # --- Scoring ----------------------------------------------------------
     env_scorer: EnvScorer
     strike_scorer: StrikeScorer
-    capital_basis_fn: CapitalBasisFn
     final_blend: tuple[float, float]       # (env_weight, strike_weight); must sum to ~1.0
 
     # --- Variant hooks ----------------------------------------------------
