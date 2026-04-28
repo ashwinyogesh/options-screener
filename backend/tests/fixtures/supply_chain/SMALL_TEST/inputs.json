@@ -1,0 +1,42 @@
+{
+  "ticker": "SMALL_TEST",
+  "enrich_industry": false,
+  "cik": "0001234567",
+  "latest_10k": {
+    "accession": "0001234567-25-000001",
+    "filing_date": "2025-03-31",
+    "primary_doc_url": "https://example.test/small/10k.htm",
+    "company_name": "Smallcap Test Industries",
+    "form": "10-K"
+  },
+  "filing_text": "ITEM 1. BUSINESS — Smallcap Test Industries manufactures specialty widgets. We rely on a single steel supplier and compete with one regional manufacturer.",
+  "recent_8ks": [],
+  "eight_k_texts": {},
+  "filing_pass_response": {
+    "segments": [],
+    "concentration_note": "",
+    "summary": "Smallcap Test Industries makes specialty widgets with a single steel supplier and one regional competitor.",
+    "suppliers": [
+      {
+        "name": "Nucor Test",
+        "ticker": "NUE_T",
+        "relationship": "Steel coils",
+        "cost_pct": null,
+        "segment": null,
+        "source": "10-K",
+        "notes": ""
+      }
+    ],
+    "customers": [],
+    "competitors": [
+      {
+        "name": "Regional Widget Test Co",
+        "ticker": null,
+        "relationship": "Specialty widgets",
+        "segment": null,
+        "source": "10-K",
+        "notes": ""
+      }
+    ]
+  }
+}

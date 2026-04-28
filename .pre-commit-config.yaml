@@ -23,7 +23,7 @@ repos:
       - id: ruff
         name: ruff (lint, autofix)
         args: [--fix]
-        files: ^backend/.*\.py$
+        files: ^(backend|scripts)/.*\.py$
       # NOTE: ruff-format runs in check-only mode for now. We have not yet
       # committed to ruff-format as the canonical formatter; this lets devs
       # see drift without surprise reformats. Remove `--check` to enable
@@ -31,7 +31,7 @@ repos:
       - id: ruff-format
         name: ruff-format (check only)
         args: [--check]
-        files: ^backend/.*\.py$
+        files: ^(backend|scripts)/.*\.py$
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

@@ -1,0 +1,110 @@
+{
+  "ticker": "KO_VERIFIER_FAIL_TEST",
+  "enrich_industry": true,
+  "cik": "0000021344",
+  "latest_10k": {
+    "accession": "0000021344-25-000004",
+    "filing_date": "2025-02-19",
+    "primary_doc_url": "https://example.test/ko/10k.htm",
+    "company_name": "Coca-Cola Test Inc",
+    "form": "10-K"
+  },
+  "filing_text": "ITEM 1. BUSINESS — Coca-Cola Test Inc operates a single beverage concentrate segment. We rely on aluminum can suppliers and PET resin producers. Our largest customers are global bottling partners. We compete with PepsiCo Test in carbonated soft drinks. No single customer accounted for more than 10% of net sales in fiscal 2024.",
+  "recent_8ks": [],
+  "eight_k_texts": {},
+  "verifier_should_fail": true,
+  "filing_pass_response": {
+    "segments": ["Beverage Concentrates"],
+    "concentration_note": "No single customer accounted for more than 10% of net sales in fiscal 2024.",
+    "summary": "Coca-Cola Test Inc sells concentrate to bottling partners, sources aluminum and PET resin, and competes with PepsiCo Test in carbonated soft drinks.",
+    "suppliers": [
+      {
+        "name": "Ball Test Corp",
+        "ticker": "BLL_T",
+        "relationship": "Aluminum cans",
+        "cost_pct": null,
+        "segment": "Beverage Concentrates",
+        "source": "10-K",
+        "notes": "Primary aluminum can supplier."
+      },
+      {
+        "name": "Indorama Test Ventures",
+        "ticker": null,
+        "relationship": "PET resin",
+        "cost_pct": null,
+        "segment": "Beverage Concentrates",
+        "source": "10-K",
+        "notes": "PET resin for plastic bottles."
+      }
+    ],
+    "customers": [
+      {
+        "name": "Coca-Cola Bottling Partners Test",
+        "ticker": null,
+        "relationship": "Bottling partner",
+        "revenue_pct": null,
+        "segment": "Beverage Concentrates",
+        "source": "10-K",
+        "notes": ""
+      },
+      {
+        "name": "Walmart Test",
+        "ticker": "WMT_T",
+        "relationship": "Retail distributor",
+        "revenue_pct": null,
+        "segment": "Beverage Concentrates",
+        "source": "10-K",
+        "notes": ""
+      }
+    ],
+    "competitors": [
+      {
+        "name": "PepsiCo Test",
+        "ticker": "PEP_T",
+        "relationship": "Carbonated soft drinks",
+        "segment": "Beverage Concentrates",
+        "source": "10-K",
+        "notes": ""
+      }
+    ]
+  },
+  "industry_pass_response": {
+    "suppliers": [
+      {
+        "name": "Ball Test Corp",
+        "ticker": "BLL_T",
+        "relationship": "Aluminum cans (industry-known)",
+        "cost_pct": null,
+        "segment": "Beverage Concentrates",
+        "confidence": 0.95,
+        "notes": "Duplicate of filing entry — should be deduped on merge."
+      },
+      {
+        "name": "Crown Test Holdings",
+        "ticker": "CCK_T",
+        "relationship": "Aluminum / steel cans",
+        "cost_pct": null,
+        "segment": "Beverage Concentrates",
+        "confidence": 0.85,
+        "notes": "Widely reported secondary can supplier."
+      }
+    ],
+    "customers": [],
+    "competitors": [
+      {
+        "name": "Keurig Dr Pepper Test",
+        "ticker": "KDP_T",
+        "relationship": "Beverages",
+        "segment": "Beverage Concentrates",
+        "confidence": 0.6,
+        "notes": "Industry competitor — verifier may drop."
+      }
+    ]
+  },
+  "verifier_pass_response": {
+    "suppliers": [],
+    "customers": [],
+    "competitors": [],
+    "audit_summary": "unused — verifier_should_fail=true"
+  }
+}

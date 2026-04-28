@@ -1,0 +1,101 @@
+{
+  "ticker": "KO_VERIFIER_FAIL_TEST",
+  "company_name": "Coca-Cola Test Inc",
+  "filing_date": "2025-02-19",
+  "accession": "0000021344-25-000004",
+  "suppliers": [
+    {
+      "name": "Ball Test Corp",
+      "ticker": "BLL_T",
+      "relationship": "Aluminum cans",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "Primary aluminum can supplier.",
+      "source": "10-K",
+      "segment": "Beverage Concentrates",
+      "confidence": null
+    },
+    {
+      "name": "Indorama Test Ventures",
+      "ticker": null,
+      "relationship": "PET resin",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "PET resin for plastic bottles.",
+      "source": "10-K",
+      "segment": "Beverage Concentrates",
+      "confidence": null
+    },
+    {
+      "name": "Crown Test Holdings",
+      "ticker": "CCK_T",
+      "relationship": "Aluminum / steel cans",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "Widely reported secondary can supplier.",
+      "source": "industry",
+      "segment": "Beverage Concentrates",
+      "confidence": 0.85
+    }
+  ],
+  "customers": [
+    {
+      "name": "Coca-Cola Bottling Partners Test",
+      "ticker": null,
+      "relationship": "Bottling partner",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": "Beverage Concentrates",
+      "confidence": null
+    },
+    {
+      "name": "Walmart Test",
+      "ticker": "WMT_T",
+      "relationship": "Retail distributor",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": "Beverage Concentrates",
+      "confidence": null
+    }
+  ],
+  "competitors": [
+    {
+      "name": "PepsiCo Test",
+      "ticker": "PEP_T",
+      "relationship": "Carbonated soft drinks",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": "Beverage Concentrates",
+      "confidence": null
+    },
+    {
+      "name": "Keurig Dr Pepper Test",
+      "ticker": "KDP_T",
+      "relationship": "Beverages",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "Industry competitor — verifier may drop.",
+      "source": "industry",
+      "segment": "Beverage Concentrates",
+      "confidence": 0.6
+    }
+  ],
+  "summary": "Coca-Cola Test Inc sells concentrate to bottling partners, sources aluminum and PET resin, and competes with PepsiCo Test in carbonated soft drinks.",
+  "cached": false,
+  "eight_k_count": 0,
+  "eight_k_dates": [],
+  "segments": [
+    "Beverage Concentrates"
+  ],
+  "concentration_note": "No single customer accounted for more than 10% of net sales in fiscal 2024.",
+  "enrichment_used": [
+    "filing",
+    "industry"
+  ]
+}

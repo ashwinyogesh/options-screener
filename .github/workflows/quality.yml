@@ -43,7 +43,7 @@ jobs:
           pip install -r backend/requirements-dev.txt
 
       - name: Ruff lint
-        run: ruff check backend
+        run: ruff check backend scripts
 
       - name: Pytest
         env:

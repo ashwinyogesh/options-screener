@@ -1,0 +1,173 @@
+{
+  "ticker": "MSFT_TEST",
+  "company_name": "Microsoft Test Corporation",
+  "filing_date": "2025-07-30",
+  "accession": "0000789019-25-000007",
+  "suppliers": [
+    {
+      "name": "NVIDIA Test Corp",
+      "ticker": "NVDA_T",
+      "relationship": "AI accelerators / GPUs",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "Expanded multi-year capacity agreement disclosed in 8-K filed 2025-09-15.",
+      "source": "8-K",
+      "segment": "Intelligent Cloud",
+      "confidence": null
+    },
+    {
+      "name": "Intel Test Corporation",
+      "ticker": "INTC_T",
+      "relationship": "Server CPUs",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": "Intelligent Cloud",
+      "confidence": null
+    },
+    {
+      "name": "AMD Test Inc",
+      "ticker": "AMD_T",
+      "relationship": "Server CPUs / GPUs",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": "Intelligent Cloud",
+      "confidence": null
+    },
+    {
+      "name": "Foxconn Test",
+      "ticker": null,
+      "relationship": "Surface device assembly",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": "More Personal Computing",
+      "confidence": null
+    },
+    {
+      "name": "TSMC Test",
+      "ticker": "TSM_T",
+      "relationship": "Foundry for custom silicon",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "Widely reported foundry partner for Cobalt / Maia silicon.",
+      "source": "industry",
+      "segment": "Intelligent Cloud",
+      "confidence": 0.85
+    }
+  ],
+  "customers": [
+    {
+      "name": "Coreweave Test Inc",
+      "ticker": "CRWV_T",
+      "relationship": "AI infrastructure customer",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "Supply agreement disclosed in 8-K filed 2025-10-22.",
+      "source": "8-K",
+      "segment": "Intelligent Cloud",
+      "confidence": null
+    },
+    {
+      "name": "US Federal Government Test",
+      "ticker": null,
+      "relationship": "Cloud + productivity",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": "Intelligent Cloud",
+      "confidence": null
+    },
+    {
+      "name": "Accenture Test",
+      "ticker": "ACN_T",
+      "relationship": "Systems integrator partner / customer",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": "Productivity & Business Processes",
+      "confidence": null
+    },
+    {
+      "name": "OpenAI Test",
+      "ticker": null,
+      "relationship": "Strategic Azure customer",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "Publicly disclosed multi-year strategic partnership.",
+      "source": "industry",
+      "segment": "Intelligent Cloud",
+      "confidence": 0.95
+    },
+    {
+      "name": "Walmart Test",
+      "ticker": "WMT_T",
+      "relationship": "Enterprise Azure + M365 customer",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "Widely reported enterprise customer.",
+      "source": "industry",
+      "segment": "Productivity & Business Processes",
+      "confidence": 0.8
+    }
+  ],
+  "competitors": [
+    {
+      "name": "Amazon Test Web Services",
+      "ticker": "AMZN_T",
+      "relationship": "Public cloud",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": "Intelligent Cloud",
+      "confidence": null
+    },
+    {
+      "name": "Google Test Cloud",
+      "ticker": "GOOGL_T",
+      "relationship": "Public cloud + productivity",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": "Intelligent Cloud",
+      "confidence": null
+    },
+    {
+      "name": "Apple Test",
+      "ticker": "AAPL_T",
+      "relationship": "Personal computing devices",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": "More Personal Computing",
+      "confidence": null
+    }
+  ],
+  "summary": "Microsoft Test runs Office, Azure, and Windows/Devices. Recent 8-Ks added NVIDIA Test capacity and a Coreweave Test supply agreement.",
+  "cached": false,
+  "eight_k_count": 2,
+  "eight_k_dates": [
+    "2025-09-15",
+    "2025-10-22"
+  ],
+  "segments": [
+    "Productivity & Business Processes",
+    "Intelligent Cloud",
+    "More Personal Computing"
+  ],
+  "concentration_note": "",
+  "enrichment_used": [
+    "filing",
+    "verified",
+    "industry"
+  ]
+}

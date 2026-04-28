@@ -3,7 +3,7 @@ One-off capture utility for screener characterization fixtures.
 
 Run from repo root with:
     cd backend
-    .\venv\Scripts\python.exe ..\scripts\capture_screener_fixtures.py
+    .\venv\\Scripts\\python.exe ..\\scripts\\capture_screener_fixtures.py
 
 What it does:
 - For each (screener, ticker) pair below, calls live yfinance via the real
@@ -33,7 +33,7 @@ import json
 import logging
 import pickle
 import sys
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -44,10 +44,12 @@ _BACKEND = Path(__file__).resolve().parent.parent / "backend"
 sys.path.insert(0, str(_BACKEND))
 
 from services import data_service, options_service  # noqa: E402
-from services.csp_service import process_symbol as process_csp  # noqa: E402
 from services.cc_service import process_cc_symbol as process_cc  # noqa: E402
+from services.csp_service import process_symbol as process_csp  # noqa: E402
 from services.ditm_service import (  # noqa: E402
     get_macro_context,
+)
+from services.ditm_service import (
     process_symbol as process_ditm,
 )
 

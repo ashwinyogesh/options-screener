@@ -1,0 +1,42 @@
+{
+  "ticker": "SMALL_TEST",
+  "company_name": "Smallcap Test Industries",
+  "filing_date": "2025-03-31",
+  "accession": "0001234567-25-000001",
+  "suppliers": [
+    {
+      "name": "Nucor Test",
+      "ticker": "NUE_T",
+      "relationship": "Steel coils",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": null,
+      "confidence": null
+    }
+  ],
+  "customers": [],
+  "competitors": [
+    {
+      "name": "Regional Widget Test Co",
+      "ticker": null,
+      "relationship": "Specialty widgets",
+      "revenue_pct": null,
+      "cost_pct": null,
+      "notes": "",
+      "source": "10-K",
+      "segment": null,
+      "confidence": null
+    }
+  ],
+  "summary": "Smallcap Test Industries makes specialty widgets with a single steel supplier and one regional competitor.",
+  "cached": false,
+  "eight_k_count": 0,
+  "eight_k_dates": [],
+  "segments": [],
+  "concentration_note": "",
+  "enrichment_used": [
+    "filing"
+  ]
+}
