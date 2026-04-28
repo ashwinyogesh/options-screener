@@ -37,3 +37,7 @@ frontend/tsconfig.tsbuildinfo
 
 # Local test scratch
 test_output.txt
+
+# Deployment exports
+backend.zip
+*.zip
