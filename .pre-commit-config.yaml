@@ -1,0 +1,46 @@
+# Pre-commit hooks for the Options Screener.
+#
+# Scope:
+#   - Lint + autofix backend Python with ruff (config in repo-root ruff.toml).
+#   - Run ruff-format in --check mode only for now: surface formatting drift
+#     without rewriting files. Flip to autofix in a follow-up once we've
+#     reviewed the diff churn.
+#   - Repo-wide hygiene from pre-commit-hooks.
+#
+# Deferred (intentionally not wired here):
+#   - Frontend tsc/eslint — covered by `npm run build` and the quality workflow.
+#   - mypy — type-checking adoption is gradual; revisit in Track A Phase 6.
+#
+# Usage:
+#   pip install -r backend/requirements-dev.txt
+#   pre-commit install
+#   pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        name: ruff (lint, autofix)
+        args: [--fix]
+        files: ^backend/.*\.py$
+      # NOTE: ruff-format runs in check-only mode for now. We have not yet
+      # committed to ruff-format as the canonical formatter; this lets devs
+      # see drift without surprise reformats. Remove `--check` to enable
+      # autoformatting once the team agrees.
+      - id: ruff-format
+        name: ruff-format (check only)
+        args: [--check]
+        files: ^backend/.*\.py$
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
