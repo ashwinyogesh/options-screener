@@ -13,8 +13,8 @@ Each fixture under `backend/tests/fixtures/supply_chain/` is iterated in lexical
 order. For every ticker we:
 
 1. Load `inputs.json`,
-2. Patch every external boundary in `services.supply_chain_service` via the
-   shared `_mocks.patched_supply_chain` helper,
+2. Patch the supply-chain pipeline's default-client/default-extractor
+   factories via the shared `_mocks.patched_supply_chain` helper,
 3. Call `scs.get_supply_chain(...)` with the requested `enrich_industry` flag,
 4. Sanity-check the resulting graph (company name, accession, enrichment_used
    contract),
