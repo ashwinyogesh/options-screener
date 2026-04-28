@@ -165,4 +165,3 @@ def compute_env_score(
     if earn_p != 0:
         detail += f' Ear:{round(earn_p)}'
     return round(score, 1), detail
-
