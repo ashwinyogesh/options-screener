@@ -12,16 +12,27 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
-from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Optional
 
 import httpx
-from bs4 import BeautifulSoup
 from openai import AzureOpenAI
 
-SourceTag = Literal["10-K", "8-K", "industry"]
+from services.supply_chain.text_extraction import (
+    extract_8k_text as _extract_8k_text,
+)
+from services.supply_chain.text_extraction import (
+    extract_10k_relevant_text as _extract_relevant_text,
+)
+from services.supply_chain.types import CompanyNode, SourceTag, SupplyChainGraph
+
+__all__ = [
+    "CompanyNode",
+    "SourceTag",
+    "SupplyChainGraph",
+    "get_supply_chain",
+    "resolve_cik",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -33,38 +44,6 @@ AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY", "")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1")
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview")
-
-
-# ---------------------------------------------------------------- Models -----
-@dataclass
-class CompanyNode:
-    name: str
-    ticker: Optional[str] = None
-    relationship: str = ""        # e.g. "Foundry / chip fab", "Cloud customer"
-    revenue_pct: Optional[float] = None  # % of focal company's revenue (if disclosed)
-    cost_pct: Optional[float] = None     # % of focal company's COGS (if disclosed)
-    notes: str = ""
-    source: SourceTag = "10-K"           # provenance of this relationship
-    segment: Optional[str] = None        # business segment, if known
-    confidence: Optional[float] = None   # 0–1, only for inferred sources
-
-
-@dataclass
-class SupplyChainGraph:
-    ticker: str
-    company_name: str
-    filing_date: str
-    accession: str
-    suppliers: list[CompanyNode] = field(default_factory=list)
-    customers: list[CompanyNode] = field(default_factory=list)
-    competitors: list[CompanyNode] = field(default_factory=list)
-    summary: str = ""
-    cached: bool = False
-    eight_k_count: int = 0
-    eight_k_dates: list[str] = field(default_factory=list)
-    segments: list[str] = field(default_factory=list)
-    concentration_note: str = ""
-    enrichment_used: list[str] = field(default_factory=list)
 
 
 # ------------------------------------------------------------ Ticker -> CIK ----
@@ -152,63 +131,6 @@ def _fetch_recent_8ks(cik: str, since_date: str, max_count: int = 8) -> list[dic
 
 
 # ---------------------------------------------------- Filing text extract ----
-_SECTIONS_OF_INTEREST = re.compile(
-    r"(?is)(item\s*1[a-c]?\.[\s\S]{1,80}?(business|risk\s+factors|customers|suppliers))"
-)
-
-
-def _extract_relevant_text(html: str, max_chars: int = 600_000) -> str:
-    """
-    Strip tags, keep the Business + Risk Factors sections (Item 1, 1A).
-    These are where supplier/customer/competitor info lives.
-    Falls back to the full text if section markers can't be located.
-    """
-    soup = BeautifulSoup(html, "html.parser")
-    for s in soup(["script", "style"]):
-        s.decompose()
-    text = soup.get_text(separator="\n")
-    # Collapse whitespace
-    text = re.sub(r"\n{2,}", "\n\n", text)
-    text = re.sub(r"[ \t]+", " ", text)
-
-    # Heuristic: keep Item 1 (Business) + Item 1A (Risk Factors) + Item 7 (MD&A,
-    # which contains segment commentary critical for diversified companies).
-    # We slice [Item 1 Business -> Item 2 Properties] AND [Item 7 MD&A -> Item 8 Financials]
-    # and concatenate. Many filings use non-breaking spaces or weird casing, so be lenient.
-    m_biz_start = re.search(r"(?is)\bitem\s*1\b[.\s]\s*business\b", text)
-    m_biz_end = re.search(r"(?is)\bitem\s*2\b[.\s]\s*properties\b", text)
-    m_mda_start = re.search(
-        r"(?is)\bitem\s*7\b[.\s]\s*management.s\s+discussion", text
-    )
-    m_mda_end = re.search(
-        r"(?is)\bitem\s*8\b[.\s]\s*financial\s+statements", text
-    )
-
-    parts: list[str] = []
-    if m_biz_start and m_biz_end and m_biz_end.start() > m_biz_start.start():
-        biz = text[m_biz_start.start(): m_biz_end.start()]
-        if len(biz) > 5000:
-            parts.append(biz)
-        else:
-            logger.warning("Item 1 slice too short (%d chars)", len(biz))
-    if m_mda_start and m_mda_end and m_mda_end.start() > m_mda_start.start():
-        mda = text[m_mda_start.start(): m_mda_end.start()]
-        if len(mda) > 3000:
-            parts.append(mda)
-        else:
-            logger.warning("Item 7 slice too short (%d chars)", len(mda))
-
-    if parts:
-        text = "\n\n".join(parts)
-    else:
-        logger.warning("No section slices located - using full text")
-
-    if len(text) > max_chars:
-        # Trim from the start - early pages are usually TOC, cover, glossary
-        text = text[len(text) - max_chars:]
-    return text
-
-
 def _fetch_filing_text(url: str) -> str:
     with httpx.Client(timeout=60, headers=SEC_HEADERS, follow_redirects=True) as c:
         r = c.get(url)
@@ -217,17 +139,10 @@ def _fetch_filing_text(url: str) -> str:
 
 
 def _fetch_8k_text(url: str, max_chars: int = 30_000) -> str:
-    """8-Ks are short; just strip tags and return whole document."""
     with httpx.Client(timeout=30, headers=SEC_HEADERS, follow_redirects=True) as c:
         r = c.get(url)
         r.raise_for_status()
-    soup = BeautifulSoup(r.text, "html.parser")
-    for s in soup(["script", "style"]):
-        s.decompose()
-    text = soup.get_text(separator="\n")
-    text = re.sub(r"\n{2,}", "\n\n", text)
-    text = re.sub(r"[ \t]+", " ", text)
-    return text[:max_chars]
+    return _extract_8k_text(r.text, max_chars=max_chars)
 
 
 # ----------------------------------------------- LLM structured extraction --
