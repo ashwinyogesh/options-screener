@@ -97,5 +97,6 @@
   "enrichment_used": [
     "filing",
     "industry"
-  ]
+  ],
+  "eight_k_failed_count": 0
 }

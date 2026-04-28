@@ -32,7 +32,7 @@ Regenerating fixtures
 ---------------------
 The test is assert-only. To refresh the `expected.json` files run:
 
-    backend\\venv\\Scripts\\python.exe backend\\tests\\fixtures\\supply_chain\\_capture.py
+    backend\\venv\\Scripts\\python.exe scripts\\capture_supply_chain_fixtures.py
 
 When to delete: once Phase 1 is finished AND production tests cover the new
 pipeline. See `/memories/session/plan-supply-chain-enrichment.md`.
@@ -86,7 +86,7 @@ def test_supply_chain_baseline(ticker: str) -> None:
         pytest.fail(
             f"Missing fixture: {expected_path}. Regenerate via "
             "`backend\\venv\\Scripts\\python.exe "
-            "backend\\tests\\fixtures\\supply_chain\\_capture.py`."
+            "scripts\\capture_supply_chain_fixtures.py`."
         )
 
     with expected_path.open("r", encoding="utf-8") as fh:

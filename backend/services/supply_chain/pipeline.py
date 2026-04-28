@@ -84,25 +84,32 @@ def _resolve_focal_filing(
 
 def _load_8k_corpus(
     sec: SecDataClient, cik: str, filing: dict, ticker: str
-) -> tuple[list[dict], str]:
-    """Fetch up to 8 recent 8-Ks; return (metadata list, concatenated text)."""
+) -> tuple[list[dict], str, int]:
+    """Fetch up to 8 recent 8-Ks in parallel.
+
+    Returns ``(metadata list, concatenated text, failed_count)``.
+    Per-URL fetch failures are counted (and surfaced on the graph)
+    rather than silently dropped.
+    """
     eight_ks = sec.get_recent_8ks(
         cik, since_date=filing["filing_date"], max_count=8
     )
-    parts: list[str] = []
-    for ek in eight_ks:
-        try:
-            t = sec.fetch_8k_text(ek["primary_doc_url"])
-            parts.append(f"--- 8-K filed {ek['filing_date']} ---\n{t}")
-        except Exception as e:  # noqa: BLE001 — phase 2c introduces parallel fetch with typed failure tracking
-            logger.warning(
-                "Failed to fetch 8-K %s for %s: %s", ek["accession"], ticker, e
-            )
+    result = sec.fetch_8ks_parallel(eight_ks)
+    parts = [
+        f"--- 8-K filed {meta['filing_date']} ---\n{text}"
+        for meta, text in result.successful
+    ]
     text = "\n\n".join(parts)
+    if result.failed_count:
+        logger.warning(
+            "8-K corpus partial for %s: %d/%d fetches failed",
+            ticker, result.failed_count, len(eight_ks),
+        )
     logger.info(
-        "Loaded %d 8-Ks (%d chars total) for %s", len(eight_ks), len(text), ticker
+        "Loaded %d/%d 8-Ks (%d chars total) for %s",
+        len(result.successful), len(eight_ks), len(text), ticker,
     )
-    return eight_ks, text
+    return eight_ks, text, result.failed_count
 
 
 def _extract_filing_graph(
@@ -214,7 +221,7 @@ def get_supply_chain(
     cik, filing = _resolve_focal_filing(sec, ticker)
     company_name = filing["company_name"]
     filing_text = sec.fetch_filing_text(filing["primary_doc_url"])
-    eight_ks, eight_k_text = _load_8k_corpus(sec, cik, filing, ticker)
+    eight_ks, eight_k_text, eight_k_failed = _load_8k_corpus(sec, cik, filing, ticker)
 
     extracted = _extract_filing_graph(
         extractor,
@@ -262,4 +269,5 @@ def get_supply_chain(
         segments=segments,
         concentration_note=extracted.concentration_note or "",
         enrichment_used=enrichment_used,
+        eight_k_failed_count=eight_k_failed,
     )

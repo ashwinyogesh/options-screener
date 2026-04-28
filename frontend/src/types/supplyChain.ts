@@ -27,4 +27,5 @@ export interface SupplyChainData {
   segments: string[]
   concentration_note: string
   enrichment_used: string[]
+  eight_k_failed_count: number
 }

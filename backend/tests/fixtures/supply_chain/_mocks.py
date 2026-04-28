@@ -21,6 +21,7 @@ from typing import Any, Iterator
 
 import services.supply_chain.pipeline as pipeline
 from services.supply_chain.types import (
+    EightKFetchResult,
     LlmFilingResult,
     LlmIndustryResult,
     LlmVerifierResult,
@@ -57,6 +58,19 @@ class _FakeSecClient:
         if url in self._eight_k_fail_urls:
             raise RuntimeError("simulated 8-K fetch failure")
         return self._eight_k_texts.get(url, "")
+
+    def fetch_8ks_parallel(
+        self, items: list[dict], max_workers: int = 4  # noqa: ARG002
+    ) -> EightKFetchResult:
+        successful: list[tuple[dict, str]] = []
+        failed_count = 0
+        for meta in items:
+            url = meta["primary_doc_url"]
+            if url in self._eight_k_fail_urls:
+                failed_count += 1
+                continue
+            successful.append((meta, self._eight_k_texts.get(url, "")))
+        return EightKFetchResult(successful=successful, failed_count=failed_count)
 
 
 class _FakeLlmExtractor:

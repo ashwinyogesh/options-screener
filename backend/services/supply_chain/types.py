@@ -46,6 +46,21 @@ class SupplyChainGraph:
     segments: list[str] = field(default_factory=list)
     concentration_note: str = ""
     enrichment_used: list[str] = field(default_factory=list)
+    eight_k_failed_count: int = 0
+
+
+@dataclass(frozen=True)
+class EightKFetchResult:
+    """Outcome of a parallel 8-K corpus fetch.
+
+    ``successful`` preserves the original metadata order (filings whose
+    HTTP fetch raised are simply omitted). ``failed_count`` is the
+    number of metadata items whose fetch raised — surfaced on
+    :class:`SupplyChainGraph` so the UI can flag partial corpora.
+    """
+
+    successful: list[tuple[dict, str]]
+    failed_count: int
 
 
 # --------------------------------------------------------- LLM result types --

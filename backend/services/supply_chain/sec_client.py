@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional
 
@@ -27,6 +28,7 @@ from tenacity import (
 )
 
 from .text_extraction import extract_8k_text, extract_10k_relevant_text
+from .types import EightKFetchResult
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +195,50 @@ class SecDataClient:
         r = self._http.get(url)
         r.raise_for_status()
         return extract_8k_text(r.text, max_chars=max_chars)
+
+    def fetch_8ks_parallel(
+        self,
+        items: list[dict],
+        max_workers: int = 4,
+    ) -> EightKFetchResult:
+        """Fetch many 8-Ks concurrently. Failures are counted, not raised.
+
+        Order of ``successful`` mirrors the order of ``items``;
+        items whose fetch raises are omitted. ``httpx.Client`` is
+        thread-safe for concurrent sync use, so the shared client is
+        reused across worker threads.
+        """
+        if not items:
+            return EightKFetchResult(successful=[], failed_count=0)
+
+        # ThreadPoolExecutor.map preserves input order in the output
+        # iterator, but we want per-item exception isolation. Submit
+        # individually and zip results back to metadata.
+        def _fetch(meta: dict) -> Optional[str]:
+            try:
+                return self.fetch_8k_text(meta["primary_doc_url"])
+            except (httpx.HTTPError, RuntimeError) as e:
+                # tenacity has already retried transport errors; what arrives
+                # here is either an exhausted-retry transport failure, an
+                # HTTPStatusError (4xx/5xx), or a stub-injected RuntimeError
+                # from the test fakes. Programming errors (KeyError on
+                # malformed metadata, parser bugs) propagate.
+                logger.warning(
+                    "8-K fetch failed for %s: %s", meta.get("accession", "?"), e
+                )
+                return None
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            texts = list(pool.map(_fetch, items))
+
+        successful: list[tuple[dict, str]] = []
+        failed_count = 0
+        for meta, text in zip(items, texts, strict=True):
+            if text is None:
+                failed_count += 1
+            else:
+                successful.append((meta, text))
+        return EightKFetchResult(successful=successful, failed_count=failed_count)
 
 
 # ----------------------------------------------------------------- singleton

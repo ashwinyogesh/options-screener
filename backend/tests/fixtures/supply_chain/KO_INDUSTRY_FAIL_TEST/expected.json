@@ -74,5 +74,6 @@
   "concentration_note": "No single customer accounted for more than 10% of net sales in fiscal 2024.",
   "enrichment_used": [
     "filing"
-  ]
+  ],
+  "eight_k_failed_count": 0
 }
