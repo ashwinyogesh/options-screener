@@ -71,7 +71,7 @@ def _merge_industry(
 # ---------------------------------------------------------------- helpers
 def _resolve_focal_filing(
     sec: SecDataClient, ticker: str
-) -> dict:
+) -> tuple[str, dict]:
     """Resolve ticker → CIK → latest 10-K. Raises ``ValueError`` on miss."""
     cik = sec.resolve_cik(ticker)
     if not cik:
@@ -79,23 +79,22 @@ def _resolve_focal_filing(
     filing = sec.get_latest_10k(cik)
     if not filing:
         raise ValueError(f"No 10-K filing found for {ticker}")
-    filing["cik"] = cik
-    return filing
+    return cik, filing
 
 
 def _load_8k_corpus(
-    sec: SecDataClient, filing: dict, ticker: str
+    sec: SecDataClient, cik: str, filing: dict, ticker: str
 ) -> tuple[list[dict], str]:
     """Fetch up to 8 recent 8-Ks; return (metadata list, concatenated text)."""
     eight_ks = sec.get_recent_8ks(
-        filing["cik"], since_date=filing["filing_date"], max_count=8
+        cik, since_date=filing["filing_date"], max_count=8
     )
     parts: list[str] = []
     for ek in eight_ks:
         try:
             t = sec.fetch_8k_text(ek["primary_doc_url"])
             parts.append(f"--- 8-K filed {ek['filing_date']} ---\n{t}")
-        except Exception as e:  # noqa: BLE001 — phase 2 introduces typed retry
+        except Exception as e:  # noqa: BLE001 — phase 2c introduces parallel fetch with typed failure tracking
             logger.warning(
                 "Failed to fetch 8-K %s for %s: %s", ek["accession"], ticker, e
             )
@@ -139,63 +138,62 @@ def _apply_industry_enrichment(
     enrichment_used: list[str] = ["filing"]
     if not enabled:
         return suppliers, customers, competitors, enrichment_used
+
     try:
-        industry: LlmIndustryResult | LlmVerifierResult = llm.enrich_industry(
+        industry = llm.enrich_industry(
             ticker=ticker,
             company_name=company_name,
             segments=segments,
             existing=extracted,
         )
-        raw_counts = (
-            len(industry.suppliers),
-            len(industry.customers),
-            len(industry.competitors),
-        )
-
-        try:
-            verified: LlmVerifierResult = llm.verify(
-                ticker=ticker,
-                company_name=company_name,
-                candidates=LlmIndustryResult(
-                    suppliers=list(industry.suppliers),
-                    customers=list(industry.customers),
-                    competitors=list(industry.competitors),
-                ),
-            )
-            ver_counts = (
-                len(verified.suppliers),
-                len(verified.customers),
-                len(verified.competitors),
-            )
-            logger.info(
-                "Verifier pass for %s: suppliers %d->%d, customers %d->%d, competitors %d->%d. %s",
-                ticker,
-                raw_counts[0], ver_counts[0],
-                raw_counts[1], ver_counts[1],
-                raw_counts[2], ver_counts[2],
-                verified.audit_summary,
-            )
-            industry = verified
-            enrichment_used.append("verified")
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                "Verifier pass failed for %s (using raw industry output): %s",
-                ticker, e,
-            )
-
-        suppliers = _merge_industry(suppliers, list(industry.suppliers), cap=15)
-        customers = _merge_industry(customers, list(industry.customers), cap=15)
-        competitors = _merge_industry(competitors, list(industry.competitors), cap=5)
-        enrichment_used.append("industry")
-        logger.info(
-            "Industry pass added %d suppliers, %d customers, %d competitors for %s",
-            len(industry.suppliers),
-            len(industry.customers),
-            len(industry.competitors),
-            ticker,
-        )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 — phase 2c narrows to typed LLM errors
         logger.warning("Industry enrichment pass failed for %s: %s", ticker, e)
+        return suppliers, customers, competitors, enrichment_used
+
+    raw_counts = (
+        len(industry.suppliers),
+        len(industry.customers),
+        len(industry.competitors),
+    )
+    pool: LlmIndustryResult | LlmVerifierResult = industry
+
+    try:
+        verified = llm.verify(
+            ticker=ticker,
+            company_name=company_name,
+            candidates=industry,
+        )
+        ver_counts = (
+            len(verified.suppliers),
+            len(verified.customers),
+            len(verified.competitors),
+        )
+        logger.info(
+            "Verifier pass for %s: suppliers %d->%d, customers %d->%d, competitors %d->%d. %s",
+            ticker,
+            raw_counts[0], ver_counts[0],
+            raw_counts[1], ver_counts[1],
+            raw_counts[2], ver_counts[2],
+            verified.audit_summary,
+        )
+        pool = verified
+        enrichment_used.append("verified")
+    except Exception as e:  # noqa: BLE001 — phase 2c narrows to typed LLM errors
+        logger.warning(
+            "Verifier pass failed for %s (using raw industry output): %s",
+            ticker, e,
+        )
+
+    suppliers = _merge_industry(suppliers, list(pool.suppliers), cap=15)
+    customers = _merge_industry(customers, list(pool.customers), cap=15)
+    competitors = _merge_industry(competitors, list(pool.competitors), cap=5)
+    enrichment_used.append("industry")
+    logger.info(
+        "Industry pass for %s: raw %d/%d/%d → merged %d/%d/%d (suppliers/customers/competitors)",
+        ticker,
+        raw_counts[0], raw_counts[1], raw_counts[2],
+        len(pool.suppliers), len(pool.customers), len(pool.competitors),
+    )
 
     return suppliers, customers, competitors, enrichment_used
 
@@ -213,10 +211,10 @@ def get_supply_chain(
     sec = sec_client or get_default_client()
     extractor = llm or get_default_extractor()
 
-    filing = _resolve_focal_filing(sec, ticker)
+    cik, filing = _resolve_focal_filing(sec, ticker)
     company_name = filing["company_name"]
     filing_text = sec.fetch_filing_text(filing["primary_doc_url"])
-    eight_ks, eight_k_text = _load_8k_corpus(sec, filing, ticker)
+    eight_ks, eight_k_text = _load_8k_corpus(sec, cik, filing, ticker)
 
     extracted = _extract_filing_graph(
         extractor,
