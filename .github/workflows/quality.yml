@@ -2,7 +2,7 @@
 #
 # Runs on every push to main and every pull request:
 #   - backend job: ruff lint + pytest (PYTHONPATH=backend so `from services...` resolves)
-#   - frontend job: `npm ci && npm run build` (no test script yet; build is the gate)
+#   - frontend job: `npm ci && npm test && npm run build`
 #
 # Deploy workflows (deploy-backend.yml, deploy-frontend.yml) are unaffected.
 
@@ -65,6 +65,10 @@ jobs:
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Test
+        working-directory: frontend
+        run: npm test
 
       - name: Build
         working-directory: frontend
