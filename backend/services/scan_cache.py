@@ -33,7 +33,7 @@ class ScanCache:
         entry = self._store.get(key)
         if entry is None:
             return None
-        if time.monotonic() > entry.expires_at:
+        if time.monotonic() >= entry.expires_at:
             del self._store[key]
             return None
         return entry.value

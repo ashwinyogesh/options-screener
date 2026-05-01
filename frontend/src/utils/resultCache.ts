@@ -12,7 +12,9 @@ interface CacheEntry<T> {
   savedAt: number
 }
 
-export function saveResultCache<T>(key: string, data: T): void {
+export type CacheKey = 'csp' | 'cc' | 'ditm'
+
+export function saveResultCache<T>(key: CacheKey, data: T): void {
   try {
     const entry: CacheEntry<T> = { data, savedAt: Date.now() }
     localStorage.setItem(`screener:${key}`, JSON.stringify(entry))
@@ -21,11 +23,15 @@ export function saveResultCache<T>(key: string, data: T): void {
   }
 }
 
-export function loadResultCache<T>(key: string, ttlMs = TTL_MS): CacheEntry<T> | null {
+export function loadResultCache<T>(key: CacheKey, ttlMs = TTL_MS): CacheEntry<T> | null {
   try {
     const raw = localStorage.getItem(`screener:${key}`)
     if (!raw) return null
     const entry = JSON.parse(raw) as CacheEntry<T>
+    if (typeof entry !== 'object' || entry === null || typeof entry.savedAt !== 'number') {
+      localStorage.removeItem(`screener:${key}`)
+      return null
+    }
     if (Date.now() - entry.savedAt > ttlMs) {
       localStorage.removeItem(`screener:${key}`)
       return null
@@ -36,7 +42,7 @@ export function loadResultCache<T>(key: string, ttlMs = TTL_MS): CacheEntry<T> |
   }
 }
 
-export function clearResultCache(key: string): void {
+export function clearResultCache(key: CacheKey): void {
   try {
     localStorage.removeItem(`screener:${key}`)
   } catch {

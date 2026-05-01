@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { DitmRequest, DitmResponse, DitmResult, DitmError } from '../types/ditm'
-import { loadResultCache, saveResultCache } from '../utils/resultCache'
+import { loadResultCache, saveResultCache, clearResultCache } from '../utils/resultCache'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 
@@ -62,6 +62,7 @@ export function useDitm(): UseDitmReturn {
     setCachedAt(null)
     setResults([])
     setErrors([])
+    clearResultCache('ditm')
     setSymbolCount(req.symbols.length)
 
     try {
@@ -100,6 +101,7 @@ export function useDitm(): UseDitmReturn {
         vix_5d_change: data.vix_5d_change,
         spy_above_sma200: data.spy_above_sma200,
       })
+      setCachedAt(Date.now())
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network error — is the backend running?'
       setErrorMessage(msg)
@@ -115,6 +117,7 @@ export function useDitm(): UseDitmReturn {
     setCachedAt(null)
     setResults([])
     setErrors([])
+    clearResultCache('ditm')
     setSymbolCount(0)
 
     try {
@@ -148,6 +151,7 @@ export function useDitm(): UseDitmReturn {
         vix_5d_change: data.vix_5d_change,
         spy_above_sma200: data.spy_above_sma200,
       })
+      setCachedAt(Date.now())
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Network error — is the backend running?')
     } finally {

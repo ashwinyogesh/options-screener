@@ -164,7 +164,7 @@ export default function App() {
                 Showing <strong>{filteredCsp.length}</strong> of <strong>{cspResults.length}</strong> results
                 {filteredCsp.length < cspResults.length && ' (filters active)'}
                 {cspCachedAt !== null && (
-                  <span className="cache-notice"> · cached {Math.round((Date.now() - cspCachedAt) / 60000)} min ago</span>
+                  <span className="cache-notice"> · cached {Math.round((Date.now() - cspCachedAt) / 60000) < 1 ? '< 1' : Math.round((Date.now() - cspCachedAt) / 60000)} min ago</span>
                 )}
               </div>
             )}
@@ -211,7 +211,7 @@ export default function App() {
                 Showing <strong>{filteredCc.length}</strong> of <strong>{ccResults.length}</strong> results
                 {filteredCc.length < ccResults.length && ' (filters active)'}
                 {ccCachedAt !== null && (
-                  <span className="cache-notice"> · cached {Math.round((Date.now() - ccCachedAt) / 60000)} min ago</span>
+                  <span className="cache-notice"> · cached {Math.round((Date.now() - ccCachedAt) / 60000) < 1 ? '< 1' : Math.round((Date.now() - ccCachedAt) / 60000)} min ago</span>
                 )}
               </div>
             )}
@@ -258,7 +258,7 @@ export default function App() {
                 Showing <strong>{filteredDitm.length}</strong> of <strong>{ditmResults.length}</strong> results
                 {filteredDitm.length < ditmResults.length && ' (filters active)'}
                 {ditmCachedAt !== null && (
-                  <span className="cache-notice"> · cached {Math.round((Date.now() - ditmCachedAt) / 60000)} min ago</span>
+                  <span className="cache-notice"> · cached {Math.round((Date.now() - ditmCachedAt) / 60000) < 1 ? '< 1' : Math.round((Date.now() - ditmCachedAt) / 60000)} min ago</span>
                 )}
               </div>
             )}

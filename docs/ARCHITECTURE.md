@@ -9,6 +9,8 @@ The Options Screener is a two-artefact app — a stateless FastAPI backend and a
 1. [High-level shape](#1-high-level-shape)
 2. [Backend layering (strict)](#2-backend-layering-strict)
 3. [The unified screener runner](#3-the-unified-screener-runner)
+    - [3.1 The supply-chain package](#31-the-supply-chain-package)
+    - [3.2 Scan result caching](#32-scan-result-caching)
 4. [Scoring discipline](#4-scoring-discipline)
 5. [Hidden but live: the DCF tab](#5-hidden-but-live-the-dcf-tab)
 6. [Frontend layering (mirror)](#6-frontend-layering-mirror)
@@ -183,6 +185,15 @@ The legacy [supply_chain_service.py](../backend/services/supply_chain_service.py
 Layering rules match the rest of the backend: adapters never import FastAPI types; `pipeline.get_supply_chain` raises `ValueError` / `RuntimeError`; the router maps to HTTP. The orchestrator declares its dependencies (`sec_client`, `llm`) as keyword-only parameters so tests inject fakes via the same seam as production.
 
 Methodology: [docs/SUPPLY_CHAIN.md](SUPPLY_CHAIN.md). Decision record: [ADR-0003](adr/0003-supply-chain-adapter-pattern.md).
+
+### 3.2 Scan result caching
+
+Universe scans fan out to 80+ `yfinance` calls and take 25–30 s per run. Two complementary TTL caches (both 30 min) prevent redundant work:
+
+- **Backend** — [backend/services/scan_cache.py](../backend/services/scan_cache.py) provides a `ScanCache` class (plain `dict` + `time.monotonic` TTL). Three module-level singletons (`csp_scan_cache`, `cc_scan_cache`, `ditm_scan_cache`) are imported by their respective scan routers, which check the cache before dispatching `asyncio.gather` and store the assembled response on a miss. The cache key encodes all query parameters that affect results; `rf_rate` is deliberately excluded (changes at most once daily — within a 30-min window this is inconsequential).
+- **Frontend** — [frontend/src/utils/resultCache.ts](../frontend/src/utils/resultCache.ts) is a thin `localStorage` wrapper (`saveResultCache` / `loadResultCache` / `clearResultCache`). Each strategy hook hydrates from storage on mount if the entry is fresh; a "cached X min ago" notice is shown in the results-meta row.
+
+The backend cache is intentionally lost on server restart — serving stale option prices across a restart is worse than a cold-start scan. No new runtime dependencies are introduced (no Redis, no APScheduler). Decision record: [ADR-0004](adr/0004-scan-result-caching.md).
 
 ## 4. Scoring discipline
 

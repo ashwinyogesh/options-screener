@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CspRequest, CspResponse, CspResult, CspError } from '../types/csp'
-import { loadResultCache, saveResultCache } from '../utils/resultCache'
+import { loadResultCache, saveResultCache, clearResultCache } from '../utils/resultCache'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 
@@ -41,6 +41,7 @@ export function useCsp(): UseCspReturn {
     setCachedAt(null)
     setResults([])
     setErrors([])
+    clearResultCache('csp')
     setSymbolCount(req.symbols.length)
 
     try {
@@ -70,6 +71,7 @@ export function useCsp(): UseCspReturn {
       setResults(data.results)
       setErrors(data.errors)
       saveResultCache('csp', { results: data.results, errors: data.errors })
+      setCachedAt(Date.now())
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network error — is the backend running?'
       setErrorMessage(msg)
@@ -85,6 +87,7 @@ export function useCsp(): UseCspReturn {
     setCachedAt(null)
     setResults([])
     setErrors([])
+    clearResultCache('csp')
     setSymbolCount(0)
 
     try {
@@ -107,6 +110,7 @@ export function useCsp(): UseCspReturn {
       setResults(data.results)
       setErrors(data.errors)
       saveResultCache('csp', { results: data.results, errors: data.errors })
+      setCachedAt(Date.now())
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Network error — is the backend running?')
     } finally {

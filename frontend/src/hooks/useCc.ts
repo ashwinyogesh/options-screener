@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CcRequest, CcResponse, CcResult, CcError } from '../types/cc'
-import { loadResultCache, saveResultCache } from '../utils/resultCache'
+import { loadResultCache, saveResultCache, clearResultCache } from '../utils/resultCache'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 
@@ -41,6 +41,7 @@ export function useCc(): UseCcReturn {
     setCachedAt(null)
     setResults([])
     setErrors([])
+    clearResultCache('cc')
     setSymbolCount(req.symbols.length)
 
     try {
@@ -66,6 +67,7 @@ export function useCc(): UseCcReturn {
       setResults(data.results)
       setErrors(data.errors)
       saveResultCache('cc', { results: data.results, errors: data.errors })
+      setCachedAt(Date.now())
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network error — is the backend running?'
       setErrorMessage(msg)
@@ -81,6 +83,7 @@ export function useCc(): UseCcReturn {
     setCachedAt(null)
     setResults([])
     setErrors([])
+    clearResultCache('cc')
     setSymbolCount(0)
 
     try {
@@ -103,6 +106,7 @@ export function useCc(): UseCcReturn {
       setResults(data.results)
       setErrors(data.errors)
       saveResultCache('cc', { results: data.results, errors: data.errors })
+      setCachedAt(Date.now())
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network error — is the backend running?'
       setErrorMessage(msg)
