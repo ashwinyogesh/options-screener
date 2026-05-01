@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, field_validator
 
 from services.data_service import get_risk_free_rate
+from services.scan_cache import ditm_scan_cache
 from services.ditm_service import (
     DitmResult,
     get_macro_context,
@@ -190,6 +191,11 @@ async def run_ditm_scan(
         raise HTTPException(status_code=422, detail="min_dte must be <= max_dte")
 
     universe_key, symbols = get_universe(universe)
+    cache_key = f"{universe_key}:{top_n}:{min_dte}:{max_dte}"
+    cached = ditm_scan_cache.get(cache_key)
+    if cached is not None:
+        logger.info("DITM scan cache hit: %s", cache_key)
+        return cached
     rf_rate = await asyncio.to_thread(get_risk_free_rate)
     macro_ctx = await asyncio.to_thread(get_macro_context)
     logger.info(
@@ -222,7 +228,7 @@ async def run_ditm_scan(
         "DITM scan complete: universe=%s returning top %d of %d (errors=%d)",
         universe_key, len(top_results), len(symbols), len(errors),
     )
-    return DitmResponse(
+    response = DitmResponse(
         results=top_results,
         errors=errors,
         macro_pass=macro_ctx["macro_pass"],
@@ -230,6 +236,8 @@ async def run_ditm_scan(
         vix_5d_change=macro_ctx.get("vix_5d_change"),
         spy_above_sma200=macro_ctx.get("spy_above_sma200", True),
     )
+    ditm_scan_cache.set(cache_key, response)
+    return response
 
 
 def _to_out(r: DitmResult) -> DitmResultOut:

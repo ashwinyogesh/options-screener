@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { CspRequest, CspResponse, CspResult, CspError } from '../types/csp'
+import { loadResultCache, saveResultCache } from '../utils/resultCache'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 
@@ -10,6 +11,7 @@ interface UseCspReturn {
   symbolCount: number
   isScanMode: boolean
   errorMessage: string | null
+  cachedAt: number | null
   run: (req: CspRequest) => Promise<void>
   scan: (topN?: number, minDTE?: number, maxDTE?: number, universe?: string) => Promise<void>
 }
@@ -21,11 +23,22 @@ export function useCsp(): UseCspReturn {
   const [symbolCount, setSymbolCount] = useState(0)
   const [isScanMode, setIsScanMode] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [cachedAt, setCachedAt] = useState<number | null>(null)
+
+  useEffect(() => {
+    const entry = loadResultCache<{ results: CspResult[]; errors: CspError[] }>('csp')
+    if (entry) {
+      setResults(entry.data.results)
+      setErrors(entry.data.errors)
+      setCachedAt(entry.savedAt)
+    }
+  }, [])
 
   async function run(req: CspRequest) {
     setLoading(true)
     setIsScanMode(false)
     setErrorMessage(null)
+    setCachedAt(null)
     setResults([])
     setErrors([])
     setSymbolCount(req.symbols.length)
@@ -56,6 +69,7 @@ export function useCsp(): UseCspReturn {
       const data: CspResponse = await response.json()
       setResults(data.results)
       setErrors(data.errors)
+      saveResultCache('csp', { results: data.results, errors: data.errors })
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network error — is the backend running?'
       setErrorMessage(msg)
@@ -68,6 +82,7 @@ export function useCsp(): UseCspReturn {
     setLoading(true)
     setIsScanMode(true)
     setErrorMessage(null)
+    setCachedAt(null)
     setResults([])
     setErrors([])
     setSymbolCount(0)
@@ -91,6 +106,7 @@ export function useCsp(): UseCspReturn {
       const data: CspResponse = await response.json()
       setResults(data.results)
       setErrors(data.errors)
+      saveResultCache('csp', { results: data.results, errors: data.errors })
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Network error — is the backend running?')
     } finally {
@@ -98,5 +114,5 @@ export function useCsp(): UseCspReturn {
     }
   }
 
-  return { results, errors, loading, symbolCount, isScanMode, errorMessage, run, scan }
+  return { results, errors, loading, symbolCount, isScanMode, errorMessage, cachedAt, run, scan }
 }

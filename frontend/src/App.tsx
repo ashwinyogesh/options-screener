@@ -75,17 +75,17 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'csp' | 'cc' | 'ditm' | 'supply' | 'dcf'>('csp')
 
   // CSP state
-  const { results: cspResults, errors: cspErrors, loading: cspLoading, symbolCount: cspSymbolCount, isScanMode: cspIsScanMode, errorMessage: cspErrorMessage, run: runCsp, scan: scanCsp } = useCsp()
+  const { results: cspResults, errors: cspErrors, loading: cspLoading, symbolCount: cspSymbolCount, isScanMode: cspIsScanMode, errorMessage: cspErrorMessage, cachedAt: cspCachedAt, run: runCsp, scan: scanCsp } = useCsp()
   const [cspFilters, setCspFilters] = useState<CspFilterState>(DEFAULT_CSP_FILTERS)
   const filteredCsp = useMemo(() => applyCspFilters(cspResults, cspFilters), [cspResults, cspFilters])
 
   // CC state
-  const { results: ccResults, errors: ccErrors, loading: ccLoading, symbolCount: ccSymbolCount, isScanMode: ccIsScanMode, errorMessage: ccErrorMessage, run: runCc, scan: scanCc } = useCc()
+  const { results: ccResults, errors: ccErrors, loading: ccLoading, symbolCount: ccSymbolCount, isScanMode: ccIsScanMode, errorMessage: ccErrorMessage, cachedAt: ccCachedAt, run: runCc, scan: scanCc } = useCc()
   const [ccFilters, setCcFilters] = useState<CcFilterState>(DEFAULT_CC_FILTERS)
   const filteredCc = useMemo(() => applyCcFilters(ccResults, ccFilters), [ccResults, ccFilters])
 
   // DITM state
-  const { results: ditmResults, errors: ditmErrors, loading: ditmLoading, symbolCount: ditmSymbolCount, isScanMode: ditmIsScanMode, errorMessage: ditmErrorMessage, macroPass, vixLevel, vix5dChange, spyAboveSma200, run: runDitm, scan: scanDitm } = useDitm()
+  const { results: ditmResults, errors: ditmErrors, loading: ditmLoading, symbolCount: ditmSymbolCount, isScanMode: ditmIsScanMode, errorMessage: ditmErrorMessage, cachedAt: ditmCachedAt, macroPass, vixLevel, vix5dChange, spyAboveSma200, run: runDitm, scan: scanDitm } = useDitm()
   const [ditmFilters, setDitmFilters] = useState<DitmFilterState>(DEFAULT_DITM_FILTERS)
   const filteredDitm = useMemo(() => applyDitmFilters(ditmResults, ditmFilters), [ditmResults, ditmFilters])
 
@@ -163,6 +163,9 @@ export default function App() {
               <div className="results-meta">
                 Showing <strong>{filteredCsp.length}</strong> of <strong>{cspResults.length}</strong> results
                 {filteredCsp.length < cspResults.length && ' (filters active)'}
+                {cspCachedAt !== null && (
+                  <span className="cache-notice"> · cached {Math.round((Date.now() - cspCachedAt) / 60000)} min ago</span>
+                )}
               </div>
             )}
             <CspTable data={filteredCsp} />
@@ -207,6 +210,9 @@ export default function App() {
               <div className="results-meta">
                 Showing <strong>{filteredCc.length}</strong> of <strong>{ccResults.length}</strong> results
                 {filteredCc.length < ccResults.length && ' (filters active)'}
+                {ccCachedAt !== null && (
+                  <span className="cache-notice"> · cached {Math.round((Date.now() - ccCachedAt) / 60000)} min ago</span>
+                )}
               </div>
             )}
             <CcTable data={filteredCc} />
@@ -251,6 +257,9 @@ export default function App() {
               <div className="results-meta">
                 Showing <strong>{filteredDitm.length}</strong> of <strong>{ditmResults.length}</strong> results
                 {filteredDitm.length < ditmResults.length && ' (filters active)'}
+                {ditmCachedAt !== null && (
+                  <span className="cache-notice"> · cached {Math.round((Date.now() - ditmCachedAt) / 60000)} min ago</span>
+                )}
               </div>
             )}
             <DitmTable data={filteredDitm} macroPass={macroPass} vixLevel={vixLevel} vix5dChange={vix5dChange} spyAboveSma200={spyAboveSma200} />

@@ -578,6 +578,7 @@ body {
 .error-summary li { margin-bottom: 2px; }
 
 .results-meta { font-size: 12px; color: #94a3b8; }
+.cache-notice { opacity: 0.65; font-style: italic; }
 
 /* ── Empty state ──────────────────────────────────────────────────────────── */
 .empty-state {

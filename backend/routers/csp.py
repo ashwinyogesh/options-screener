@@ -14,6 +14,7 @@ from pydantic import BaseModel, field_validator
 
 from services.csp_service import CspResult, process_symbol
 from services.data_service import get_risk_free_rate
+from services.scan_cache import csp_scan_cache
 from services.universe import UNIVERSES, get_universe
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,13 @@ async def run_csp_scan(
         raise HTTPException(status_code=422, detail="min_dte must be <= max_dte")
 
     universe_key, symbols = get_universe(universe)
+
+    cache_key = f"{universe_key}:{top_n}:{min_dte}:{max_dte}"
+    cached = csp_scan_cache.get(cache_key)
+    if cached is not None:
+        logger.info("CSP scan cache hit: %s", cache_key)
+        return cached
+
     rf_rate = await asyncio.to_thread(get_risk_free_rate)
     logger.info(
         "Starting CSP scan universe=%s (%d stocks), DTE %d\u2013%d, top_n=%d",
@@ -210,7 +218,9 @@ async def run_csp_scan(
         "CSP scan complete: universe=%s returning top %d of %d (errors=%d)",
         universe_key, len(top_results), len(symbols), len(errors),
     )
-    return CspResponse(results=top_results, errors=errors)
+    response = CspResponse(results=top_results, errors=errors)
+    csp_scan_cache.set(cache_key, response)
+    return response
 
 
 def _to_out(r: CspResult) -> CspResultOut:
