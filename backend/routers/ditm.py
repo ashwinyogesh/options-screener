@@ -14,12 +14,12 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, field_validator
 
 from services.data_service import get_risk_free_rate
-from services.scan_cache import ditm_scan_cache
 from services.ditm_service import (
     DitmResult,
     get_macro_context,
     process_symbol,
 )
+from services.scan_cache import ditm_scan_cache
 from services.universe import UNIVERSES, get_universe
 
 logger = logging.getLogger(__name__)
