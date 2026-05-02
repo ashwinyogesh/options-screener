@@ -79,14 +79,17 @@ def compute_csp_strike_score(
         p = 7.0
     score += p; bk['Sup'] = p
 
-    # --- Expected Move Buffer (20 pts) — unchanged ---
+    # --- Expected Move Buffer (20 pts) — recalibrated reference to 0.5× EM ---
+    # Prior formula used 1×EM as the lower boundary, making sigmas_outside ≈ -0.25
+    # at the target delta (-0.225), earning 0 pts always. Using 0.5×EM means a
+    # -0.225 delta put is ~0.25 EM units outside the new boundary → full 20 pts.
     p = 0.0
     _em_buffer_pct: float = float('nan')
     if not math.isnan(iv_used) and iv_used > 0 and dte > 0:
         T = dte / 365.0
         em = current_price * iv_used * math.sqrt(T)
-        em_lower = current_price - em
-        sigmas_outside = (em_lower - strike) / em
+        em_half_lower = current_price - 0.5 * em   # 0.5× EM reference boundary
+        sigmas_outside = (em_half_lower - strike) / em
         _em_buffer_pct = round(sigmas_outside * 100, 2)
         if sigmas_outside >= 0.20:
             p = 20.0
@@ -135,7 +138,9 @@ def compute_csp_strike_score(
         p = (liquidity_count - 100) / 100.0 * 2.0
     score += p; bk['LQ'] = p
 
-    # --- Annualized ROC (10 pts) — provisional curve, calibrate empirically ---
+    # --- Annualized ROC (10 pts) — recalibrated: full credit threshold 30% → 20% ---
+    # Prior 30% threshold was only achievable on illiquid chains that simultaneously
+    # fail Bid-Ask. Lowered to 20% so NVDA/AMD/AMAT at delta -0.225 earn near-full pts.
     # CSP capital = (strike * 100) − credit*100 (cash secured minus premium received)
     # Per-share: capital = strike − credit
     p = 0.0
@@ -145,14 +150,14 @@ def compute_csp_strike_score(
         if capital_per_share > 0:
             roc = (credit / capital_per_share) * (365.0 / dte) * 100.0
             _roc_annualized = round(roc, 2)
-            if roc >= 30:
+            if roc >= 20:
                 p = 10.0
-            elif roc >= 20:
-                p = 7.0 + (roc - 20) / 10.0 * 3.0    # 7 → 10
-            elif roc >= 12:
-                p = 4.0 + (roc - 12) / 8.0 * 3.0     # 4 → 7
-            elif roc >= 6:
-                p = 1.0 + (roc - 6) / 6.0 * 3.0      # 1 → 4
+            elif roc >= 14:
+                p = 7.0 + (roc - 14) / 6.0 * 3.0     # 7 → 10
+            elif roc >= 8:
+                p = 4.0 + (roc - 8) / 6.0 * 3.0      # 4 → 7
+            elif roc >= 4:
+                p = 1.0 + (roc - 4) / 4.0 * 3.0      # 1 → 4
     score += p; bk['ROC'] = p
 
     detail = ' '.join(f"{k}:{round(v)}" for k, v in bk.items())
@@ -231,14 +236,15 @@ def compute_cc_strike_score(
             p = 10.0 - (gap_pct - 5) / 5.0 * 10.0
     score += p; bk['Res'] = p
 
-    # --- Expected Move Buffer (20 pts) — unchanged ---
+    # --- Expected Move Buffer (20 pts) — recalibrated reference to 0.5× EM ---
+    # Same fix as CSP: uses 0.5×EM as the boundary so +0.225 delta calls earn pts.
     p = 0.0
     _cc_em_buffer_pct: float = float('nan')
     if not math.isnan(iv_used) and iv_used > 0 and dte > 0:
         T = dte / 365.0
         em = current_price * iv_used * math.sqrt(T)
-        em_upper = current_price + em
-        sigmas_outside = (strike - em_upper) / em
+        em_half_upper = current_price + 0.5 * em   # 0.5× EM reference boundary
+        sigmas_outside = (strike - em_half_upper) / em
         _cc_em_buffer_pct = round(sigmas_outside * 100, 2)
         if sigmas_outside >= 0.20:
             p = 20.0
@@ -287,7 +293,7 @@ def compute_cc_strike_score(
         p = (liquidity_count - 100) / 100.0 * 2.0
     score += p; bk['LQ'] = p
 
-    # --- Annualized ROC (10 pts) ---
+    # --- Annualized ROC (10 pts) — recalibrated: full credit threshold 30% → 20% ---
     # CC capital basis = current price (not cost basis — out of scope)
     # Per-share: capital = current_price − credit
     p = 0.0
@@ -297,14 +303,14 @@ def compute_cc_strike_score(
         if capital_per_share > 0:
             roc = (credit / capital_per_share) * (365.0 / dte) * 100.0
             _roc_annualized = round(roc, 2)
-            if roc >= 30:
+            if roc >= 20:
                 p = 10.0
-            elif roc >= 20:
-                p = 7.0 + (roc - 20) / 10.0 * 3.0
-            elif roc >= 12:
-                p = 4.0 + (roc - 12) / 8.0 * 3.0
-            elif roc >= 6:
-                p = 1.0 + (roc - 6) / 6.0 * 3.0
+            elif roc >= 14:
+                p = 7.0 + (roc - 14) / 6.0 * 3.0
+            elif roc >= 8:
+                p = 4.0 + (roc - 8) / 6.0 * 3.0
+            elif roc >= 4:
+                p = 1.0 + (roc - 4) / 4.0 * 3.0
     score += p; bk['ROC'] = p
 
     detail = ' '.join(f"{k}:{round(v)}" for k, v in bk.items())

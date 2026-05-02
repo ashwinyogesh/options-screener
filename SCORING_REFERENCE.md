@@ -65,22 +65,20 @@ HV      = std(log(Closeₜ / Closeₜ₋₁), 30d) × √252
 iv_hv_ratio = yfinance_IV / HV_30d
 ```
 
-| Bucket    | Pts            |
-|-----------|----------------|
-| < 0.8     | 0              |
-| 0.8–0.9   | linear → 2.8   |
-| 0.9–1.1   | linear → 6.72  |
-| 1.1–1.4   | linear → 14    |
-| 1.4–1.7   | linear → 22.4  |
-| ≥ 1.7     | 28             |
+Recalibrated in v2: upper full-credit threshold compressed from 1.7 → 1.3. In a trending
+bull market, IV/HV is structurally 0.9–1.15; the prior 1.7 threshold was calibrated for
+post-spike/crisis conditions and earned only 3–9 pts in normal trending environments.
 
-**Stale-IV flag (changed):** previously the trigger was `IV < 0.15`, which silently treated
-legitimately low-vol names (KO, T-bills, utilities) as stale. New trigger:
+| Bucket      | Pts              |
+|-------------|------------------|
+| < 0.8       | 0                |
+| 0.8–1.0     | linear → 4       |
+| 1.0–1.1     | linear 4 → 10    |
+| 1.1–1.2     | linear 10 → 18   |
+| 1.2–1.3     | linear 18 → 28   |
+| ≥ 1.3       | 28               |
 
-```
-iv_stale = (IV is NaN) or (IV ≤ 0.01)
-```
-
+**Stale-IV flag:** trigger is `(IV is NaN) or (IV ≤ 0.01)`.
 When `iv_stale=True`, IV/HV pts are forced to 0 and the row is annotated with
 `iv_stale: true` in the API response so the UI can surface the warning.
 
@@ -102,13 +100,17 @@ pct_below  = abs(min(dist, 0))
 
 **CSP curve** (rewards proximity to the high — uptrend):
 
-| pct_below     | Pts            |
-|---------------|----------------|
-| ≤ 5%          | 10             |
-| 5–10%         | linear → 7.33  |
-| 10–20%        | linear → 4.67  |
-| 20–30%        | linear → 2     |
-| > 30%         | 0              |
+> Bug fix: the 5–10% segment previously started at 7.33 pts (creating a 2.67-pt cliff
+> at exactly 5% below the 52W high). The segment now correctly starts at 10.0 pts and
+> decays continuously through 7.33 at 10%, then to 0 at 30%.
+
+| pct_below     | Pts                          |
+|---------------|------------------------------|
+| ≤ 5%          | 10                           |
+| 5–10%         | linear 10 → 7.33             |
+| 10–20%        | linear 7.33 → 4.67           |
+| 20–30%        | linear 4.67 → 0              |
+| > 30%         | 0                            |
 
 **CC curve** (rewards mild consolidation, penalizes near-high — assignment risk):
 
@@ -224,10 +226,16 @@ below strike.
 
 ### Exp Move Buffer (20 pts)
 
+Recalibrated in v2: reference boundary changed from 1× EM to **0.5× EM**.
+At the target delta (−0.225), the put strike sits approximately 0.25 EM units *outside*
+the 0.5× boundary, earning full 20 pts. Under the prior 1× EM reference, the same
+strike sat 0.25 EM units *inside* the boundary and earned 0 pts — a mathematical
+certainty regardless of IV level (see ADR-0006).
+
 ```
-EM             = S × σ × √(DTE/365)
-EM_lower       = S − EM
-sigmas_outside = (EM_lower − strike) / EM
+EM              = S × σ × √(DTE/365)
+EM_half_lower   = S − 0.5 × EM        (reference boundary)
+sigmas_outside  = (EM_half_lower − strike) / EM
 ```
 
 | sigmas_outside       | Pts |
@@ -236,6 +244,8 @@ sigmas_outside = (EM_lower − strike) / EM
 | 0 to 0.2σ outside    | 13  |
 | −0.1 to 0σ           |  5  |
 | deeper inside        |  0  |
+
+CC uses the symmetric upper boundary: `EM_half_upper = S + 0.5 × EM`.
 
 ### % OTM from Spot (9 pts)
 
@@ -270,30 +280,39 @@ spread_pct = (ask − bid) / mid × 100   where mid = (bid + ask) / 2
 Per-strike circuit-breaker. Uses volume during US market hours (9:30–16:00 ET weekday),
 otherwise falls back to openInterest.
 
-| Bucket    | Pts |
-|-----------|----:|
-| ≥ 1000    | 5   |
-| ≥ 500     | 3.5 |
-| ≥ 200     | 2   |
-| < 200     | 0   |
+| Bucket      | Pts                      |
+|-------------|-------------------------:|
+| ≥ 1000      | 5                        |
+| 500–1000    | linear 3.5 → 5           |
+| 200–500     | linear 2 → 3.5           |
+| 100–200     | linear 0 → 2             |
+| < 100       | 0                        |
 
-### Annualized ROC (10 pts) — new
+Note: the 100–200 range awards partial credit (linear ramp) to borderline-liquid
+strikes. The doc previously stated flat 0 below 200; the backend implementation
+has always interpolated in this range — this entry corrects the documentation.
+
+### Annualized ROC (10 pts)
 
 ```
 capital_per_share = strike − credit
 ROC               = (credit / capital_per_share) × (365 / DTE) × 100
 ```
 
+Recalibrated in v2: full-credit threshold lowered from 30% → 20%. The prior 30%
+threshold was only achievable on illiquid chains that simultaneously failed the Bid-Ask
+factor. At the target delta (−0.225), liquid large-caps earn 8–17% annualized ROC;
+20% for full credit makes the factor meaningful for the intended universe.
+
 | ROC %       | Pts            |
 |-------------|----------------|
-| ≥ 30%       | 10             |
-| 20–30%      | linear 7 → 10  |
-| 12–20%      | linear 4 → 7   |
-| 6–12%       | linear 1 → 4   |
-| < 6%        | 0              |
+| ≥ 20%       | 10             |
+| 14–20%      | linear 7 → 10  |
+| 8–14%       | linear 4 → 7   |
+| 4–8%        | linear 1 → 4   |
+| < 4%        | 0              |
 
-The API response exposes the raw value as `roc_annualized`. The curve is provisional —
-plan to recalibrate once a basket of real strikes has been observed.
+The API response exposes the raw value as `roc_annualized`.
 
 ---
 
@@ -381,6 +400,67 @@ Tier table same as CSP.
 
 ---
 
+## Capital constraint (CSP only)
+
+The `maxCapital` parameter caps the collateral you are willing to commit per contract.
+It is a **pre-scoring gate, not a post-hoc filter**: any strike that exceeds the cap is
+skipped before scoring starts, so it never appears in results and does not inflate error
+counts.
+
+**Collateral formula:**
+
+```
+collateral = strike × 100   (one standard-lot contract)
+```
+
+A strike is evaluated only when:
+
+```
+strike × 100 ≤ maxCapital
+```
+
+### Defaults and validation
+
+| Property   | Value                                          |
+|------------|------------------------------------------------|
+| Default    | `None` — no constraint, all strikes evaluated  |
+| Floor      | $100 (rejects values below minimum 1-lot contract) |
+| Applies to | CSP only — CC and DITM are unaffected          |
+
+### Example
+
+With `maxCapital = 8000`, only strikes ≤ $80 are evaluated:
+
+```
+$80 × 100 = $8,000 ≤ $8,000   ✓ evaluated
+$81 × 100 = $8,100 > $8,000   ✗ skipped
+```
+
+### Endpoints
+
+`maxCapital` is accepted by both CSP endpoints:
+
+| Endpoint                    | Parameter shape                                            |
+|-----------------------------|------------------------------------------------------------|
+| `POST /api/screener/csp`    | JSON body field `maxCapital` (float, optional)             |
+| `GET /api/screener/csp/scan`| Query parameter `max_capital` (float, optional, `ge=100`)  |
+
+### Cache behaviour
+
+The `/csp/scan` cache key includes `max_capital`:
+
+```
+cache_key = "{universe}:{top_n}:{min_dte}:{max_dte}:{max_capital}"
+```
+
+Scans with different `max_capital` values are stored as separate entries and do not
+pollute each other. A scan with no capital constraint and one with `max_capital=8000`
+each maintain an independent 30-minute TTL entry. See
+[ADR-0004](docs/adr/0004-scan-result-caching.md) and
+[ADR-0005](docs/adr/0005-csp-capital-constraint.md) for design rationale.
+
+---
+
 ## What changed from the prior revision
 
 1. **HV Rank rename** — was "IV Rank" but always derived from HV; now honestly labeled.
@@ -405,3 +485,28 @@ Tier table same as CSP.
 ENV totals to exactly 100 (22+28+15+10+10+8+7). Strike totals to exactly 100
 (15+18+20+9+23+5+10). Confirmed by `assert sum(ENV_WEIGHTS.values()) == 100` and
 `assert sum(STRIKE_WEIGHTS.values()) == 100` in the smoke test.
+
+### v2 recalibration (quant-trader diagnostic)
+
+12. **IV/HV upper threshold 1.7 → 1.3** — trending bull markets sustain IV/HV 1.1–1.3
+    structurally; the prior 1.7 ceiling earned only 3–9 pts in normal conditions and
+    essentially never fired. New curve: 0.8–1.0 → 4, 1.0–1.1 → 10, 1.1–1.2 → 18,
+    1.2–1.3 → 28, ≥1.3 = 28.
+13. **52W CSP curve bug fix** — the 5–10% segment previously started at 7.33 pts
+    (discontinuous drop from 10 pts at 5%). Corrected to a smooth linear decay:
+    5–10% → 10→7.33, 10–20% → 7.33→4.67, 20–30% → 4.67→0.
+14. **EM Buffer reference 1×EM → 0.5×EM** — at the target delta (−0.225), the put
+    strike sits ~0.25 EM units inside the 1×EM lower bound, earning 0 pts regardless
+    of IV level. Changing the reference boundary to 0.5×EM puts the same strike 0.25 EM
+    units *outside* the boundary, earning full 20 pts. See ADR-0006.
+15. **ROC full-credit threshold 30% → 20%** — at target delta on liquid large-caps,
+    annualized ROC is typically 8–17%. The prior 30% floor was only achievable on
+    illiquid chains that simultaneously failed Bid-Ask. The factor was effectively
+    inert. New tiers: ≥20%=10, 14–20%→7–10, 8–14%→4–7, 4–8%→1–4, <4%=0.
+16. **OI/Volume doc corrected** — backend has always interpolated linearly in the
+    100–200 range; documentation incorrectly stated flat 0 below 200. Table now shows
+    the 100–200 ramp explicitly.
+17. **`stable_csp` universe added** — 29 large-cap names across financials, payment
+    networks, consumer defensives/staples, industrials, and healthcare. Curated for
+    tight bid-ask spreads, structurally stable RSI (40–65), and IV/HV typically 1.0–1.3.
+    See `backend/services/universe.py`.

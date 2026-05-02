@@ -60,20 +60,22 @@ def compute_env_score(
             p = (iv_rank - 20) / 20.0 * 6.6           # 0 → 6.6
     score += p; bk['HV'] = p
 
-    # --- IV / HV Ratio (28 pts) — rescaled from 25 by ×28/25 = 1.12 ---
+    # --- IV / HV Ratio (28 pts) — recalibrated: upper threshold 1.7 → 1.3 ---
+    # Prior curve required IV/HV ≥ 1.7 for full pts — only achievable in fear/spike
+    # environments. Compressed to ≥ 1.3 so trending bull-market names earn meaningful pts.
     # Stale-IV: when iv_stale=True (IV NaN or ≤0.01), award 0 pts and let UI flag the row.
     p = 0.0
     if not iv_stale and iv_hv_ratio is not None and not math.isnan(iv_hv_ratio):
-        if iv_hv_ratio >= 1.7:
+        if iv_hv_ratio >= 1.3:
             p = 28.0
-        elif iv_hv_ratio >= 1.4:
-            p = 14.0 + (iv_hv_ratio - 1.4) / 0.3 * 8.4    # 14.0 → 22.4
+        elif iv_hv_ratio >= 1.2:
+            p = 18.0 + (iv_hv_ratio - 1.2) / 0.1 * 10.0   # 18.0 → 28.0
         elif iv_hv_ratio >= 1.1:
-            p = 6.72 + (iv_hv_ratio - 1.1) / 0.3 * 7.28   # 6.72 → 14.0
-        elif iv_hv_ratio >= 0.9:
-            p = 2.8 + (iv_hv_ratio - 0.9) / 0.2 * 3.92    # 2.8 → 6.72
+            p = 10.0 + (iv_hv_ratio - 1.1) / 0.1 * 8.0    # 10.0 → 18.0
+        elif iv_hv_ratio >= 1.0:
+            p = 4.0 + (iv_hv_ratio - 1.0) / 0.1 * 6.0     # 4.0 → 10.0
         elif iv_hv_ratio >= 0.8:
-            p = (iv_hv_ratio - 0.8) / 0.1 * 2.8           # 0 → 2.8
+            p = (iv_hv_ratio - 0.8) / 0.2 * 4.0           # 0 → 4.0
     score += p; bk['IH'] = p
 
     # --- SMA Alignment (15 pts): categorical, unchanged ---
@@ -103,14 +105,15 @@ def compute_env_score(
             # > 35% → 0
         else:
             # CSP: reward strength near the high. Rescaled from 15 → 10 (×10/15).
+            # Bug fix: 5–10% segment now correctly starts at 10.0 (was 7.333).
             if pct_below <= 5:
                 p = 10.0
             elif pct_below <= 10:
-                p = 7.333 - (pct_below - 5.0) / 5.0 * 2.667   # 7.333 → 4.667
+                p = 10.0 - (pct_below - 5.0) / 5.0 * 2.667   # 10.0 → 7.333
             elif pct_below <= 20:
-                p = 4.667 - (pct_below - 10.0) / 10.0 * 2.667  # 4.667 → 2.0
+                p = 7.333 - (pct_below - 10.0) / 10.0 * 2.667  # 7.333 → 4.667 (was 4.667→2.0)
             elif pct_below <= 30:
-                p = 2.0 - (pct_below - 20.0) / 10.0 * 2.0     # 2.0 → 0
+                p = 4.667 - (pct_below - 20.0) / 10.0 * 4.667  # 4.667 → 0
     score += p; bk['52W'] = p
 
     # --- RSI(14) (10 pts) — direction-aware ---

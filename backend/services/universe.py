@@ -60,6 +60,24 @@ _NON_AI_CORE: list[str] = [
     "QQQ", "SOXX", "SMH",
 ]
 
+# Stable CSP universe: large-cap names with liquid option chains, tight put spreads,
+# RSI that spends meaningful time in the 42–62 sweet spot, and IV/HV closer to 1.1–1.3.
+# Ideal for traders with limited capital (≤ $20K per contract) who need tradeable CSP signals.
+_STABLE_CSP: list[str] = [
+    # Large-cap financials — tight put spreads, event premium, RSI stability
+    "JPM", "BAC", "GS", "MS", "WFC", "C",
+    # Payment networks — deep chains, consistent IV/HV premium
+    "V", "MA",
+    # Consumer defensive / staples — best RSI stability, low gap risk
+    "WMT", "COST", "KO", "PG", "MCD",
+    # Industrials — uncorrelated to AI sentiment rotation, own vol cycle
+    "CAT", "DE", "GE", "HON", "RTX",
+    # Healthcare large-cap — liquid chains, low beta relative to tech
+    "JNJ", "UNH", "ABT",
+    # Home improvement / retail — liquid, stable trend
+    "HD", "LOW",
+]
+
 
 def _build_universe() -> list[str]:
     """Flatten AI buckets + core, preserving order, deduped."""
@@ -103,6 +121,7 @@ UNIVERSES: dict[str, list[str]] = {
     "ai_infrastructure": list(AI_BUILDOUT["infrastructure"]),
     "ai_models": list(AI_BUILDOUT["models"]),
     "ai_applications": list(AI_BUILDOUT["applications"]),
+    "stable_csp": _STABLE_CSP,
 }
 
 
