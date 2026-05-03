@@ -200,36 +200,68 @@ def _score_weekly_rsi(w_rsi: float, trend_pts: float) -> float:
 
 
 def _score_52w_dist(dist_pct: float) -> float:
-    """v3: 20 pts. Curve FLIPPED — finding #6: full credit at 0–5% below
-    high (trend confirmation), smooth taper through 30%. Mean-reversion
-    logic removed."""
+    """v3.2: 20 pts. Tent curve — rewards 3–12% below the 52W high.
+
+    Avoids buying right at local exhaustion (0% = possible all-time-high
+    reversal risk). Sweet spot is slightly off highs where momentum is
+    confirmed but a local top has not been set.
+
+    Curve: 0%→0% ramp to 3%; peak 20 at 3–12%; linear decay 12→30%; 0 beyond.
+    """
     if math.isnan(dist_pct):
         return 10.0
     d = abs(min(dist_pct, 0.0))
-    if d <= 5:
-        return 20.0
-    if d <= 10:
-        return _lerp(d, 5, 10, 20.0, 17.0)
-    if d <= 20:
-        return _lerp(d, 10, 20, 17.0, 10.0)
-    if d <= 30:
-        return _lerp(d, 20, 30, 10.0, 0.0)
+    if d < 3:
+        return _lerp(d, 0, 3, 12.0, 20.0)    # partial credit right at all-time high
+    if d <= 12:
+        return 20.0                           # sweet spot: 3–12% off highs
+    if d <= 25:
+        return _lerp(d, 12, 25, 20.0, 6.0)
+    if d <= 40:
+        return _lerp(d, 25, 40, 6.0, 0.0)
     return 0.0
 
 
 def _score_200d_return(ret_frac: float) -> float:
-    """v3: 25 pts. ret_frac is fraction (0.15 = 15%)."""
+    """v3.2: 15 pts (was 25). Compressed to reduce momentum-cluster dominance.
+
+    Cap kept at 25% (no need to reward 80% vs 30% — both confirm a strong
+    trend). Weight reduced so Trend Stability (R²) can be added as an
+    independent orthogonal signal.
+    """
     if math.isnan(ret_frac):
-        return 8.0
+        return 5.0
     pct = ret_frac * 100
     if pct >= 25:
-        return 25.0
+        return 15.0
     if pct >= 15:
-        return _lerp(pct, 15, 25, 18.0, 25.0)
+        return _lerp(pct, 15, 25, 11.0, 15.0)
     if pct >= 5:
-        return _lerp(pct, 5, 15, 10.0, 18.0)
+        return _lerp(pct, 5, 15, 6.0, 11.0)
     if pct >= 0:
-        return _lerp(pct, 0, 5, 2.0, 10.0)
+        return _lerp(pct, 0, 5, 1.5, 6.0)
+    return 0.0
+
+
+def _score_trend_r2(r2: float) -> float:
+    """v3.2 NEW: 10 pts. Trend Stability — R² of OLS price regression (50-day).
+
+    Measures *smoothness* of the trend, not direction or magnitude.
+    High R² → clean, consistent trend (DITM-friendly: delta-heavy position
+    survives chop poorly). Low R² → choppy/range-bound (theta bleeds you).
+
+    Thresholds: > 0.7 = clean trend; 0.4–0.7 = moderate; < 0.4 = choppy.
+    """
+    if math.isnan(r2):
+        return 5.0   # neutral default when insufficient data
+    if r2 >= 0.85:
+        return 10.0
+    if r2 >= 0.70:
+        return _lerp(r2, 0.70, 0.85, 7.5, 10.0)
+    if r2 >= 0.50:
+        return _lerp(r2, 0.50, 0.70, 4.0, 7.5)
+    if r2 >= 0.30:
+        return _lerp(r2, 0.30, 0.50, 1.0, 4.0)
     return 0.0
 
 
@@ -268,28 +300,32 @@ def compute_ditm_env_score(
     days_to_earnings: Optional[int],
     chain_median_oi: float,
     dte: int,
+    trend_r2: float = float("nan"),   # v3.2: R² of 50-day OLS price regression
 ) -> tuple[float, str]:
     """
     Returns (env_raw_score 0–100, detail_string).
 
-    v3: no hard gates. HV Rank dropped (was duplicate of strike-side IV
-    Percentile). Trend gate dropped (now a soft 25-pt factor — failing
-    full alignment costs ~17 pts but doesn't zero ENV). Earnings ≤7d is
-    a DTE-scaled penalty rather than a hard gate.
+    v3: no hard gates. HV Rank dropped (duplicate of strike-side IV
+    Percentile). Trend gate dropped (soft 25-pt factor). Earnings ≤7d is
+    a DTE-scaled penalty.
+
+    v3.2: 200d Return 25→15 pts; Trend Stability (R²) added at 10 pts;
+    52W Distance curve shifted to tent peaking at 3–12% off highs.
     """
     trend_pts = _score_trend_strength(price_above_sma50, sma50_above_sma200, price, sma200)
     rsi_pts = _score_weekly_rsi(weekly_rsi, trend_pts)
     dist_pts = _score_52w_dist(dist_from_52w_high_pct)
     ret_pts = _score_200d_return(ret_200d_frac)
+    r2_pts = _score_trend_r2(trend_r2)
     lq_pts = _score_liquidity_ditm(chain_median_oi)
     earn_pen = _earnings_penalty_dte_scaled(days_to_earnings, dte)
 
-    raw = trend_pts + rsi_pts + dist_pts + ret_pts + lq_pts + earn_pen
+    raw = trend_pts + rsi_pts + dist_pts + ret_pts + r2_pts + lq_pts + earn_pen
     raw = max(0.0, min(100.0, raw))
 
     detail = (
-        f"Tr:{trend_pts:.1f} R2:{ret_pts:.1f} 52W:{dist_pts:.1f} "
-        f"WRSI:{rsi_pts:.1f} LQ:{lq_pts:.1f} Earn:{earn_pen:.1f}"
+        f"Tr:{trend_pts:.1f} Ret:{ret_pts:.1f} 52W:{dist_pts:.1f} "
+        f"R2:{r2_pts:.1f} WRSI:{rsi_pts:.1f} LQ:{lq_pts:.1f} Earn:{earn_pen:.1f}"
     )
     return round(raw, 2), detail
 
@@ -299,27 +335,31 @@ def compute_ditm_env_score(
 # ---------------------------------------------------------------------------
 
 def _score_delta_ditm(delta: float) -> float:
-    """v3: 20 pts. Symmetric bell around 0.82 sweet spot 0.80–0.85."""
+    """v3.2: 20 pts. Sweet spot shifted to 0.82–0.90 (reduces gamma risk,
+    more stock-like behaviour).
+
+    Ramps up through 0.75–0.82, flat top 0.82–0.90, soft decay above 0.90.
+    Below 0.70 = 0 (option is not deep enough in the money).
+    """
     if delta < 0.70:
         return 0.0
     if delta <= 0.75:
         return _lerp(delta, 0.70, 0.75, 0.0, 12.0)
-    if delta <= 0.80:
-        return _lerp(delta, 0.75, 0.80, 12.0, 17.0)
-    if delta <= 0.85:
-        return _lerp(delta, 0.80, 0.85, 17.0, 20.0)
+    if delta <= 0.82:
+        return _lerp(delta, 0.75, 0.82, 12.0, 20.0)
     if delta <= 0.90:
-        return _lerp(delta, 0.85, 0.90, 20.0, 16.0)
-    return _lerp(delta, 0.90, 0.98, 16.0, 10.0)
+        return 20.0                              # flat top — sweet zone
+    if delta <= 0.95:
+        return _lerp(delta, 0.90, 0.95, 20.0, 14.0)
+    return _lerp(delta, 0.95, 1.00, 14.0, 9.0)
 
 
 def _score_leverage(leverage: float) -> float:
-    """v3 NEW (audit finding #1): 25 pts. The headline DITM metric.
+    """v3.2: 25 pts. The headline DITM metric: delta × price / mid.
 
-    leverage = delta × price / mid — captures the stock-replacement thesis
-    directly. Sweet spot 2.5–3.5×. Below 1.5× the option is not delivering
-    enough leverage to justify time-value cost; above ~5× usually means
-    the strike is too far OTM and delta has already collapsed.
+    v3.2 changes: flat top extended to 2.5–4.0×; sharper decay 4–5×;
+    hard zero at ≥5× (leverage that high usually reflects a mispriced or
+    wide-spread option rather than a genuinely advantaged setup).
     """
     if math.isnan(leverage) or leverage <= 0:
         return 0.0
@@ -329,11 +369,11 @@ def _score_leverage(leverage: float) -> float:
         return _lerp(leverage, 1.5, 2.0, 8.0, 17.0)
     if leverage <= 2.5:
         return _lerp(leverage, 2.0, 2.5, 17.0, 25.0)
-    if leverage <= 3.5:
-        return 25.0
-    if leverage <= 5.0:
-        return _lerp(leverage, 3.5, 5.0, 25.0, 12.0)
-    return _lerp(leverage, 5.0, 8.0, 12.0, 0.0)
+    if leverage <= 4.0:
+        return 25.0                              # flat top expanded to 4×
+    if leverage < 5.0:
+        return _lerp(leverage, 4.0, 5.0, 25.0, 0.0)  # sharp decay
+    return 0.0                                   # hard zero ≥5×
 
 
 def _score_extrinsic_pct(pct_frac: float) -> float:
@@ -558,6 +598,19 @@ def _legacy_process_symbol(
         ret_200d_frac = _compute_200d_return(df)
         ret_200d_pct = round((ret_200d_frac * 100) if not math.isnan(ret_200d_frac) else 0.0, 2)
 
+        # v3.2: R² of OLS price regression over last 50 days
+        _prices_leg = df["Close"].dropna().values
+        _prices_leg = _prices_leg[-50:] if len(_prices_leg) >= 50 else _prices_leg
+        if len(_prices_leg) >= 10:
+            _x_leg = np.arange(len(_prices_leg), dtype=float)
+            _coeffs_leg = np.polyfit(_x_leg, _prices_leg, 1)
+            _fitted_leg = np.polyval(_coeffs_leg, _x_leg)
+            _ss_res_leg = float(np.sum((_prices_leg - _fitted_leg) ** 2))
+            _ss_tot_leg = float(np.sum((_prices_leg - _prices_leg.mean()) ** 2))
+            trend_r2_leg = float(1.0 - _ss_res_leg / _ss_tot_leg) if _ss_tot_leg > 1e-9 else float("nan")
+        else:
+            trend_r2_leg = float("nan")
+
         # Overnight gap
         gap_3d = _compute_gap_3d(df)
 
@@ -675,6 +728,7 @@ def _legacy_process_symbol(
                             days_to_earnings=days_to_earnings,
                             chain_median_oi=chain_median_oi,
                             dte=dte,
+                            trend_r2=trend_r2_leg,
                         )
 
                         # Strike score
@@ -792,6 +846,19 @@ def _ditm_symbol_factory(_sym: str, df, current_price: float) -> tuple[Indicator
     ret_200d_frac = _compute_200d_return(df)
     gap_3d = _compute_gap_3d(df)
 
+    # v3.2: R² of OLS price regression over last 50 days (trend smoothness)
+    _prices = df["Close"].dropna().values
+    _prices = _prices[-50:] if len(_prices) >= 50 else _prices
+    if len(_prices) >= 10:
+        _x = np.arange(len(_prices), dtype=float)
+        _coeffs = np.polyfit(_x, _prices, 1)
+        _fitted = np.polyval(_coeffs, _x)
+        _ss_res = float(np.sum((_prices - _fitted) ** 2))
+        _ss_tot = float(np.sum((_prices - _prices.mean()) ** 2))
+        _trend_r2 = float(1.0 - _ss_res / _ss_tot) if _ss_tot > 1e-9 else float("nan")
+    else:
+        _trend_r2 = float("nan")
+
     sma50 = trend.get("sma50") or 0.0
     sma200 = trend.get("sma200") or 0.0
 
@@ -809,6 +876,7 @@ def _ditm_symbol_factory(_sym: str, df, current_price: float) -> tuple[Indicator
         hv_rank=hv_rank,
         weekly_rsi=None if math.isnan(w_rsi) else w_rsi,
         ret_200d_frac=None if math.isnan(ret_200d_frac) else ret_200d_frac,
+        trend_r2=None if math.isnan(_trend_r2) else _trend_r2,
     )
     metrics = SymbolMetrics(
         sma_ratio=(
@@ -886,6 +954,7 @@ def _ditm_env_scorer(ind: Indicators) -> tuple[float, str]:
         days_to_earnings=ind.days_to_earnings,
         chain_median_oi=ind.chain_median_oi,
         dte=ind.dte,
+        trend_r2=ind.trend_r2 if ind.trend_r2 is not None else float("nan"),
     )
 
 

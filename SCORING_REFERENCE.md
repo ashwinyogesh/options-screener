@@ -1,4 +1,4 @@
-# Scoring Reference (CSP, CC, DITM) — v3.1
+# Scoring Reference (CSP, CC, DITM) — v3.2
 
 > Single source of truth for the screener scoring system. Every weight and threshold listed
 > here is mirrored in code by `ENV_WEIGHTS` / `STRIKE_WEIGHTS` in
@@ -17,7 +17,10 @@
 > ROC ceiling (20% → 12%). **DITM v3** (May 2026, see
 > [ADR-0008](docs/adr/0008-ditm-v3-lean-model.md)) reduced the DITM model from 13 → 10
 > factors, added the Leverage factor that was missing, and removed the HV Rank and Trend
-> hard gates. Diagnostic-preserved fields (`em_buffer_pct`, `dist_pct`, `otm_pct` for CSP/CC;
+> hard gates. **DITM v3.2** (May 2026) de-correlates the ENV momentum cluster: 200d Return
+> compressed 25→15 pts, Trend Stability R² added at 10 pts, 52W Distance tent curve
+> (exhaustion penalty at 0%), Delta sweet spot shifted to 0.82–0.90, Leverage hard-capped
+> at 5×. Diagnostic-preserved fields (`em_buffer_pct`, `dist_pct`, `otm_pct` for CSP/CC;
 > `theta_annualized_pct`, `capital_efficiency_pct`, `breakeven_pct`, `hv_rank` for DITM) are
 > still computed and returned in the response payload but contribute 0 to the score.
 
@@ -363,13 +366,13 @@ These constraints filter candidates *before* scoring, not as scored factors:
 
 ---
 
-## DITM (Deep-In-The-Money long calls) — v3
+## DITM (Deep-In-The-Money long calls) — v3.2
 
 `compute_ditm_env_score(...)` and `compute_ditm_strike_score(...)` in
 [backend/services/ditm_service.py](backend/services/ditm_service.py). DITM v3 (ADR-0008)
-shipped after CSP/CC v3 — it applies the same lean philosophy plus DITM-specific fixes
-(adds Leverage, removes the HV Rank > 50 hard gate, makes the macro-hold flag actually
-demote scores).
+shipped after CSP/CC v3 — it applies the same lean philosophy plus DITM-specific fixes.
+DITM v3.2 de-correlates the ENV momentum cluster (see `_score_trend_r2`, `_score_200d_return`,
+`_score_52w_dist` docstrings in `ditm_service.py`).
 
 ### Final score formula
 
@@ -385,8 +388,9 @@ macro_mult  = 0.85 if macro_hold else 1.0
 | Factor | Weight | Notes |
 |--------|-------:|-------|
 | Trend Strength | 25 | Soft factor (no longer a hard gate) |
-| 200d Return | 25 | ≥25% = full credit |
-| 52W High Distance (FLIPPED) | 20 | ≤5% = full credit (audit fix #6) |
+| 200d Return | 15 | ≥25% = full credit (v3.2: compressed from 25) |
+| Trend Stability (R²) | 10 | OLS R² of 50-day price regression (v3.2 NEW) |
+| 52W High Distance | 20 | tent peak 3–12% off highs (v3.2 tent curve) |
 | Weekly RSI(14) | 15 | sweet 50–65 |
 | Chain Liquidity | 15 | log10(median_OI) / log10(500) × 15 |
 | Earnings (DTE-scaled) | up to −15 | Penalty, not gate |
@@ -406,36 +410,65 @@ else                     →  0
 > wasn't full. v3 keeps Trend as the highest-weighted ENV factor (any partial alignment
 > earns proportional pts) but no longer zeroes ENV for failing it.
 
-#### 200d Return (25 pts)
+#### 200d Return (15 pts) — v3.2 compressed
 
 ```
 ret_200d = Close_today / median(Close[-205:-200]) − 1
 ```
 
+Weight reduced 25→15 in v3.2 to break the momentum cluster: Trend Strength already
+captures direction (25 pts), so awarding a further 25 pts for magnitude created a
+dominant 50-pt momentum block. The freed 10 pts fund the new orthogonal Trend Stability
+factor.
+
 | pct      | Pts             |
 |----------|-----------------|
-| ≥ 25%    | 25              |
-| 15–25%   | linear 18 → 25  |
-| 5–15%    | linear 10 → 18  |
-| 0–5%     | linear 2 → 10   |
+| ≥ 25%    | 15              |
+| 15–25%   | linear 11 → 15  |
+| 5–15%    | linear 6 → 11   |
+| 0–5%     | linear 1.5 → 6  |
 | < 0%     | 0               |
 
-#### 52W High Distance (20 pts) — **curve flipped vs v2**
+#### Trend Stability R² (10 pts) — v3.2 NEW
+
+```python
+# 50-day OLS linear regression of closing price
+_x      = [0, 1, …, n−1]   # n = min(50, available days)
+coeffs  = np.polyfit(_x, Close[-50:], 1)
+fitted  = np.polyval(coeffs, _x)
+R² = 1 − SS_res / SS_tot
+```
+
+Measures *smoothness* of the trend — orthogonal to direction (Trend Strength) and
+magnitude (200d Return). High R² means the stock drifted cleanly in one direction;
+low R² means choppy/range-bound behaviour where theta bleeds a DITM long.
+
+| R²       | Pts             |
+|----------|-----------------|
+| ≥ 0.85   | 10              |
+| 0.70–0.85 | linear 7.5 → 10 |
+| 0.50–0.70 | linear 4 → 7.5  |
+| 0.30–0.50 | linear 1 → 4    |
+| < 0.30   | 0               |
+| NaN      | 5 (neutral default if < 10 days) |
+
+#### 52W High Distance (20 pts) — **v3.2 tent curve**
 
 `pct_below = abs(min(dist, 0))` where `dist = (Close − max_252d_close) / max_252d_close × 100`.
 
 | pct_below | Pts             |
 |-----------|-----------------|
-| ≤ 5%      | 20              |
-| 5–10%     | linear 20 → 17  |
-| 10–20%    | linear 17 → 10  |
-| 20–30%    | linear 10 → 0   |
-| > 30%     | 0               |
+| 0–3%      | linear 12 → 20  |
+| 3–12%     | 20 (flat top)   |
+| 12–25%    | linear 20 → 6   |
+| 25–40%    | linear 6 → 0    |
+| > 40%     | 0               |
 
-> **Audit fix #6:** v2 awarded only 7 pts at 0–3% below high and 12 pts at 3–10% — so a
-> stock printing fresh ATHs (the cleanest possible DITM trend setup) lost 5 pts vs a stock
-> 8% below. That was mean-reversion logic in a momentum screener. v3 flips the curve: full
-> credit at the high, smooth taper through 30%.
+> **v3.2 change (tent curve):** v3 gave full credit at 0% (right at the 52W high).
+> v3.2 finds that buying right at a fresh local high carries exhaustion risk; the sweet
+> spot is 3–12% off the high where momentum is confirmed but near-term reversal risk
+> is lower. The v3 all-time-high case (0%) still earns 12 pts (not zero) to avoid
+> discarding fundamentally strong stocks that briefly tag ATH.
 
 #### Weekly RSI(14) (15 pts)
 
@@ -477,48 +510,46 @@ penalty = -15 × scale  if days_to_earnings ≤ 7
 
 | Factor | Weight | Notes |
 |--------|-------:|-------|
-| Δ (delta position) | 20 | sweet 0.80–0.85 |
-| **Leverage (NEW)** | 25 | δ × price / mid · sweet 2.5–3.5× |
+| Δ (delta position) | 20 | sweet 0.82–0.90 (v3.2: shifted from 0.80–0.85) |
+| **Leverage** | 25 | δ × price / mid · flat top 2.5–4.0× · hard 0 ≥5× (v3.2) |
 | Extrinsic % | 25 | <2% = full |
 | Bid-Ask Spread % | 20 | ≤2% = full |
 | IV Percentile (inv) | 10 | ≤25th pct = full credit (cheap vol for buyers) |
 | **Total** | **100** | |
 
-#### Δ — 20 pts
+#### Δ — 20 pts (v3.2: sweet spot shifted to 0.82–0.90)
 
 | Bucket       | Pts                  |
 |--------------|----------------------|
-| 0.80–0.85    | linear 17 → 20       |
-| 0.85–0.90    | linear 20 → 16       |
-| 0.75–0.80    | linear 12 → 17       |
+| 0.82–0.90    | 20 (flat top)        |
+| 0.75–0.82    | linear 12 → 20       |
 | 0.70–0.75    | linear 0 → 12        |
-| 0.90–0.98    | linear 16 → 10       |
+| 0.90–0.95    | linear 20 → 14       |
+| 0.95–1.00    | linear 14 → 9        |
 | < 0.70       | 0                    |
 
-#### Leverage — 25 pts (NEW in v3)
+> **v3.2 change:** Sweet spot shifted from 0.80–0.85 → 0.82–0.90. Higher delta reduces
+> gamma risk and makes the position more stock-like, more faithful to the stock-replacement
+> thesis.
+
+#### Leverage — 25 pts (v3.2: sharper cap)
 
 ```
 leverage = delta × current_price / mid
 ```
 
-The headline DITM metric. Captures stock replacement directly: at `δ = 0.85`, `S = $700`,
-`mid = $210`, `leverage = 2.83×` — every dollar deployed in the option captures 2.83× the
-notional exposure of a share. v2 had a 5-pt Capital Efficiency factor that ignored delta
-and could rank a 0.95Δ call at 50% cap-eff (leverage ≈ 1.9×) above a 0.70Δ call at 30%
-cap-eff (leverage ≈ 2.3×) — i.e., it ranked the worse option higher. Audit finding #1.
+The headline DITM metric. v3.2 tightens the upper cap: flat top extended to 4× (was 3.5×),
+then a sharper linear drop to hard zero at 5× (was gradual decay to 8×). Leverage ≥5×
+almost always reflects a mispriced or extremely wide-spread option.
 
 | leverage   | Pts             |
 |------------|-----------------|
 | 0–1.5×     | linear 0 → 8    |
 | 1.5–2.0×   | linear 8 → 17   |
 | 2.0–2.5×   | linear 17 → 25  |
-| 2.5–3.5×   | 25              |
-| 3.5–5.0×   | linear 25 → 12  |
-| 5.0–8.0×   | linear 12 → 0   |
-| > 8.0×     | 0               |
-
-Above ~5× usually means the strike is too far OTM and delta has already collapsed —
-the leverage number looks high but the option is no longer behaving like stock.
+| 2.5–4.0×   | 25 (flat top)   |
+| 4.0–5.0×   | linear 25 → 0   |
+| ≥ 5.0×     | 0 (hard zero)   |
 
 #### Extrinsic % — 25 pts
 

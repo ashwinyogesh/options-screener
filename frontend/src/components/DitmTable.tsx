@@ -40,7 +40,7 @@ function parseDetail(detail: string): Record<string, number> {
 
 // v3 ENV factor keys + max pts (ADR-0008)
 const ENV_MAX: Record<string, number> = {
-  Tr: 25, R2: 25, '52W': 20, WRSI: 15, LQ: 15,
+  Tr: 25, Ret: 15, R2: 10, '52W': 20, WRSI: 15, LQ: 15,
 }
 // v3 Strike factor keys + max pts
 const STRIKE_MAX: Record<string, number> = {
@@ -48,7 +48,7 @@ const STRIKE_MAX: Record<string, number> = {
 }
 const DRAG_LABELS: Record<string, string> = {
   Tr: 'Trend', WRSI: 'Weekly RSI', '52W': '52W Dist',
-  R2: '200d Return', LQ: 'Liquidity',
+  Ret: '200d Return', R2: 'Trend Stability R²', LQ: 'Liquidity',
   'Δ': 'Delta', Lev: 'Leverage', Ext: 'Extrinsic%',
   BA: 'Bid-Ask Spread', IV: 'IV Pctile',
 }
@@ -345,7 +345,7 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
                 className="sortable"
                 onClick={() => scoreCol?.toggleSorting(scoreSorted === 'asc')}
               >
-                <span className="col-tip" title="Final Score = (0.5×Env + 0.5×Strike) × macro_mult (0.85 if macro hold)&#10;&#10;ENV (100 pts)&#10;  Trend Strength   25 pts  P>SMA50>SMA200 (soft factor in v3)&#10;  200d Return      25 pts  ≥25%=full&#10;  52W High Dist.   20 pts  ≤5%=full (curve flipped — audit #6)&#10;  Weekly RSI       15 pts  50–65=full&#10;  Chain Liquidity  15 pts  log10 ref 500&#10;  Earnings (DTE-scaled)  up to −15 pts penalty&#10;&#10;STRIKE (100 pts)&#10;  Delta            20 pts  0.80–0.85 peak&#10;  Leverage (NEW)   25 pts  delta×price/mid · sweet 2.5–3.5×&#10;  Extrinsic%       25 pts  &lt;2%=full&#10;  Bid-Ask Spread   20 pts  ≤2%=full&#10;  IV Percentile    10 pts  ≤25th=full (inverted)&#10;&#10;Diagnostic only in v3:&#10;  Theta/yr  Cap%  HV Rank  Breakeven%">
+                <span className="col-tip" title="Final Score = (0.5×Env + 0.5×Strike) × macro_mult (0.85 if macro hold)&#10;&#10;ENV (100 pts)&#10;  Trend Strength       25 pts  P>SMA50>SMA200 (soft factor)&#10;  200d Return          15 pts  ≥25%=full (v3.2: compressed)&#10;  Trend Stability R²   10 pts  OLS R² of 50-day price (v3.2 NEW)&#10;  52W High Dist.       20 pts  peak 3–12% off highs (v3.2 tent curve)&#10;  Weekly RSI           15 pts  50–65=full&#10;  Chain Liquidity      15 pts  log10 ref 500&#10;  Earnings (DTE-scaled)  up to −15 pts penalty&#10;&#10;STRIKE (100 pts)&#10;  Delta            20 pts  0.82–0.90 sweet spot (v3.2)&#10;  Leverage         25 pts  δ×price/mid · flat 2.5–4.0× · hard 0 at ≥5× (v3.2)&#10;  Extrinsic%       25 pts  &lt;2%=full&#10;  Bid-Ask Spread   20 pts  ≤2%=full&#10;  IV Percentile    10 pts  ≤25th=full (inverted)">
                   Score ⓘ
                 </span>
                 {scoreSorted === 'asc' && ' ↑'}
@@ -428,10 +428,10 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
                     {isNaN(r.ret_200d)
                       ? <span className="dim">—</span>
                       : <>
-                          <span style={{ color: subColor(envPts, 'R2', ENV_MAX) }}>
+                          <span style={{ color: subColor(envPts, 'Ret', ENV_MAX) }}>
                             {r.ret_200d >= 0 ? '+' : ''}{r.ret_200d.toFixed(1)}%
                           </span>
-                          {subScore(envPts, 'R2', ENV_MAX)}
+                          {subScore(envPts, 'Ret', ENV_MAX)}
                         </>
                     }
                   </td>

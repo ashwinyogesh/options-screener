@@ -72,6 +72,7 @@ class Indicators:
     # DITM only
     weekly_rsi: Optional[float] = None
     ret_200d_frac: Optional[float] = None  # 200-day median-anchored return as fraction
+    trend_r2: Optional[float] = None       # v3.2: R² of 50-day OLS price regression
 
     # Per-symbol levels consumed by strike scorers via strike_context_builder.
     vol_support_1: Optional[float] = None
