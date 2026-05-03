@@ -20,6 +20,7 @@ from routers.csp import router as csp_router
 from routers.dcf import router as dcf_router
 from routers.ditm import router as ditm_router
 from routers.supply_chain import router as supply_chain_router
+from services.scoring.config import SCORING_VERSION
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,7 +30,7 @@ logging.basicConfig(
 app = FastAPI(
     title="CSP Screener API",
     description="Cash Secured Put screener using technical + options signals.",
-    version="1.0.0",
+    version=SCORING_VERSION,
 )
 
 # Rate limiting (slowapi). Per-IP limits; 429 returned when exceeded.
@@ -62,4 +63,4 @@ app.include_router(dcf_router)
 
 @app.get("/health", tags=["meta"])
 def health() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "scoring_version": SCORING_VERSION}

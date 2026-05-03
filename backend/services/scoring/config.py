@@ -9,17 +9,16 @@ inline. The dicts are the textual source-of-truth referenced by
 Per copilot-instructions.md: any tweak to these weights requires an ADR
 plus matching updates to `SCORING_REFERENCE.md` and the frontend legend.
 
-v3 (ADR-0007) reduced the model from 14 factors to 8 to remove
-correlated/redundant signals. Dropped: HV Rank, SMA Alignment, DTE Sweet
-Spot, EM Buffer, %OTM, S/R Distance.
-
-v3.1 (ADR-0009) calibration fixes:
-- Trend split: 52W Distance 15 pts + SMA Alignment 5 pts + SMA50 Slope 5 pts
-- Delta bell smoothed (piecewise-linear) and raised from 20 to 25 pts
-- Bid-Ask lowered from 30 to 25 pts (rebalanced with Delta)
-- ROC ceiling lowered from 20% to 12% annualised (reduces vol-bias)
+SCORING_VERSION is the gold-standard version tag for the current
+calibration. Bump it whenever scoring constants change (matches the git
+tag). Surfaced by the /health endpoint at runtime.
 """
 from __future__ import annotations
+
+# v3.1 = CSP/CC calibration (ADR-0009: trend split, delta bell, BA/ROC)
+# v3.2 = DITM de-correlation (trend R², 52W tent, return compress,
+#         delta 0.82-0.90, leverage hard cap 5×)
+SCORING_VERSION: str = "3.2.0"
 
 # Environment-score factor weights (CSP/CC). Sum = 100.
 # Mirror of the per-factor caps inside `compute_env_score` in `env.py`.
