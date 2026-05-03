@@ -49,6 +49,8 @@ def _csp_indicators() -> Indicators:
         iv_hv_ratio=1.4,
         iv_stale=False,
         rsi=55.0,
+        sma_ratio=1.05,
+        sma50_slope_pct=0.3,
     )
 
 
@@ -165,6 +167,7 @@ def _stub_symbol_factory(_sym: str, _df: Any, _price: float) -> tuple[Indicators
         price_above_sma50=True, sma50_above_sma200=True,
         dist_from_52w_high_pct=-2.0, chain_median_oi=0.0,
         earnings_within_dte=False, days_to_earnings=30, dte=0,
+        sma_ratio=1.03, sma50_slope_pct=0.2,
     ), SymbolMetrics()
 
 

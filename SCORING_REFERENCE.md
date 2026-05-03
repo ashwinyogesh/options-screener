@@ -1,4 +1,4 @@
-# Scoring Reference (CSP, CC, DITM) — v3
+# Scoring Reference (CSP, CC, DITM) — v3.1
 
 > Single source of truth for the screener scoring system. Every weight and threshold listed
 > here is mirrored in code by `ENV_WEIGHTS` / `STRIKE_WEIGHTS` in
@@ -10,7 +10,11 @@
 > [DitmInput.tsx](frontend/src/components/DitmInput.tsx) mirror this document.
 
 > **v3 lean model** for CSP/CC (May 2026, see [ADR-0007](docs/adr/0007-scoring-v3-lean-model.md))
-> reduced the model from 14 → 8 factors. **DITM v3** (May 2026, see
+> reduced the model from 14 → 8 factors. **v3.1 calibration** (May 2026, see
+> [ADR-0009](docs/adr/0009-csp-cc-v31-calibration.md)) splits the Trend factor into three
+> independent sub-signals (Tr 15 + SMA 5 + Slope 5 = 25 pts), smooths the Delta bell
+> (steps → piecewise-linear, 20 → 25 pts), lowers Bid-Ask (30 → 25 pts), and lowers the
+> ROC ceiling (20% → 12%). **DITM v3** (May 2026, see
 > [ADR-0008](docs/adr/0008-ditm-v3-lean-model.md)) reduced the DITM model from 13 → 10
 > factors, added the Leverage factor that was missing, and removed the HV Rank and Trend
 > hard gates. Diagnostic-preserved fields (`em_buffer_pct`, `dist_pct`, `otm_pct` for CSP/CC;
@@ -49,7 +53,9 @@ Both `env_score` and `strike_score` cap at 100, so `final_score` ∈ [0, 100].
 | Factor             | Weight | CSP / CC differs? |
 |--------------------|-------:|:-----------------:|
 | IV / HV Ratio      |  35    | no                |
-| Trend (52W dist)   |  25    | **yes**           |
+| Trend: 52W dist    |  15    | **yes**           |
+| Trend: SMA align   |   5    | no (higher = more pts for both) |
+| Trend: SMA slope   |   5    | no                |
 | RSI(14)            |  20    | **yes**           |
 | Chain Median OI    |  20    | no                |
 | Earnings in DTE    | −15    | no (penalty)      |
@@ -77,11 +83,10 @@ IV/HV becomes the primary volatility signal.
 **Stale-IV flag:** trigger is `(IV is NaN) or (IV ≤ 0.01)`. When `iv_stale=True`, IV/HV pts
 are forced to 0 and the row is annotated with `iv_stale: true` in the API response.
 
-### Trend / 52W High Distance (25 pts) — direction-aware
+### Trend: 52W High Distance (15 pts) — direction-aware
 
-Replaces the v2 SMA Alignment (15) + 52W (10) into a single direction-aware Trend factor.
-SMA was a redundant signal under the lean model; the 52W direction-aware curve captures
-the same trend information with smooth math.
+v3.1 rescaled from 25 pts to 15 pts — the 10 pts freed are redistributed to SMA Alignment
+(5 pts) and SMA50 Slope (5 pts). Smooth piecewise-linear curves; no step discontinuities.
 
 ```
 dist       = (Closeₜ − max(Close, 252d)) / max(Close, 252d) × 100
@@ -92,25 +97,54 @@ pct_below  = abs(min(dist, 0))
 
 | pct_below     | Pts                          |
 |---------------|------------------------------|
-| ≤ 5%          | 25                           |
-| 5–10%         | linear 25 → 18.333           |
-| 10–20%        | linear 18.333 → 11.667       |
-| 20–30%        | linear 11.667 → 0            |
+| ≤ 5%          | **15** (flat top)            |
+| 5–30%         | linear 15 → 0                |
 | > 30%         | 0                            |
+
+> v3 used a multi-segment decay (5→10, 10→20, 20→30). v3.1 uses a single linear
+> decay from 15 at ≤5% to 0 at 30% — simpler and equally monotone.
 
 **CC curve** (penalizes near-high — assignment risk; rewards 5–15% consolidation):
 
 | pct_below     | Pts                          |
 |---------------|------------------------------|
-| ≤ 5%          | **0** (was 4 in v2 — fix #5) |
-| 5–15%         | linear 0 → 25                |
-| 15–25%        | linear 25 → 10               |
-| 25–35%        | linear 10 → 0                |
+| ≤ 5%          | **0** (assignment risk)      |
+| 5–15%         | linear 0 → 15                |
+| 15–35%        | linear 15 → 0                |
 | > 35%         | 0                            |
 
-> **Cliff fix #5:** in v2 the CC ≤5% bucket paid 4 pts (40% of the factor cap), which
-> contradicted the assignment-risk thesis for call writers. v3 zeroes this bucket so
-> near-52W-high names are correctly penalized.
+### Trend: SMA Alignment (5 pts) — v3.1 restored signal
+
+Restored from v2 (dropped in v3 as redundant with 52W). v3.1 treats SMA alignment as an
+independent structural signal separate from 52W proximity — the two are not redundant
+(a stock can be near its 52W high with declining SMA50, or far from it with rising SMA50).
+
+```
+sma_ratio = SMA50 / SMA200
+```
+
+| sma_ratio     | Pts |
+|---------------|----:|
+| > 1.02        | 5   |
+| 1.00–1.02     | 3   |
+| 0.98–1.00     | 1.5 |
+| < 0.98        | 0   |
+
+### Trend: SMA50 Slope (5 pts) — v3.1 momentum confirmation
+
+New in v3.1. Measures whether the 50-day moving average is accelerating (rising slope)
+or decelerating (flat/declining). Rewards continuation, not just direction.
+
+```
+sma50_slope_pct = (SMA50[−1] / SMA50[−11] − 1) × 100   (10-trading-day window)
+```
+
+| slope_pct     | Pts                     |
+|---------------|-------------------------|
+| ≥ 0.5%        | 5 (full credit)         |
+| 0.2–0.5%      | linear 3 → 5            |
+| 0.0–0.2%      | linear 0 → 3            |
+| < 0%          | 0 (declining SMA50)     |
 
 ### RSI(14) (20 pts) — direction-aware
 
@@ -179,34 +213,35 @@ Source: yfinance calendarEvents.earnings
 
 | Factor               | Weight |
 |----------------------|-------:|
-| Δ (delta position)   |  20    |
-| Bid-Ask Spread %     |  30    |
+| Δ (delta position)   |  25    |
+| Bid-Ask Spread %     |  25    |
 | OI / Volume (per strike) | 15 |
 | Annualized ROC       |  35    |
 | **Total**            | **100**|
 
-### Δ (delta position) — 20 pts
+### Δ (delta position) — 25 pts (v3.1)
 
-Symmetric bell around `ideal_delta = -0.225`. The CSP delta gate
-`delta_range=(-0.35, -0.10)` is enforced by the candidate filter upstream; this factor
-awards points based on offset from the ideal.
+Smooth piecewise-linear bell around `ideal_delta = -0.225` (v3.1: raised from 20 pts,
+step-bands replaced with continuous interpolation).
 
 ```
 offset = abs(delta - (-0.225))
 ```
 
-| offset            | Pts |
-|-------------------|----:|
-| ≤ 0.025  (Δ in [-0.25, -0.20]) | 20 |
-| ≤ 0.075  (gate inner band)     | 13 |
-| ≤ 0.125  (gate outer band)     |  7 |
-| outside the gate               |  0 |
+| offset                    | Pts                  |
+|---------------------------|----------------------|
+| ≤ 0.025 (Δ in [−0.25, −0.20]) | 25 (flat top)   |
+| 0.025–0.075               | linear 25 → 16       |
+| 0.075–0.125               | linear 16 → 9        |
+| 0.125–0.175               | linear 9 → 0         |
+| > 0.175                   | 0                    |
 
-> **Audit fix #7:** v2 awarded the aggressive wing (Δ < -0.30) 5.83 pts but the conservative
-> wing (-0.15 < Δ ≤ -0.10) only 5.0 pts despite equal distance from the ideal. v3 is
-> symmetric — both wings score equally at the same offset.
+> **v3.1 change:** v3 used step bands (20/13/7/0) creating 7-pt cliffs at offsets
+> 0.025, 0.075, and 0.125. v3.1 replaces with piecewise-linear interpolation through the
+> same boundaries plus adds a 0.125–0.175 band (Δ −0.05 range that maps to 0).
+> Max raised from 20 to 25 (rebalanced vs Bid-Ask lowered from 30 to 25).
 
-### Bid-Ask Spread % — 30 pts
+### Bid-Ask Spread % — 25 pts (v3.1)
 
 ```
 spread_pct = (ask − bid) / mid × 100   where mid = (bid + ask) / 2
@@ -216,13 +251,13 @@ Lower spread = better execution. Wide spreads erode realized premium on entry an
 
 | Bucket    | Pts            |
 |-----------|----------------|
-| ≤ 1%      | 30             |
-| 1–3%      | linear 30 → 20 |
-| 3–5%      | linear 20 → 11 |
-| 5–8%      | linear 11 → 3  |
+| ≤ 1%      | 25             |
+| 1–3%      | linear 25 → 17 |
+| 3–5%      | linear 17 → 9  |
+| 5–8%      | linear 9 → 2   |
 | > 8%      | 0              |
 
-Rescaled from 23 in v2.
+> **v3.1 change:** lowered from 30 pts to 25 pts (rebalanced vs Delta raised to 25).
 
 ### OI / Volume (per strike) — 15 pts
 
@@ -250,15 +285,18 @@ For CSP, capital at risk = strike − credit (cash secured minus premium receive
 
 | ROC %       | Pts                  |
 |-------------|----------------------|
-| ≥ 20%       | 35                   |
-| 14–20%      | linear 24.5 → 35     |
-| 8–14%       | linear 14 → 24.5     |
-| 4–8%        | linear 3.5 → 14      |
-| 2–4%        | linear 0 → 3.5       |
-| < 2%        | 0                    |
+| ≥ 12%       | 35 (ceiling v3.1)    |
+| 8–12%       | linear 24.5 → 35     |
+| 4–8%        | linear 14 → 24.5     |
+| 2–4%        | linear 3.5 → 14      |
+| 1–2%        | linear 0 → 3.5       |
+| < 1%        | 0                    |
 
-> **Cliff fix #6:** v2 awarded a flat 1 pt at ROC = 4 then jumped to 0 below. v3 adds a
-> 2–4% ramp for continuous behavior.
+> **v3.1 change:** ceiling lowered from 20% → 12%. Rationale: stable low-IV names
+> (KO, JNJ, DUK) generate 5–10% annualised ROC at the configured ideal delta — under the
+> old 20% ceiling they could never exceed 24.5 pts (70% utilisation). The new 12% ceiling
+> lets them reach full credit at realistic premium levels. The tier boundaries are scaled
+> proportionally.
 
 The API response exposes the raw value as `roc_annualized`.
 
@@ -270,8 +308,8 @@ The API response exposes the raw value as `roc_annualized`.
 
 | Factor               | Weight |
 |----------------------|-------:|
-| Δ (delta position)   |  20    |
-| Bid-Ask Spread %     |  30    |
+| Δ (delta position)   |  25    |
+| Bid-Ask Spread %     |  25    |
 | OI / Volume          |  15    |
 | Annualized ROC       |  35    |
 | **Total**            | **100**|
@@ -281,7 +319,7 @@ The API response exposes the raw value as `roc_annualized`.
 The CC scorer uses the **same 8-factor structure, the same weights, and the same curves**
 as CSP. Only two inputs differ:
 
-1. **Δ ideal**: `+0.225` (sign-flipped from CSP). Symmetric bell math is identical.
+1. **Δ ideal**: `+0.225` (sign-flipped from CSP). Smooth bell math is identical.
 2. **ROC capital basis**: `current_price − credit`. The CC writer's capital at risk is the
    value of the underlying held to write the call, not the strike. The ROC scoring curve
    is otherwise identical to CSP.

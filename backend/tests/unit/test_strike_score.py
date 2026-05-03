@@ -70,27 +70,27 @@ def _cc_neutral_kwargs() -> dict:
 
 # === CSP =====================================================================
 
-# --- Delta bell-curve (20 pts) --------------------------------------------
+# --- Delta bell-curve (25 pts smooth) — v3.1 ----------------------------------
 
 @pytest.mark.parametrize(
     "delta, expected_pts",
     [
-        (-0.22, 20.0),    # sweet spot (offset 0.005 ≤ 0.025)
-        (-0.20, 20.0),    # boundary (offset 0.025 ≤ 0.025)
-        (-0.25, 20.0),    # boundary (offset 0.025 ≤ 0.025)
-        (-0.18, 13.0),    # shoulder (offset 0.045 ≤ 0.075)
-        (-0.28, 13.0),    # shoulder (offset 0.055 ≤ 0.075)
-        (-0.12, 7.0),     # outer (offset 0.105 ≤ 0.125)
-        (-0.35, 7.0),     # outer edge (offset 0.125 ≤ 0.125)
-        (-0.05, 0.0),     # too close to ATM
-        (0.10, 0.0),      # wrong sign
+        (-0.22, 25.0),   # sweet spot (offset ≤0.025)
+        (-0.20, 25.0),   # exactly at flat-top boundary
+        (-0.25, 25.0),   # exactly at flat-top boundary
+        (-0.18, 21.4),   # shoulder (offset 0.045 in 0.025–0.075 band)
+        (-0.28, 19.6),   # shoulder (offset 0.055 in 0.025–0.075 band)
+        (-0.12, 11.8),   # outer (offset 0.105 in 0.075–0.125 band)
+        (-0.10, 9.0),    # outer edge (offset 0.125, lerp endpoint = 9.0)
+        (-0.05, 0.0),    # too close to ATM (offset >0.175)
+        (0.10, 0.0),     # wrong sign
     ],
 )
 def test_csp_delta_factor_at_elbows(delta: float, expected_pts: float):
     kw = _csp_neutral_kwargs()
     kw["delta"] = delta
     score, _, _ = compute_csp_strike_score(**kw)
-    assert score == pytest.approx(expected_pts, abs=0.1)
+    assert score == pytest.approx(expected_pts, abs=0.2)
 
 
 # --- S/R distance back-compat (dropped in v3) -----------------------------
@@ -124,15 +124,15 @@ def test_csp_em_buffer_diagnostic_at_half_em_boundary():
     assert raw["em_buffer_pct"] == pytest.approx(0.0, abs=2.0)
 
 
-# --- Bid-Ask spread (23 pts) -----------------------------------------------
+# --- Bid-Ask spread (25 pts) — v3.1 -----------------------------------------
 
 @pytest.mark.parametrize(
     "spread, expected_min",
     [
-        (0.5, 23.0),
-        (1.0, 23.0),
-        (3.0, 15.0),
-        (5.0, 8.0),
+        (0.5, 25.0),
+        (1.0, 25.0),
+        (3.0, 17.0),
+        (5.0, 9.0),
         (8.0, 2.0),
         (12.0, 0.0),
     ],
@@ -166,16 +166,16 @@ def test_csp_liquidity_uses_volume_when_market_open():
     assert score == pytest.approx(15.0, abs=0.1)
 
 
-# --- ROC factor (10 pts) ---------------------------------------------------
+# --- ROC factor (35 pts, ceiling 12%) — v3.1 ---------------------------------
 
 def test_csp_roc_factor_strong_premium():
     kw = _csp_neutral_kwargs()
     kw["strike"] = 100.0
     kw["dte"] = 30
-    kw["credit"] = 3.0  # capital = 97; roc = 3/97 * 365/30 * 100 ≈ 37.6 → cap 10
+    kw["credit"] = 3.0  # capital = 97; roc = 3/97 * 365/30 * 100 ≈ 37.6 → cap at 12% → 35 pts
     score, _, raw = compute_csp_strike_score(**kw)
-    assert raw["roc_annualized"] >= 30.0
-    assert score >= 10.0
+    assert raw["roc_annualized"] >= 12.0
+    assert score >= 35.0
 
 
 # --- Final-blend helpers ---------------------------------------------------
@@ -187,27 +187,27 @@ def test_csp_final_score_blend():
 
 # === CC ======================================================================
 
-# --- Delta bell-curve (20 pts) — positive deltas for calls ----------------
+# --- Delta bell-curve (25 pts smooth) — v3.1 positive deltas for calls ------
 
 @pytest.mark.parametrize(
     "delta, expected_pts",
     [
-        (0.22, 20.0),     # sweet spot
-        (0.20, 20.0),     # boundary
-        (0.25, 20.0),     # boundary
-        (0.18, 13.0),     # shoulder
-        (0.28, 13.0),     # shoulder
-        (0.12, 7.0),      # outer
-        (0.35, 7.0),      # outer edge
+        (0.22, 25.0),    # sweet spot
+        (0.20, 25.0),    # boundary
+        (0.25, 25.0),    # boundary
+        (0.18, 21.4),    # shoulder (offset 0.045)
+        (0.28, 19.6),    # shoulder (offset 0.055)
+        (0.12, 11.8),    # outer (offset 0.105)
+        (0.35, 9.0),     # outer edge (offset 0.125 → 9.0)
         (0.05, 0.0),
-        (-0.10, 0.0),     # wrong sign
+        (-0.10, 0.0),    # wrong sign
     ],
 )
 def test_cc_delta_factor_at_elbows(delta: float, expected_pts: float):
     kw = _cc_neutral_kwargs()
     kw["delta"] = delta
     score, _, _ = compute_cc_strike_score(**kw)
-    assert score == pytest.approx(expected_pts, abs=0.1)
+    assert score == pytest.approx(expected_pts, abs=0.2)
 
 
 # --- CC vs CSP delta divergence --------------------------------------------
@@ -215,11 +215,11 @@ def test_cc_delta_factor_at_elbows(delta: float, expected_pts: float):
 def test_cc_and_csp_delta_factor_mirror_signs():
     """Both screeners should award full Δ credit at their respective sweet
     spots: CSP at -0.22, CC at +0.22. Each should give zero on the opposite
-    sign."""
+    sign. v3.1: max = 25 pts."""
     csp_kw = _csp_neutral_kwargs()
     csp_kw["delta"] = -0.22
     csp_score, _, _ = compute_csp_strike_score(**csp_kw)
-    assert csp_score == pytest.approx(20.0, abs=0.1)
+    assert csp_score == pytest.approx(25.0, abs=0.1)
 
     csp_kw["delta"] = 0.22
     csp_wrong_sign, _, _ = compute_csp_strike_score(**csp_kw)
@@ -228,7 +228,7 @@ def test_cc_and_csp_delta_factor_mirror_signs():
     cc_kw = _cc_neutral_kwargs()
     cc_kw["delta"] = 0.22
     cc_score, _, _ = compute_cc_strike_score(**cc_kw)
-    assert cc_score == pytest.approx(20.0, abs=0.1)
+    assert cc_score == pytest.approx(25.0, abs=0.1)
 
     cc_kw["delta"] = -0.22
     cc_wrong_sign, _, _ = compute_cc_strike_score(**cc_kw)

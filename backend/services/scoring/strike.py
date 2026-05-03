@@ -47,17 +47,17 @@ __all__ = [
 
 
 def _score_bid_ask(spread_pct: float | None) -> float:
-    """Bid-Ask Spread % — 30 pts. Lower spread = better execution."""
+    """Bid-Ask Spread % — 25 pts (v3.1: lowered from 30; rebalanced vs Delta)."""
     if spread_pct is None or math.isnan(spread_pct):
         return 0.0
     if spread_pct <= 1.0:
-        return 30.0
+        return 25.0
     if spread_pct <= 3.0:
-        return 20.0 + (3.0 - spread_pct) / 2.0 * 10.0     # 30 → 20
+        return 25.0 - (spread_pct - 1.0) / 2.0 * 8.0      # 25 → 17
     if spread_pct <= 5.0:
-        return 11.0 + (5.0 - spread_pct) / 2.0 * 9.0      # 20 → 11
+        return 17.0 - (spread_pct - 3.0) / 2.0 * 8.0      # 17 → 9
     if spread_pct <= 8.0:
-        return 3.0 + (8.0 - spread_pct) / 3.0 * 8.0       # 11 → 3
+        return 9.0 - (spread_pct - 5.0) / 3.0 * 7.0       # 9 → 2
     return 0.0
 
 
@@ -78,36 +78,46 @@ def _score_liquidity(market_open: bool, volume: int, open_interest: int) -> tupl
 
 
 def _score_roc(roc: float) -> float:
-    """Annualized ROC — 35 pts. Cliff-fixed (#6): adds 2–4% ramp."""
-    if roc >= 20:
+    """Annualized ROC — 35 pts.
+
+    v3.1: ceiling lowered from 20% to 12% annualised so stable low-IV names
+    (KO, JNJ) reach full credit at realistic premium levels, reducing the
+    vol-bias that rewarded NVDA-class names structurally.
+
+    ≥12%=35 · 8–12%→24.5→35 · 4–8%→14→24.5 · 2–4%→3.5→14 · 1–2%→0→3.5 · <1%=0
+    """
+    if roc >= 12:
         return 35.0
-    if roc >= 14:
-        return 24.5 + (roc - 14) / 6.0 * 10.5    # 24.5 → 35.0
     if roc >= 8:
-        return 14.0 + (roc - 8) / 6.0 * 10.5     # 14.0 → 24.5
+        return 24.5 + (roc - 8) / 4.0 * 10.5     # 24.5 → 35.0
     if roc >= 4:
-        return 3.5 + (roc - 4) / 4.0 * 10.5      # 3.5 → 14.0
+        return 14.0 + (roc - 4) / 4.0 * 10.5     # 14.0 → 24.5
     if roc >= 2:
-        return (roc - 2) / 2.0 * 3.5             # 0 → 3.5 (cliff fix)
+        return 3.5 + (roc - 2) / 2.0 * 10.5      # 3.5 → 14.0
+    if roc >= 1:
+        return (roc - 1) / 1.0 * 3.5             # 0 → 3.5
     return 0.0
 
 
 def _score_delta_symmetric(delta: float, ideal: float) -> float:
-    """Δ symmetric bell — 20 pts. Fixes audit #7 asymmetry between wings.
+    """Δ smooth bell — 25 pts (v3.1: raised from 20, step-cliffs replaced with
+    piecewise-linear interpolation through same band boundaries).
 
-    Sweet band ±0.025 around ideal = full credit; widens 13 → 7 → 0 by 0.05
-    bands. The legacy gate (-0.35 to -0.10 for CSP, mirrored for CC) is enforced
-    by the candidate filter upstream; this scorer awards 0 outside ±0.125.
+    Sweet band ±0.025 around ideal = 25 pts flat top.
+    Piecewise-linear decay: 25→16 (0.025−0.075) →09 (0.075−0.125) →0 (0.125−0.175).
+    Awards 0 outside ±0.175 (upstream filter enforces -0.35 to -0.10 for CSP).
     """
     if math.isnan(delta):
         return 0.0
     offset = abs(delta - ideal)
     if offset <= 0.025:
-        return 20.0
+        return 25.0
     if offset <= 0.075:
-        return 13.0
+        return 25.0 - (offset - 0.025) / 0.05 * 9.0    # 25 → 16
     if offset <= 0.125:
-        return 7.0
+        return 16.0 - (offset - 0.075) / 0.05 * 7.0    # 16 → 9
+    if offset <= 0.175:
+        return 9.0 - (offset - 0.125) / 0.05 * 9.0     # 9 → 0
     return 0.0
 
 

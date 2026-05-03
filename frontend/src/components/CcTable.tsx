@@ -29,13 +29,11 @@ function parseEnvDetail(detail: string): Record<string, number> {
   }
   return out
 }
-const ENV_MAX: Record<string, number> = { HV: 22, IH: 28, SMA: 15, '52W': 10, RSI: 10, OI: 8, DTE: 7 }
-const STRIKE_MAX: Record<string, number> = { 'Δ': 15, 'Res': 18, 'EM': 20, 'OTM': 9, 'BA': 23, 'LQ': 5, 'ROC': 10 }
+const ENV_MAX: Record<string, number> = { IH: 35, Tr: 15, SMA: 5, SLP: 5, RSI: 20, OI: 20 }
+const STRIKE_MAX: Record<string, number> = { 'Δ': 25, 'BA': 25, 'LQ': 15, 'ROC': 35 }
 const DRAG_LABELS: Record<string, string> = {
-  HV: 'HV Rank', IH: 'IV/HV Ratio', SMA: 'Trend (SMA)',
-  '52W': '52W Dist', RSI: 'RSI', OI: 'Chain OI', DTE: 'DTE',
-  'Δ': 'Delta', Res: 'Resistance Dist', EM: 'Exp Move Buffer',
-  OTM: 'OTM%', BA: 'Bid-Ask Spread', LQ: 'Liquidity', ROC: 'Ann. ROC',
+  IH: 'IV/HV Ratio', Tr: 'Trend (52W)', SMA: 'SMA Alignment', SLP: 'SMA Slope', RSI: 'RSI', OI: 'Chain OI',
+  'Δ': 'Delta', BA: 'Bid-Ask Spread', LQ: 'Liquidity', ROC: 'Ann. ROC',
 }
 function topDrags(envDetail: string, strikeDetail: string, n = 2) {
   const envPts = parseEnvDetail(envDetail)
@@ -100,7 +98,7 @@ const COLUMNS = [
   }),
   col.accessor('sma_ratio',     {
     header: () => (
-      <span className="col-tip col-scored" title="SMA50 ÷ SMA200 · Ratio >1 means the 50-day average is above the 200-day average (bullish structure)">
+      <span className="col-tip" title="SMA50 ÷ SMA200 · Ratio >1 means the 50-day average is above the 200-day average (bullish structure)  ·  diagnostic only in v3, not scored (Trend uses 52W).">
         SMA50/200 ⓘ
       </span>
     ),
@@ -110,14 +108,6 @@ const COLUMNS = [
     header: () => (
       <span className="col-tip col-scored" title="Distance from the 52-week high · 0% = at the high · Negative = % below the high">
         52W Dist ⓘ
-      </span>
-    ),
-    cell: () => null,
-  }),
-  col.accessor('iv_rank',       {
-    header: () => (
-      <span className="col-tip col-scored" title="HV Rank: percentile of today's 30-day historical volatility within its 252-day min–max range (0 = historically cheap, 100 = historically expensive). Used as an IV proxy until true ATM IV history is available.">
-        HV Rank ⓘ
       </span>
     ),
     cell: () => null,
@@ -140,7 +130,7 @@ const COLUMNS = [
   }),
   col.accessor('vol_resistance_126_1', {
     header: () => (
-      <span className="col-tip col-scored" title="Volume Profile resistance levels above the current price (126-day / 6M lookback) · High-volume price bins where sellers historically appeared">
+      <span className="col-tip" title="Volume Profile resistance levels above the current price (126-day / 6M lookback) · High-volume price bins where sellers historically appeared  ·  diagnostic only in v3, not scored (S/R distance dropped from scoring).">
         Vol Resistance 6M ⓘ
       </span>
     ),
@@ -320,23 +310,13 @@ export function CcTable({ data }: Props) {
                 </span>
               </th>
               <th>
-                <span className="col-tip" title="Black-Scholes call delta  ·  Positive for calls  ·  Approximates probability of expiring in-the-money (shares called away)  ·  +0.20 to +0.25 = sweet spot (20–25% assignment chance)">
+                <span className="col-tip" title="Black-Scholes call delta  ·  Positive for calls  ·  Approximates probability of expiring in-the-money (shares called away)  ·  v3 ideal +0.225 with symmetric bell: |Δ−(+0.225)| ≤ 0.025 = 20 pts · ≤ 0.075 = 13 · ≤ 0.125 = 7 · outside gate = 0">
                   Delta ⓘ
                 </span>
               </th>
               <th>
                 <span className="col-tip" title="(Ask − Bid) / Mid × 100  ·  Lower = tighter market">
                   Spread% ⓘ
-                </span>
-              </th>
-              <th>
-                <span className="col-tip" title="% gap from strike to nearest vol-resistance above  ·  0% = strike at or above resistance  ·  — if no resistance above in range">
-                  Res ⓘ
-                </span>
-              </th>
-              <th>
-                <span className="col-tip" title="How far the strike is outside the 1σ expected upward move  ·  +20% = well above the ceiling  ·  negative = strike is inside the move">
-                  EM ⓘ
                 </span>
               </th>
               <th>
@@ -353,7 +333,7 @@ export function CcTable({ data }: Props) {
                 className="sortable"
                 onClick={() => scoreCol?.toggleSorting(scoreSorted === 'asc')}
               >
-                <span className="col-tip" title="Final Score = 0.4×Env + 0.6×Strike&#10;&#10;ENV SCORE (100 pts)&#10;  HV Rank           22 pts&#10;  IV / HV Ratio     28 pts  (stale IV → 0)&#10;  SMA Alignment     15 pts&#10;  52W High Dist.    10 pts  CC: 5–15% below=full&#10;  RSI(14)           10 pts  CC: 38–58=full&#10;  Chain Median OI    8 pts  circuit-breaker&#10;  DTE Sweet Spot     7 pts  30–45 DTE=full&#10;  Earnings in DTE  −15 pts&#10;&#10;STRIKE SCORE (100 pts)&#10;  Delta             15 pts  peak +0.20→+0.25&#10;  Dist vs Resist.   18 pts  strike ≥ resistance&#10;  Exp Move Buffer   20 pts  ≥0.2σ above ceiling&#10;  % OTM from Spot    9 pts  ≥15%=full&#10;  Bid-Ask Spread    23 pts  ≤1%=full&#10;  OI / Volume        5 pts  circuit-breaker&#10;  Annualized ROC    10 pts  ≥30%=full">
+                <span className="col-tip" title="Final Score = 0.4×Env + 0.6×Strike  ·  v3 lean 8-factor model&#10;&#10;ENV SCORE (100 pts)&#10;  IV / HV Ratio   35 pts  ≥1.3×=full (stale IV → 0)&#10;  Trend (52W)     25 pts  CC: 5–15% below 52W high=full (≤5%=0)&#10;  RSI(14)         20 pts  CC: 38–58=full (ceiling 75)&#10;  Chain Median OI 20 pts  log circuit-breaker&#10;  Earnings in DTE −15 pts  penalty&#10;&#10;STRIKE SCORE (100 pts)&#10;  Delta           20 pts  symmetric bell, ideal +0.225&#10;  Bid-Ask Spread  30 pts  ≤1%=full&#10;  OI / Volume     15 pts  per-strike circuit-breaker&#10;  Annualized ROC  35 pts  ≥20%=full (capital = price − credit)&#10;&#10;Diagnostic-only (not scored): EM Buffer, %OTM from Spot.">
                   Score ⓘ
                 </span>
                 {scoreSorted === 'asc' && ' ↑'}
@@ -407,23 +387,15 @@ export function CcTable({ data }: Props) {
                   <td rowSpan={totalRows}>
                     {r.sma_ratio == null || isNaN(r.sma_ratio)
                       ? <span className="dim">—</span>
-                      : <><span style={{ color: envColor(envPts, 'SMA') }}>{r.sma_ratio.toFixed(4)}</span><br />{envSub(envPts, 'SMA')}</>
+                      : <><span style={{ color: envColor(envPts, 'SMA') }}>{r.sma_ratio.toFixed(4)}</span><br />{envSub(envPts, 'SMA')}{envSub(envPts, 'SLP')}</>
                     }
                   </td>
                   <td rowSpan={totalRows}>
                     {isNaN(r.dist_from_52w_high_pct)
                       ? <span className="dim">—</span>
-                      : <><span style={{ color: envColor(envPts, '52W') }}>
+                      : <><span style={{ color: envColor(envPts, 'Tr') }}>
                           {r.dist_from_52w_high_pct.toFixed(1)}%
-                        </span><br />{envSub(envPts, '52W')}</>
-                    }
-                  </td>
-                  <td rowSpan={totalRows}>
-                    {r.iv_rank == null
-                      ? <span className="dim">N/A</span>
-                      : <><span style={{ color: envColor(envPts, 'HV'), fontWeight: 600 }}>
-                            {r.iv_rank.toFixed(0)}
-                          </span><br />{envSub(envPts, 'HV')}</>
+                        </span><br />{envSub(envPts, 'Tr')}</>
                     }
                   </td>
                   <td rowSpan={totalRows}>
@@ -502,16 +474,6 @@ export function CcTable({ data }: Props) {
                 </td>
                 <td><span style={{ color: strikeColor(bestStrike.strike_detail, 'BA') }}>{fmtSpread(bestStrike.bid_ask_spread_pct)}</span>{strikeSub(bestStrike.strike_detail, 'BA')}</td>
                 <td>
-                  {bestStrike.dist_pct == null
-                    ? <span className="dim">—</span>
-                    : <><span style={{ color: strikeColor(bestStrike.strike_detail, 'Res') }}>{bestStrike.dist_pct >= 0 ? '+' : ''}{bestStrike.dist_pct.toFixed(1)}%</span>{strikeSub(bestStrike.strike_detail, 'Res')}</>}
-                </td>
-                <td>
-                  {bestStrike.em_buffer_pct == null
-                    ? <span className="dim">—</span>
-                    : <><span style={{ color: strikeColor(bestStrike.strike_detail, 'EM') }}>{bestStrike.em_buffer_pct >= 0 ? '+' : ''}{bestStrike.em_buffer_pct.toFixed(0)}%</span>{strikeSub(bestStrike.strike_detail, 'EM')}</>}
-                </td>
-                <td>
                   <span style={{ color: strikeColor(bestStrike.strike_detail, 'LQ') }}>{bestStrike.lq_count >= 1000 ? (bestStrike.lq_count / 1000).toFixed(1) + 'k' : bestStrike.lq_count}</span>{strikeSub(bestStrike.strike_detail, 'LQ')}
                 </td>
                 <td>
@@ -550,16 +512,6 @@ export function CcTable({ data }: Props) {
                       {strikeSub(s.strike_detail, 'Δ')}
                     </td>
                     <td><span style={{ color: strikeColor(s.strike_detail, 'BA') }}>{fmtSpread(s.bid_ask_spread_pct)}</span>{strikeSub(s.strike_detail, 'BA')}</td>
-                    <td>
-                      {s.dist_pct == null
-                        ? <span className="dim">—</span>
-                        : <><span style={{ color: strikeColor(s.strike_detail, 'Res') }}>{s.dist_pct >= 0 ? '+' : ''}{s.dist_pct.toFixed(1)}%</span>{strikeSub(s.strike_detail, 'Res')}</>}
-                    </td>
-                    <td>
-                      {s.em_buffer_pct == null
-                        ? <span className="dim">—</span>
-                        : <><span style={{ color: strikeColor(s.strike_detail, 'EM') }}>{s.em_buffer_pct >= 0 ? '+' : ''}{s.em_buffer_pct.toFixed(0)}%</span>{strikeSub(s.strike_detail, 'EM')}</>}
-                    </td>
                     <td>
                       <span style={{ color: strikeColor(s.strike_detail, 'LQ') }}>{s.lq_count >= 1000 ? (s.lq_count / 1000).toFixed(1) + 'k' : s.lq_count}</span>{strikeSub(s.strike_detail, 'LQ')}
                     </td>

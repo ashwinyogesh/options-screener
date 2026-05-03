@@ -1,16 +1,17 @@
 """
-Environment scorer — v3 lean model (see ADR-0007).
+Environment scorer — v3.1 calibration (see ADR-0007 + ADR-0009).
 
 `compute_env_score` is direction-aware via the `direction` arg ('csp' | 'cc');
-it shapes the Trend (52W) and RSI curves accordingly.
+it shapes the Trend (52W), SMA, and RSI curves accordingly.
 
-v3 reduced ENV from 7 factors to 4 (IV/HV 35 + Trend 25 + RSI 20 + Chain
-OI 20 = 100). Dropped: HV Rank (correlated with IV/HV), SMA Alignment
-(collapsed into Trend), DTE Sweet Spot (now a hard filter via min/max DTE).
+v3 reduced ENV from 7 factors to 4. v3.1 splits the 25-pt Trend factor into
+three independent signals (total still 25 pts, total ENV still 100):
+  Tr:  15 pts  52W high distance  — momentum proxy, direction-aware
+  SMA:  5 pts  SMA alignment categorical (P>SMA50>SMA200)
+  SLP:  5 pts  SMA50 10-day slope  — momentum confirmation
+
 The legacy parameters `iv_rank`, `price_above_sma50`, `sma50_above_sma200`,
-and `dte` are kept in the signature for back-compat but ignored — call
-sites do not need to change. They will be removed in a future cleanup
-once all call sites are updated.
+and `dte` are kept in the signature for back-compat but ignored.
 
 DITM environment scoring is intentionally *not* in this module yet — the
 live implementation lives inline in `services.ditm_service.py`.
@@ -26,28 +27,30 @@ __all__ = ["compute_env_score"]
 
 def compute_env_score(
     *,
-    iv_rank: float | None,             # IGNORED in v3 (HV Rank dropped) — kept for back-compat
+    iv_rank: float | None,             # IGNORED (HV Rank dropped) — kept for back-compat
     iv_hv_ratio: float | None,
-    price_above_sma50: bool,           # IGNORED in v3 (SMA dropped) — kept for back-compat
-    sma50_above_sma200: bool,          # IGNORED in v3 (SMA dropped) — kept for back-compat
+    price_above_sma50: bool,           # IGNORED (raw bool; use sma_ratio for scoring)
+    sma50_above_sma200: bool,          # IGNORED (raw bool; use sma_ratio for scoring)
     dist_from_52w_high_pct: float,
     rsi: float,
     chain_median_oi: float,
     earnings_within_dte: bool,
     direction: str = 'csp',            # 'csp' or 'cc' — affects Trend and RSI curves
-    dte: int | None = None,            # IGNORED in v3 (DTE Sweet Spot dropped) — kept for back-compat
+    dte: int | None = None,            # IGNORED (DTE Sweet Spot dropped) — kept for back-compat
     iv_stale: bool = False,            # If True, IV/HV pts forced to 0
+    sma_ratio: float = 1.0,            # v3.1: SMA50/SMA200 ratio (1.0 = neutral default)
+    sma50_slope_pct: float = 0.0,      # v3.1: SMA50 10-day % change (0.0 = flat default)
 ) -> tuple[float, str]:
     """
     Environment Score 0–100 (+earnings penalty up to −15).
     Direction-aware: CSP rewards strength near 52W high; CC rewards
     consolidation 5–15% below the high.
 
-    Weights (v3): IV/HV 35 + Trend 25 + RSI 20 + Chain OI 20 = 100
+    Weights (v3.1): IV/HV 35 + Tr 15 + SMA 5 + SLP 5 + RSI 20 + OI 20 = 100
     Penalty: Earnings within DTE = −15
 
-    Note: `iv_rank`, `price_above_sma50`, `sma50_above_sma200`, and `dte`
-    are accepted for call-site back-compat but unused in v3 scoring.
+    Back-compat: `iv_rank`, `price_above_sma50`, `sma50_above_sma200`, `dte`
+    are accepted but unused.
     """
     _ = iv_rank, price_above_sma50, sma50_above_sma200, dte  # explicitly unused
     direction = direction.lower()
@@ -70,36 +73,55 @@ def compute_env_score(
             p = (iv_hv_ratio - 0.8) / 0.2 * 5.0            # 0 → 5.0
     score += p; bk['IH'] = p
 
-    # --- Trend / 52W High Distance (25 pts) — direction-aware ---
-    # Replaces the v2 SMA Alignment (15) + 52W (10) into a single direction-aware
-    # factor. SMA was redundant signal under the lean model; 52W direction-aware
-    # captures the same trend information with a smooth curve.
+    # --- Trend: 52W High Distance (15 pts) — direction-aware, smooth curves ---
+    # v3.1: scaled from 25 to 15 pts (10 pts moved to SMA+Slope sub-factors).
+    # Smooth: flat top then single linear decay (CSP) / smooth tent (CC).
+    # No slope discontinuities: 9.9% and 10.1% below high differ by <0.15 pts.
     p = 0.0
     if not math.isnan(dist_from_52w_high_pct):
         pct_below = abs(min(dist_from_52w_high_pct, 0.0))
         if direction == 'cc':
-            # CC: PENALIZE near-high (assignment risk — fix #5).
-            # Sweet spot at 5–15% consolidation; smooth ramps both sides.
+            # CC: sweet spot 5–15% consolidation; smooth tent both sides.
             if pct_below <= 5:
-                p = 0.0  # was 4.0 in v2 — finding #5: full penalty for assignment risk
+                p = 0.0
             elif pct_below <= 15:
-                p = (pct_below - 5.0) / 10.0 * 25.0           # 0 → 25
-            elif pct_below <= 25:
-                p = 25.0 - (pct_below - 15.0) / 10.0 * 15.0   # 25 → 10
+                p = (pct_below - 5.0) / 10.0 * 15.0          # 0 → 15
             elif pct_below <= 35:
-                p = 10.0 - (pct_below - 25.0) / 10.0 * 10.0   # 10 → 0
+                p = max(0.0, 15.0 * (1.0 - (pct_below - 15.0) / 20.0))  # 15 → 0
         else:
-            # CSP: reward strength near the 52W high (uptrend).
-            # Smooth continuous decay from 25 at ≤5% to 0 at 30%.
+            # CSP: flat top ≤5%, single linear decay to 0 at 30%.
             if pct_below <= 5:
-                p = 25.0
-            elif pct_below <= 10:
-                p = 25.0 - (pct_below - 5.0) / 5.0 * 6.667        # 25.0 → 18.333
-            elif pct_below <= 20:
-                p = 18.333 - (pct_below - 10.0) / 10.0 * 6.667    # 18.333 → 11.667
-            elif pct_below <= 30:
-                p = 11.667 - (pct_below - 20.0) / 10.0 * 11.667   # 11.667 → 0
+                p = 15.0
+            else:
+                p = max(0.0, 15.0 * (1.0 - (pct_below - 5.0) / 25.0))
     score += p; bk['Tr'] = p
+
+    # --- Trend: SMA Alignment (5 pts) — v3.1 restored signal ---
+    # Categorical: P>SMA50>SMA200 is structurally different from 52W proximity.
+    # Back-compat booleans are still ignored; sma_ratio encodes the same info
+    # continuously: >1.02 = P>SMA50>SMA200 likely; 1.0–1.02 = borderline; etc.
+    p = 0.0
+    if not math.isnan(sma_ratio):
+        if sma_ratio > 1.02:
+            p = 5.0
+        elif sma_ratio >= 1.0:
+            p = 3.0
+        elif sma_ratio >= 0.98:
+            p = 1.5
+    score += p; bk['SMA'] = p
+
+    # --- Trend: SMA50 Slope (5 pts) — v3.1 momentum confirmation ---
+    # 10-day % change in SMA50. Rewards accelerating uptrend; zeroes on flat/declining.
+    p = 0.0
+    if not math.isnan(sma50_slope_pct):
+        slp = sma50_slope_pct
+        if slp >= 0.5:
+            p = 5.0
+        elif slp >= 0.2:
+            p = 3.0 + (slp - 0.2) / 0.3 * 2.0   # 3.0 → 5.0
+        elif slp >= 0.0:
+            p = slp / 0.2 * 3.0                   # 0 → 3.0
+    score += p; bk['SLP'] = p
 
     # --- RSI(14) (20 pts) — direction-aware, cliff-fixed (#2, #8) ---
     p = 0.0

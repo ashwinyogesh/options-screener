@@ -347,14 +347,14 @@ body {
 .exit-children { list-style: none; padding: 0 0 0 12px; margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .exit-child {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.6fr);
   gap: 8px;
   align-items: baseline;
   font-size: 11px;
 }
-.exit-cond   { color: #cbd5e1; }
+.exit-cond   { color: #cbd5e1; min-width: 0; overflow-wrap: anywhere; }
 .exit-arrow  { color: #475569; font-weight: 700; }
-.exit-action { font-weight: 700; font-size: 11px; white-space: nowrap; }
+.exit-action { font-weight: 700; font-size: 11px; min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
 .exit-action-close   { color: #4ade80; }
 .exit-action-hold    { color: #86efac; }
 .exit-action-monitor { color: #facc15; }

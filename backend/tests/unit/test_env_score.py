@@ -35,6 +35,8 @@ def _neutral_kwargs() -> dict:
         "direction": "csp",
         "dte": 0,
         "iv_stale": False,
+        "sma_ratio": 0.0,         # v3.1: below 0.98 → SMA=0
+        "sma50_slope_pct": 0.0,   # v3.1: flat → SLP=0
     }
 
 
@@ -58,7 +60,7 @@ def test_env_iv_rank_is_ignored_in_v3():
         (2.5, 28.0),    # plateau
         (1.4, 14.0),
         (1.1, 6.7),
-        (0.9, 2.8),
+        (0.9, 2.0),    # small positive value; exact depends on curve
         (0.5, 0.0),
     ],
 )
@@ -66,7 +68,7 @@ def test_env_iv_hv_ratio_factor_at_elbows(ratio: float, expected_min: float):
     kw = _neutral_kwargs()
     kw["iv_hv_ratio"] = ratio
     score, _ = compute_env_score(**kw)
-    isolated = score - 10.0  # subtract the 50-RSI plateau
+    isolated = score - 20.0  # subtract the RSI=50 plateau (20 pts in v3/v3.1)
     assert isolated >= expected_min - 0.1
 
 
@@ -81,22 +83,53 @@ def test_env_iv_stale_zeros_iv_hv_factor():
     assert score == pytest.approx(20.0, abs=0.1)
 
 
-# --- SMA alignment back-compat (dropped in v3) ----------------------------
+# --- SMA alignment factor (5 pts) — v3.1 restored signal -------------------
 
-def test_env_sma_flags_are_ignored_in_v3():
-    """price_above_sma50 / sma50_above_sma200 are back-compat parameters; v3
-    replaced the SMA factor with the direction-aware 52W Trend curve."""
-    base = _neutral_kwargs()
-    s_neither, _ = compute_env_score(**base)
-    s_both, _ = compute_env_score(**{**base, "price_above_sma50": True, "sma50_above_sma200": True})
-    assert s_neither == pytest.approx(s_both, abs=0.01)
+@pytest.mark.parametrize(
+    "sma_ratio, expected_pts",
+    [
+        (1.05, 5.0),    # strong alignment
+        (1.01, 3.0),    # borderline above 1.0
+        (0.99, 1.5),    # borderline below 1.0
+        (0.95, 0.0),    # below 0.98 threshold
+    ],
+)
+def test_env_sma_alignment_factor_elbows(sma_ratio: float, expected_pts: float):
+    kw = _neutral_kwargs()
+    kw["sma_ratio"] = sma_ratio
+    score, _ = compute_env_score(**kw)
+    # Subtract baseline: rsi=50 in CSP sweet-spot = 20 pts; everything else = 0
+    sma_pts = score - 20.0
+    assert sma_pts == pytest.approx(expected_pts, abs=0.01)
+
+
+# --- SMA slope factor (5 pts) — v3.1 momentum confirmation ------------------
+
+@pytest.mark.parametrize(
+    "slope, expected_pts",
+    [
+        (0.6, 5.0),    # above 0.5% ceiling → full credit
+        (0.5, 5.0),    # exactly at ceiling
+        (0.35, 4.0),   # lerp 3→5 at midpoint 0.2–0.5%
+        (0.2, 3.0),    # lower elbow of upper lerp
+        (0.1, 1.5),    # midpoint of 0–0.2% ramp
+        (0.0, 0.0),    # flat → 0
+        (-0.1, 0.0),   # declining → 0
+    ],
+)
+def test_env_sma_slope_factor_elbows(slope: float, expected_pts: float):
+    kw = _neutral_kwargs()
+    kw["sma50_slope_pct"] = slope
+    score, _ = compute_env_score(**kw)
+    slp_pts = score - 20.0
+    assert slp_pts == pytest.approx(expected_pts, abs=0.15)
 
 
 # --- Direction-aware divergence: 52W and RSI -------------------------------
 
 def test_env_direction_diverges_at_52w_proximity():
-    """At 0% below the 52W high, CSP rewards strength (10 pts) while CC
-    penalizes the lack of consolidation (4 pts)."""
+    """At 0% below the 52W high, CSP awards 15 Tr pts (v3.1) while CC awards 0
+    (assignment risk near all-time high). Divergence = 15 pts."""
     kw = _neutral_kwargs()
     kw["dist_from_52w_high_pct"] = 0.0
     csp_score, _ = compute_env_score(**kw)
@@ -104,8 +137,8 @@ def test_env_direction_diverges_at_52w_proximity():
     kw["direction"] = "cc"
     cc_score, _ = compute_env_score(**kw)
 
-    # v3: CSP awards full 25 Trend pts at the 52W high; CC awards 0 (assignment risk).
-    assert csp_score - cc_score == pytest.approx(25.0, abs=0.2)
+    # v3.1: CSP awards 15 Tr pts at 52W high; CC awards 0.
+    assert csp_score - cc_score == pytest.approx(15.0, abs=0.2)
 
 
 def test_env_direction_diverges_at_rsi_60():
@@ -176,14 +209,12 @@ def test_env_full_score_csp_top_environment():
     """Maxed-out inputs in every factor → score should be ≥99 (allowing
     for small rounding in the rescaled curves)."""
     kw = _neutral_kwargs()
-    kw["iv_rank"] = 95.0           # 22
-    kw["iv_hv_ratio"] = 2.0        # 28
-    kw["price_above_sma50"] = True
-    kw["sma50_above_sma200"] = True  # 15
-    kw["dist_from_52w_high_pct"] = 0.0  # 10 (CSP)
-    kw["rsi"] = 50.0               # 10
-    kw["chain_median_oi"] = 10000.0  # 8
-    kw["dte"] = 35                 # 7
+    kw["iv_hv_ratio"] = 2.0           # 35 pts
+    kw["dist_from_52w_high_pct"] = 0.0 # Tr: 15 pts (CSP flat top)
+    kw["sma_ratio"] = 1.05             # SMA: 5 pts
+    kw["sma50_slope_pct"] = 0.6        # SLP: 5 pts
+    kw["rsi"] = 50.0                   # RSI: 20 pts
+    kw["chain_median_oi"] = 10000.0    # OI: 20 pts
     score, _ = compute_env_score(**kw)
     assert score >= 99.0
     assert score <= 100.0

@@ -170,6 +170,13 @@ def _legacy_process_symbol(
         log_ret = np.log(df["Close"] / df["Close"].shift(1)).dropna()
         hv_sigma = float(log_ret.iloc[-30:].std(ddof=1) * np.sqrt(252)) if len(log_ret) >= 30 else 0.25
 
+        # SMA50 10-day % change (v3.1 slope factor)
+        _sma50_legacy = df["Close"].rolling(50).mean().dropna()
+        sma50_slope_pct = (
+            (float(_sma50_legacy.iloc[-1]) / float(_sma50_legacy.iloc[-11]) - 1) * 100
+            if len(_sma50_legacy) >= 11 else 0.0
+        )
+
         # Detect if US market is currently open
         try:
             _et = _pytz.timezone("America/New_York")
@@ -288,6 +295,8 @@ def _legacy_process_symbol(
                             direction='csp',
                             dte=dte,
                             iv_stale=iv_stale_row,
+                            sma_ratio=sma_ratio,
+                            sma50_slope_pct=sma50_slope_pct,
                         )
                         strike_s, strike_detail, strike_raw = compute_csp_strike_score(
                             delta=d,
@@ -410,6 +419,14 @@ def _csp_symbol_factory(_sym: str, df, current_price: float) -> tuple[Indicators
     log_ret = _np2.log(df["Close"] / df["Close"].shift(1)).dropna()
     hv_sigma = float(log_ret.iloc[-30:].std(ddof=1) * _np2.sqrt(252)) if len(log_ret) >= 30 else 0.25
 
+    # SMA50 10-day % change (v3.1 slope factor)
+    _sma50_series = df["Close"].rolling(50).mean()
+    _valid_sma = _sma50_series.dropna()
+    sma50_slope_pct = (
+        (float(_valid_sma.iloc[-1]) / float(_valid_sma.iloc[-11]) - 1) * 100
+        if len(_valid_sma) >= 11 else 0.0
+    )
+
     indicators = Indicators(
         price=current_price,
         sma50=trend.get("sma50", 0.0),
@@ -423,6 +440,8 @@ def _csp_symbol_factory(_sym: str, df, current_price: float) -> tuple[Indicators
         dte=0,                      # filled per-expiration
         rsi=rsi,
         hv_rank=hv_rank,
+        sma_ratio=sma_r,
+        sma50_slope_pct=sma50_slope_pct,
         vol_support_1=vol_sups[0] if len(vol_sups) > 0 else None,
         vol_support_2=vol_sups[1] if len(vol_sups) > 1 else None,
         vol_support_3=vol_sups[2] if len(vol_sups) > 2 else None,
@@ -479,6 +498,8 @@ def _csp_env_scorer(ind: Indicators) -> tuple[float, str]:
         direction='csp',
         dte=ind.dte,
         iv_stale=ind.iv_stale,
+        sma_ratio=ind.sma_ratio,
+        sma50_slope_pct=ind.sma50_slope_pct,
     )
 
 

@@ -61,6 +61,8 @@ class Indicators:
     iv_hv_ratio: Optional[float] = None
     iv_stale: bool = False
     rsi: Optional[float] = None            # RSI(14) daily
+    sma_ratio: float = 1.0                 # SMA50/SMA200 ratio (v3.1 SMA alignment factor)
+    sma50_slope_pct: float = 0.0           # SMA50 10-day % change (v3.1 slope factor)
 
     # Shared by all three (CSP/CC env scorer historically called the param
     # `iv_rank`, but the value is HV-derived; we standardise on `hv_rank` at
