@@ -7,6 +7,7 @@ export interface InsightResult {
   env_flag: string
   strike_flag: string
   key_risk: string
+  reentry_condition: string | null
 }
 
 export interface InsightRequest {

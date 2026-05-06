@@ -179,6 +179,9 @@ function InsightPanel({ insight }: { insight: InsightResult }) {
         <div className="insight-flag"><span className="insight-flag-label">ENV</span>{insight.env_flag}</div>
         <div className="insight-flag"><span className="insight-flag-label">Strike</span>{insight.strike_flag}</div>
         <div className="insight-flag insight-flag-risk"><span className="insight-flag-label">Key risk</span>{insight.key_risk}</div>
+        {insight.verdict === 'WAIT' && insight.reentry_condition && (
+          <div className="insight-flag insight-flag-reentry"><span className="insight-flag-label">Re-entry</span>{insight.reentry_condition}</div>
+        )}
       </div>
     </div>
   )

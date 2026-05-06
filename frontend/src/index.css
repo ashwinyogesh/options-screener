@@ -601,6 +601,7 @@ body {
   flex-shrink: 0;
 }
 .insight-flag-risk { color: #fca5a5; }
+.insight-flag-reentry { color: #6ee7b7; border-top: 1px solid #2d3748; margin-top: 4px; padding-top: 4px; }
 
 /* HV fallback tag next to delta */
 .iv-fallback-tag {

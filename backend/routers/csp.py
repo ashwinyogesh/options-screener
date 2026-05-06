@@ -319,6 +319,7 @@ class InsightResultOut(BaseModel):
     env_flag: str
     strike_flag: str
     key_risk: str
+    reentry_condition: Optional[str] = None
 
 
 @router.post("/csp/insight", response_model=InsightResultOut)
@@ -356,4 +357,5 @@ async def get_csp_insight(request: InsightRequestIn) -> InsightResultOut:
         env_flag=result.env_flag,
         strike_flag=result.strike_flag,
         key_risk=result.key_risk,
+        reentry_condition=result.reentry_condition,
     )

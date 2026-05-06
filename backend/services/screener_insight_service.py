@@ -61,6 +61,7 @@ class InsightResult:
     env_flag: str
     strike_flag: str
     key_risk: str
+    reentry_condition: Optional[str]
 
 
 class InsightError(Exception):
@@ -164,6 +165,9 @@ Rules:
 - If no headlines are provided, reason from scores and data alone.
 - summary: 2-3 sentences max. env_flag and strike_flag: 1 sentence each.
 - key_risk: single sentence — the one scenario that would cause maximum loss.
+- reentry_condition: WAIT verdicts only — 1-2 sentences stating concrete re-entry triggers
+  (e.g. specific price level to watch, RSI cooling below a threshold, post-earnings IV crush,
+  a catalyst resolving, or a date range). Be specific. Set to null for ENTER and SKIP.
 - confidence: 0.0-1.0 reflecting how clear the verdict is given available data.
 """
 
@@ -207,7 +211,7 @@ _RESPONSE_SCHEMA = {
     "schema": {
         "type": "object",
         "additionalProperties": False,
-        "required": ["verdict", "confidence", "summary", "env_flag", "strike_flag", "key_risk"],
+        "required": ["verdict", "confidence", "summary", "env_flag", "strike_flag", "key_risk", "reentry_condition"],
         "properties": {
             "verdict": {"type": "string", "enum": ["ENTER", "WAIT", "SKIP"]},
             "confidence": {"type": "number"},
@@ -215,6 +219,7 @@ _RESPONSE_SCHEMA = {
             "env_flag": {"type": "string"},
             "strike_flag": {"type": "string"},
             "key_risk": {"type": "string"},
+            "reentry_condition": {"type": ["string", "null"]},
         },
     },
 }
@@ -269,6 +274,7 @@ def get_insight(req: InsightRequest) -> InsightResult:
     if verdict not in ("ENTER", "WAIT", "SKIP"):
         verdict = "WAIT"
 
+    raw_reentry = data.get("reentry_condition")
     return InsightResult(
         verdict=verdict,
         confidence=float(max(0.0, min(1.0, data.get("confidence", 0.5)))),
@@ -276,4 +282,5 @@ def get_insight(req: InsightRequest) -> InsightResult:
         env_flag=str(data.get("env_flag", "")),
         strike_flag=str(data.get("strike_flag", "")),
         key_risk=str(data.get("key_risk", "")),
+        reentry_condition=str(raw_reentry) if raw_reentry is not None else None,
     )
