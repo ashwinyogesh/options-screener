@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import os
 from dataclasses import dataclass
 from typing import Literal, Optional
@@ -44,20 +43,23 @@ class InsightRequest:
     premium: float
     dte: int
     expiration: str
+    earnings_within_dte: bool
+    # screener scores kept for router back-compat but NOT sent to LLM
     env_score: float
     strike_score: float
     final_score: float
-    env_detail: str        # e.g. "IVP:25 Tr:15 SMA:3 SLP:0 RSI:16 OI:18"
-    strike_detail: str     # e.g. "Δ:20 BA:24 LQ:15 ROC:35"
+    env_detail: str
+    strike_detail: str
     roc_annualized: Optional[float]
     rsi: float
-    iv_hv_ratio: Optional[float]      # kept for back-compat — NOT used in prompt
-    iv_percentile: Optional[float]    # v3.3 scored ENV factor (0–100)
+    iv_hv_ratio: Optional[float]
+    iv_percentile: Optional[float]
     dist_from_52w_high_pct: float
 
 
 @dataclass(frozen=True)
 class InsightResult:
+    reasoning: str         # chain-of-thought: business quality assessment (FIRST)
     verdict: Literal["ENTER", "WAIT", "SKIP"]
     confidence: float
     summary: str
@@ -66,8 +68,8 @@ class InsightResult:
     stock_cycle: str       # "Bear" | "Normal" | "Bull"
     bear_band: str         # "$15–$35"
     normal_band: str       # "$40–$65"
-    bull_band: str         # "$80+" or "$80–$120+"
-    strike_context: str    # "Strike $50 sits at the floor of Normal — solid if mid-cycle holds"
+    bull_band: str         # "$80+" or "$80–$120"
+    ownership_case: str    # "Strike $50 below Normal floor — comfortable owning if mid-cycle holds"
     key_risk: str          # single sentence
     vix_regime: str        # "Calm" | "Normal" | "Elevated" | "Panic" | "Unknown"
 
@@ -140,42 +142,72 @@ def _compute_1d_change(symbol: str) -> Optional[float]:
 
 
 _SYSTEM_PROMPT = """\
-You are an expert options trader specialising in Cash-Secured Puts (CSP).
+You are a value-oriented equity investor evaluating a Cash-Secured Put (CSP).
 
-Your task is NOT to rephrase the screener score. Your task is to produce an
-independent, regime-conditioned framework that helps the trader decide whether
-they are comfortable owning 100 shares at the strike price.
+Your task: answer one question with independence and discipline.
 
-Follow these five steps exactly:
+  "If this put is assigned and I am holding 100 shares at a cost basis of the
+   given strike, would I be comfortable holding that position for 6-12 months?"
 
-STEP 1 — IDENTIFY REGIME DRIVERS
-  From ticker_profile (sector, industry, business_summary) and recent_headlines,
-  identify 1–2 primary external drivers that determine this stock’s valuation cycle.
-  Examples: “BTC price + AI capex”, “consumer spending + commodity costs”,
-  “interest rates + credit spreads”, “oil price + refining margins”.
-  Output → regime_drivers (10 words max)
+Reason from business fundamentals and current market regime. You have NO
+information about screener scores -- produce an independent ownership verdict.
 
-STEP 2 — ASSESS CURRENT REGIME
+Follow these six steps exactly:
+
+STEP 1 -- REASON THROUGH THE BUSINESS
+  From business (summary, sector, industry) and financials, assess:
+  - Quality: is FCF positive? Is ROE above 10%? Is debt-to-equity manageable (< 2)?
+  - Trajectory: growing, stable, or declining? (revenue_growth_pct > 0 = growing)
+  - Valuation: stretched, fair, or cheap relative to sector norms?
+    (trailing_pe vs forward_pe -- declining PE is a green flag; elevated PE with
+     declining revenue is a red flag; None values mean data was unavailable)
+  Write your working in 3-4 sentences covering quality, trajectory, and valuation.
+  Output -> reasoning
+
+STEP 2 -- IDENTIFY REGIME DRIVERS
+  From business (sector, industry, summary) and recent_headlines,
+  identify 1-2 primary external drivers that determine this stock's valuation cycle.
+  Examples: "BTC price + AI capex", "consumer spending + commodity costs",
+  "interest rates + credit spreads", "oil price + refining margins".
+  Output -> regime_drivers (10 words max)
+
+STEP 3 -- ASSESS CURRENT REGIME
   From recent_headlines and one_day_change_pct, classify the current cycle:
   Bear (stress / contraction), Normal (stable / ranging), or Bull (expansion / momentum).
-  Briefly state why (one clause, e.g. “BTC ~$82K, recovering from Jan lows”).
-  Output → current_regime (15 words max), stock_cycle (exactly one of: Bear, Normal, Bull)
+  Briefly state why (one clause, e.g. "BTC ~$82K, recovering from Jan lows").
+  Output -> current_regime (15 words max), stock_cycle (exactly one of: Bear, Normal, Bull)
 
-STEP 3 — PRODUCE VALUE BANDS
-  Produce three non-overlapping dollar bands:
-  - bear_band:   floor near 52w_low, ceiling below Normal floor
-  - normal_band: must satisfy low < current_price < high (brackets current price)
-  - bull_band:   floor at Normal ceiling; open-ended top is acceptable (e.g. "$80+")
-  Format: "$X–$Y" for bounded, "$X+" for open-ended. Integer dollar values only.
-  Output → bear_band, normal_band, bull_band
+STEP 4 -- PRODUCE FUNDAMENTAL VALUE BANDS
+  Produce three non-overlapping dollar bands based on VALUATION SCENARIOS,
+  not chart levels. Do NOT anchor on 52w_low.
 
-STEP 4 — EVALUATE THE STRIKE
-  Compare the given strike to the three bands.
-  State where the strike sits relative to the Normal band floor and the bear band ceiling.
-  State what assignment at this strike means in a bear-cycle scenario.
-  Output → strike_context (20 words max)
+  - bear_band: where the stock stabilises if revenue contracts 15-20% and the
+    sector multiple compresses to distress levels. This is a fundamental
+    distress valuation, not a technical support. Width <= 30% of normal_band width.
+  - normal_band: fair value at current growth rate with the current sector
+    multiple. Must satisfy: low < current_price < high (brackets current
+    price). Width = 12-20% of current_price.
+  - bull_band: where the stock trades if growth accelerates or the multiple
+    expands. For enterprise / consumer / industrial names: bounded range,
+    same approximate width as normal_band. Open-ended format ("$X+") ONLY
+    for names whose primary driver has no fundamental ceiling (e.g.
+    crypto-linked, pure commodity).
 
-STEP 5 — VERDICT using VIX × cycle matrix
+  Format: "$X-$Y" for bounded, "$X+" for open-ended. Integer dollar values only.
+  The 52w_high and 52w_low in the payload are provided as context only -- do not
+  use them as band anchors.
+  Output -> bear_band, normal_band, bull_band
+
+STEP 5 -- OWNERSHIP VERDICT
+  Given cost basis = strike if assigned:
+  - Does the strike sit below the normal_band floor? (good: buffer before
+    assignment hurts)
+  - Would you hold 100 shares at this cost basis for 6-12 months given the
+    business quality and current regime?
+  One sentence on whether the ownership case is sound.
+  Output -> ownership_case (25 words max)
+
+STEP 6 -- VERDICT via VIX x cycle matrix
   Use the following gate:
 
   stock_cycle / vix_regime |  Calm   Normal  Elevated  Panic
@@ -184,65 +216,61 @@ STEP 5 — VERDICT using VIX × cycle matrix
   Normal                   |  WAIT   ENTER   ENTER     WAIT
   Bull                     |  ENTER  ENTER   ENTER     WAIT
 
-  Override rules:
-  - If strike > Normal band ceiling → always SKIP (catching falling knife on assignment)
-  - If earnings_within_dte is true and stock_cycle is Bear → always SKIP
+  Override rules (applied after the matrix):
+  - strike > normal_band ceiling -> always SKIP
+  - earnings_within_dte is true AND stock_cycle is Bear -> always SKIP
+  - poor business quality (FCF negative AND debt_to_equity > 3 AND
+    revenue_growth_pct < 0) -> WAIT minimum, never ENTER
   - WAIT is preferred over SKIP when regime is uncertain or data is thin
 
-  Output → verdict (ENTER | WAIT | SKIP)
+  Output -> verdict (ENTER | WAIT | SKIP)
 
 Output rules:
-  - Reason ONLY from data you are given. Do not invent or assume facts.
-  - If no headlines are provided, reason from ticker_profile and scores alone.
-  - summary: 2–3 sentences on the regime + verdict rationale. Do not repeat the numbers.
-  - key_risk: one sentence — the single scenario that would cause maximum loss.
-  - confidence: 0.0–1.0 reflecting how clearly the data supports the verdict.
+  - Reason ONLY from data provided. Do not invent or assume facts.
+  - If fundamental data fields are None, state that data was unavailable and
+    rely on qualitative description from business_summary.
+  - summary: 2-3 sentences on the ownership case + verdict rationale.
+    Do not mention screener scores -- they were not provided to you.
+  - key_risk: one sentence -- the specific scenario that would make you regret
+    this assignment.
+  - confidence: 0.0-1.0 reflecting how clearly the data supports the verdict.
+    Lower confidence when multiple fundamental fields are None.
 """
 
-
 def _build_user_prompt(req: InsightRequest, one_day_change_pct: Optional[float], news: list[dict], ticker_profile: dict) -> str:
-    env_factors = _format_factors(req.env_detail, _ENV_MAX, _ENV_LABELS)
-    strike_factors = _format_factors(req.strike_detail, _STRIKE_MAX, _STRIKE_LABELS)
     payload = {
-        "symbol": req.symbol,
-        "current_price": req.price,
-        "one_day_change_pct": one_day_change_pct,
-        "ticker_profile": {
-            "sector": ticker_profile.get("sector"),
-            "industry": ticker_profile.get("industry"),
-            "business_summary": ticker_profile.get("business_summary"),
-            "52w_high": ticker_profile.get("52w_high"),
-            "52w_low": ticker_profile.get("52w_low"),
-        },
-        "market_context": {
-            "vix": ticker_profile.get("vix_current"),
-            "vix_regime": ticker_profile.get("vix_regime", "Unknown"),
-        },
         "trade": {
+            "symbol": req.symbol,
             "strike": req.strike,
             "premium": req.premium,
             "dte": req.dte,
             "expiration": req.expiration,
             "breakeven": round(req.strike - req.premium, 2),
             "otm_pct": round((req.strike - req.price) / req.price * 100, 1) if req.price else None,
+            "earnings_within_dte": req.earnings_within_dte,
+            "current_price": req.price,
         },
-        "scores": {
-            "final": round(req.final_score, 1),
-            "env": round(req.env_score, 1),
-            "strike": round(req.strike_score, 1),
+        "business": {
+            "summary": ticker_profile.get("business_summary"),
+            "sector": ticker_profile.get("sector"),
+            "industry": ticker_profile.get("industry"),
+            "trailing_pe": ticker_profile.get("trailing_pe"),
+            "forward_pe": ticker_profile.get("forward_pe"),
+            "revenue_growth_pct": ticker_profile.get("revenue_growth_pct"),
+            "free_cashflow_b": ticker_profile.get("free_cashflow_b"),
+            "debt_to_equity": ticker_profile.get("debt_to_equity"),
+            "return_on_equity_pct": ticker_profile.get("return_on_equity_pct"),
+            "52w_high": ticker_profile.get("52w_high"),
+            "52w_low": ticker_profile.get("52w_low"),
         },
-        "env_factors": env_factors,
-        "strike_factors": strike_factors,
-        "supporting_data": {
-            "rsi_14": round(req.rsi, 1) if not math.isnan(req.rsi) else None,
-            "iv_percentile": round(req.iv_percentile, 1) if req.iv_percentile is not None else None,
-            "dist_from_52w_high_pct": round(req.dist_from_52w_high_pct, 1),
-            "roc_annualized_pct": round(req.roc_annualized, 1) if req.roc_annualized is not None else None,
+        "market_context": {
+            "vix": ticker_profile.get("vix_current"),
+            "vix_regime": ticker_profile.get("vix_regime", "Unknown"),
+            "one_day_change_pct": one_day_change_pct,
         },
         "recent_headlines": news,
     }
     return json.dumps(payload, indent=2)
-
 
 _RESPONSE_SCHEMA = {
     "name": "screener_insight",
@@ -251,12 +279,14 @@ _RESPONSE_SCHEMA = {
         "type": "object",
         "additionalProperties": False,
         "required": [
+            "reasoning",
             "verdict", "confidence", "summary",
             "regime_drivers", "current_regime", "stock_cycle",
             "bear_band", "normal_band", "bull_band",
-            "strike_context", "key_risk",
+            "ownership_case", "key_risk",
         ],
         "properties": {
+            "reasoning":      {"type": "string"},
             "verdict":        {"type": "string", "enum": ["ENTER", "WAIT", "SKIP"]},
             "confidence":     {"type": "number"},
             "summary":        {"type": "string"},
@@ -266,7 +296,7 @@ _RESPONSE_SCHEMA = {
             "bear_band":      {"type": "string"},
             "normal_band":    {"type": "string"},
             "bull_band":      {"type": "string"},
-            "strike_context": {"type": "string"},
+            "ownership_case": {"type": "string"},
             "key_risk":       {"type": "string"},
         },
     },
@@ -306,7 +336,7 @@ def get_insight(req: InsightRequest) -> InsightResult:
             ],
             response_format={"type": "json_schema", "json_schema": _RESPONSE_SCHEMA},
             temperature=0.3,
-            max_tokens=900,
+            max_tokens=1200,
         )
     except Exception as exc:
         logger.exception("Azure OpenAI call failed for %s insight", req.symbol)
@@ -324,6 +354,7 @@ def get_insight(req: InsightRequest) -> InsightResult:
         verdict = "WAIT"
 
     return InsightResult(
+        reasoning=str(data.get("reasoning", "")),
         verdict=verdict,
         confidence=float(max(0.0, min(1.0, data.get("confidence", 0.5)))),
         summary=str(data.get("summary", "")),
@@ -333,7 +364,7 @@ def get_insight(req: InsightRequest) -> InsightResult:
         bear_band=str(data.get("bear_band", "")),
         normal_band=str(data.get("normal_band", "")),
         bull_band=str(data.get("bull_band", "")),
-        strike_context=str(data.get("strike_context", "")),
+        ownership_case=str(data.get("ownership_case", "")),
         key_risk=str(data.get("key_risk", "")),
         vix_regime=str(ticker_profile.get("vix_regime", "Unknown")),
     )

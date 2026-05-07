@@ -227,6 +227,7 @@ const VERDICT_STYLE: Record<InsightVerdict, { cls: string; label: string }> = {
 }
 
 function InsightPanel({ insight, vixRegime }: { insight: InsightResult; vixRegime: VixRegime }) {
+  const [showReasoning, setShowReasoning] = useState(false)
   const vs = VERDICT_STYLE[insight.verdict as InsightVerdict] ?? VERDICT_STYLE.WAIT
   const baseBands: Record<StockCycle, string> = {
     Bear:   insight.bear_band,
@@ -302,10 +303,10 @@ function InsightPanel({ insight, vixRegime }: { insight: InsightResult; vixRegim
         </table>
       </div>
 
-      {/* Strike context + key risk */}
+      {/* Ownership case + key risk */}
       <div className="insight-flags">
         <div className="insight-flag">
-          <span className="insight-flag-label">Strike</span>{insight.strike_context}
+          <span className="insight-flag-label">Ownership</span>{insight.ownership_case}
         </div>
         <div className="insight-flag insight-flag-risk">
           <span className="insight-flag-label">Key risk</span>{insight.key_risk}
@@ -315,8 +316,23 @@ function InsightPanel({ insight, vixRegime }: { insight: InsightResult; vixRegim
       {/* Summary paragraph */}
       <div className="insight-summary">{insight.summary}</div>
 
+      {/* Reasoning toggle */}
+      {insight.reasoning && (
+        <div>
+          <button
+            className="insight-reasoning-toggle"
+            onClick={() => setShowReasoning(v => !v)}
+          >
+            {showReasoning ? '▼ Hide reasoning' : '▶ Show reasoning'}
+          </button>
+          {showReasoning && (
+            <div className="insight-reasoning">{insight.reasoning}</div>
+          )}
+        </div>
+      )}
+
       {/* Disclaimer */}
-      <div className="insight-disclaimer">* AI-estimated ranges, not fundamental valuations</div>
+      <div className="insight-disclaimer">* Fundamental valuation estimates — not investment advice</div>
     </div>
   )
 }
@@ -692,6 +708,7 @@ export function CspTable({ data }: Props) {
                           premium: bestStrike.premium,
                           dte: exp.dte,
                           expiration: exp.expiration,
+                          earnings_within_dte: exp.earnings_within_dte,
                           env_score: bestStrike.env_score,
                           strike_score: bestStrike.strike_score,
                           final_score: bestStrike.csp_score,

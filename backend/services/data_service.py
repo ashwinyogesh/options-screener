@@ -64,6 +64,12 @@ def get_ticker_info(symbol: str) -> dict:
         "business_summary": None,
         "52w_high": None,
         "52w_low": None,
+        "trailing_pe": None,
+        "forward_pe": None,
+        "revenue_growth_pct": None,
+        "free_cashflow_b": None,
+        "debt_to_equity": None,
+        "return_on_equity_pct": None,
         "vix_current": None,
         "vix_regime": "Unknown",
     }
@@ -76,6 +82,37 @@ def get_ticker_info(symbol: str) -> dict:
         profile["business_summary"] = summary[:300] if summary else None
         profile["52w_high"] = info.get("fiftyTwoWeekHigh")
         profile["52w_low"] = info.get("fiftyTwoWeekLow")
+        # fundamental fields for AI ownership gate
+        try:
+            raw_pe = info.get("trailingPE")
+            profile["trailing_pe"] = round(float(raw_pe), 1) if raw_pe is not None else None
+        except (TypeError, ValueError):
+            pass
+        try:
+            raw_fpe = info.get("forwardPE")
+            profile["forward_pe"] = round(float(raw_fpe), 1) if raw_fpe is not None else None
+        except (TypeError, ValueError):
+            pass
+        try:
+            raw_rev = info.get("revenueGrowth")
+            profile["revenue_growth_pct"] = round(float(raw_rev) * 100, 1) if raw_rev is not None else None
+        except (TypeError, ValueError):
+            pass
+        try:
+            raw_fcf = info.get("freeCashflow")
+            profile["free_cashflow_b"] = round(float(raw_fcf) / 1e9, 2) if raw_fcf is not None else None
+        except (TypeError, ValueError):
+            pass
+        try:
+            raw_de = info.get("debtToEquity")
+            profile["debt_to_equity"] = round(float(raw_de), 2) if raw_de is not None else None
+        except (TypeError, ValueError):
+            pass
+        try:
+            raw_roe = info.get("returnOnEquity")
+            profile["return_on_equity_pct"] = round(float(raw_roe) * 100, 1) if raw_roe is not None else None
+        except (TypeError, ValueError):
+            pass
     except Exception as exc:
         logger.warning("Ticker info fetch failed for %s: %s", symbol, exc)
 

@@ -304,6 +304,7 @@ class InsightRequestIn(BaseModel):
     premium: float
     dte: int
     expiration: str
+    earnings_within_dte: bool = False
     env_score: float
     strike_score: float
     final_score: float
@@ -317,6 +318,7 @@ class InsightRequestIn(BaseModel):
 
 
 class InsightResultOut(BaseModel):
+    reasoning: str
     verdict: str
     confidence: float
     summary: str
@@ -326,7 +328,7 @@ class InsightResultOut(BaseModel):
     bear_band: str
     normal_band: str
     bull_band: str
-    strike_context: str
+    ownership_case: str
     key_risk: str
     vix_regime: str
 
@@ -344,6 +346,7 @@ async def get_csp_insight(request: InsightRequestIn) -> InsightResultOut:
         premium=request.premium,
         dte=request.dte,
         expiration=request.expiration,
+        earnings_within_dte=request.earnings_within_dte,
         env_score=request.env_score,
         strike_score=request.strike_score,
         final_score=request.final_score,
@@ -361,6 +364,7 @@ async def get_csp_insight(request: InsightRequestIn) -> InsightResultOut:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return InsightResultOut(
+        reasoning=result.reasoning,
         verdict=result.verdict,
         confidence=result.confidence,
         summary=result.summary,
@@ -370,7 +374,7 @@ async def get_csp_insight(request: InsightRequestIn) -> InsightResultOut:
         bear_band=result.bear_band,
         normal_band=result.normal_band,
         bull_band=result.bull_band,
-        strike_context=result.strike_context,
+        ownership_case=result.ownership_case,
         key_risk=result.key_risk,
         vix_regime=result.vix_regime,
     )

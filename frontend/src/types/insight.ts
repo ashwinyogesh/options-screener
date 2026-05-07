@@ -2,6 +2,7 @@ export type InsightVerdict = 'ENTER' | 'WAIT' | 'SKIP'
 export type StockCycle = 'Bear' | 'Normal' | 'Bull'
 
 export interface InsightResult {
+  reasoning: string
   verdict: InsightVerdict
   confidence: number
   summary: string
@@ -11,7 +12,7 @@ export interface InsightResult {
   bear_band: string
   normal_band: string
   bull_band: string
-  strike_context: string
+  ownership_case: string
   key_risk: string
   vix_regime: string
 }
@@ -23,6 +24,7 @@ export interface InsightRequest {
   premium: number
   dte: number
   expiration: string
+  earnings_within_dte: boolean
   env_score: number
   strike_score: number
   final_score: number
