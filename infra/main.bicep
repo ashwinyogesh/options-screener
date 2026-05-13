@@ -22,9 +22,9 @@ param resourceGroupName string = 'rg-narrative'
 @description('Azure region for all resources. Existing stack lives in centralus.')
 param location string = 'centralus'
 
-@description('Short suffix appended to globally-unique resource names. Lowercase alnum, 3-8 chars.')
+@description('Short suffix appended to globally-unique resource names. Lowercase alnum, 3-9 chars.')
 @minLength(3)
-@maxLength(8)
+@maxLength(9)
 param nameSuffix string
 
 @description('Azure AD principal IDs (object IDs) that should receive Key Vault Secrets Officer.')

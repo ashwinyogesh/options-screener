@@ -4,10 +4,11 @@ name: Narrative — Deploy Infrastructure (Bicep)
 # are deliberate. Validates with what-if before deploying.
 #
 # Required repo secrets:
-#   AZURE_CREDENTIALS         — service principal JSON (Contributor on subscription)
-#   AZURE_SUBSCRIPTION_ID     — target subscription
-#   NARRATIVE_NAME_SUFFIX     — 3–8 char alnum, fed to nameSuffix param
-#   NARRATIVE_KV_ADMIN_OBJECT_IDS — JSON array of AAD object IDs
+#   AZURE_CREDENTIALS               — service principal JSON (Contributor on subscription)
+#   AZURE_SUBSCRIPTION_ID           — target subscription
+#   NARRATIVE_RESOURCE_GROUP        — resource group name (e.g. options-rg)
+#   NARRATIVE_NAME_SUFFIX           — 3-9 char alnum, fed to nameSuffix param
+#   NARRATIVE_KV_ADMIN_OBJECT_IDS   — JSON array of AAD object IDs
 
 on:
   workflow_dispatch:
@@ -51,6 +52,7 @@ jobs:
       - name: Render parameters file
         env:
           NAME_SUFFIX: ${{ secrets.NARRATIVE_NAME_SUFFIX }}
+          RESOURCE_GROUP: ${{ secrets.NARRATIVE_RESOURCE_GROUP }}
           KV_ADMIN_OBJECT_IDS: ${{ secrets.NARRATIVE_KV_ADMIN_OBJECT_IDS }}
         run: |
           # Build an ARM parameters file. Using env vars (not direct expression
@@ -60,16 +62,19 @@ jobs:
             || { echo "::error::NARRATIVE_KV_ADMIN_OBJECT_IDS must be a JSON array, e.g. [\"<guid>\"]"; exit 1; }
           jq -n \
             --arg suffix "$NAME_SUFFIX" \
+            --arg rg "$RESOURCE_GROUP" \
             --argjson admins "$KV_ADMIN_OBJECT_IDS" \
             '{
               "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
               "contentVersion": "1.0.0.0",
               "parameters": {
+                "resourceGroupName": { "value": $rg },
                 "nameSuffix": { "value": $suffix },
                 "keyVaultAdminObjectIds": { "value": $admins }
               }
             }' > infra/main.parameters.json
           # Print without secrets (admins array length only).
+          echo "resourceGroupName=$RESOURCE_GROUP"
           echo "nameSuffix=$NAME_SUFFIX"
           echo "admin count: $(jq '.parameters.keyVaultAdminObjectIds.value | length' infra/main.parameters.json)"
 
