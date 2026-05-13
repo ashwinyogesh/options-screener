@@ -36,9 +36,9 @@ Rules:
 - Return [] if no clear signals exist.
 - Never invent tickers not present in the text."""
 
-# Layer 1 cost gate — skip low-signal posts before calling OpenAI.
-_MIN_SCORE = 2
-_MIN_BODY_LEN = 50
+# Layer 1 cost gate — skip posts too short to contain meaningful signal.
+# RSS posts are often link submissions; body = title only (~30-60 chars).
+_MIN_BODY_LEN = 20
 
 
 @dataclass
@@ -79,6 +79,7 @@ class Extractor:
         # Gate: skip only if body is too short to contain meaningful signal.
         # Score is used as a soft boost only when available.
         if len(body) < _MIN_BODY_LEN:
+            logger.debug("Gated post %s: body_len=%d", event.get('post_id'), len(body))
             return []
 
         raw = self._call_openai(body[:4000])  # cap prompt size

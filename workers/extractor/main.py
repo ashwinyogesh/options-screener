@@ -100,10 +100,13 @@ def main() -> None:
 
     logger.info("Consumed %d events from Event Hubs", events_processed)
 
+    gated = 0
     for event_data in collected:
         try:
             signals = extractor.extract(event_data)
-            if signals:
+            if signals is None or len(signals) == 0:
+                gated += 1
+            else:
                 written = writer.write_batch(signals)
                 signals_written += written
                 logger.debug(
@@ -112,6 +115,8 @@ def main() -> None:
                 )
         except Exception:
             logger.exception("Extraction failed for post %s", event_data.get("post_id"))
+
+    logger.info("Gate stats: gated=%d passed=%d", gated, events_processed - gated)
 
     logger.info(
         "Extractor done. events=%d signals_written=%d",
