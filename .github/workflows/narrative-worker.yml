@@ -23,6 +23,8 @@ on:
         required: true
       AZURE_RESOURCE_GROUP:
         required: true
+      GHCR_PAT:
+        required: true
 
 jobs:
   build-and-deploy:
@@ -39,7 +41,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Build & push image
         uses: docker/build-push-action@v6
@@ -57,6 +59,12 @@ jobs:
 
       - name: Update Container Apps Job image
         run: |
+          az containerapp job registry set \
+            --name ${{ inputs.job_name }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --server ghcr.io \
+            --username ${{ github.actor }} \
+            --password ${{ secrets.GHCR_PAT }}
           az containerapp job update \
             --name ${{ inputs.job_name }} \
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \

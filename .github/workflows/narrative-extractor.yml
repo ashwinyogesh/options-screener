@@ -22,3 +22,4 @@ jobs:
     secrets:
       AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
       AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+      GHCR_PAT: ${{ secrets.GHCR_PAT }}

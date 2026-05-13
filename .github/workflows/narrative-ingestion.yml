@@ -40,7 +40,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Build & push image
         uses: docker/build-push-action@v6
@@ -48,8 +48,8 @@ jobs:
           context: workers/ingestion
           push: true
           tags: |
-            ${{ secrets.GHCR_IMAGE_BASE }}:${{ steps.tag.outputs.tag }}
-            ${{ secrets.GHCR_IMAGE_BASE }}:latest
+            ${{ vars.GHCR_IMAGE_BASE }}:${{ steps.tag.outputs.tag }}
+            ${{ vars.GHCR_IMAGE_BASE }}:latest
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -63,8 +63,8 @@ jobs:
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
             --server ghcr.io \
             --username ${{ github.actor }} \
-            --password ${{ secrets.GITHUB_TOKEN }}
+            --password ${{ secrets.GHCR_PAT }}
           az containerapp update \
             --name ca-ingestion \
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
-            --image ${{ secrets.GHCR_IMAGE_BASE }}:${{ steps.tag.outputs.tag }}
+            --image ${{ vars.GHCR_IMAGE_BASE }}:${{ steps.tag.outputs.tag }}
