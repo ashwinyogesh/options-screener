@@ -22,7 +22,7 @@ from azure.identity import DefaultAzureCredential
 from config import ExtractorConfig, load_from_env
 from cosmos_writer import CosmosWriter
 from extractor import Extractor
-from secrets import fetch_secrets
+from kv_secrets import fetch_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,8 @@ def main() -> None:
 
     def _on_event(partition_context, event):
         nonlocal events_processed
+        if event is None:
+            return  # max_wait_time fired with no event
         if events_processed >= config.max_events_per_run:
             return
         try:
