@@ -18,10 +18,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-_DEFAULT_UA = (
-    "narrative-screener/1.0 "
-    "(options-screener; +https://github.com/AshwinChandlapur/options-screener)"
-)
+# Reddit requires: platform:app_id:version (by /u/username)
+# Override REDDIT_USER_AGENT env var to set your Reddit username.
+_DEFAULT_UA = "script:narrative-screener:1.0 (by /u/AshwinChandlapur)"
 
 
 @dataclass(frozen=True)
@@ -60,7 +59,7 @@ def _required(name: str) -> str:
 SUBREDDIT_TIERS: dict[str, list[str]] = {
     "tier1": ["investing", "stocks", "SecurityAnalysis", "ValueInvesting"],
     "tier2": ["wallstreetbets", "options", "smallstreetbets", "pennystocks"],
-    "tier3": ["artificial", "SemiConductors", "energy", "biotech", "space", "DefenseContractors"],
+    "tier3": ["artificial", "SemiConductors", "energy", "biotech", "space", "geopolitics"],
 }
 
 
