@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import threading
+import time
 
 from azure.eventhub import EventHubConsumerClient
 from azure.identity import DefaultAzureCredential
@@ -67,7 +69,7 @@ def main() -> None:
     def _on_event(partition_context, event):
         nonlocal events_processed
         if event is None:
-            return  # max_wait_time fired with no event
+            return  # safety guard
         if events_processed >= config.max_events_per_run:
             return
         try:
@@ -80,12 +82,19 @@ def main() -> None:
             logger.exception("Failed to parse EH event")
 
     try:
-        # Receive with a short timeout — this is a one-shot job.
-        eh_client.receive(
-            on_event=_on_event,
-            starting_position="-1",  # earliest unprocessed
-            max_wait_time=30,
+        # receive() blocks forever — run it in a daemon thread and close after
+        # the budget window so the job exits cleanly.
+        receive_thread = threading.Thread(
+            target=eh_client.receive,
+            kwargs={"on_event": _on_event, "starting_position": "-1"},
+            daemon=True,
         )
+        receive_thread.start()
+        time.sleep(30)  # collect events for 30 seconds
+        eh_client.close()
+        receive_thread.join(timeout=10)
+    except Exception:
+        logger.exception("Event Hubs receive error")
     finally:
         eh_client.close()
 
