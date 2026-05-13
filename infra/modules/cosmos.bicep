@@ -30,7 +30,7 @@ param tags object
 @description('Principal IDs granted Cosmos DB Built-in Data Contributor.')
 param dataContributorPrincipalIds array = []
 
-var accountName = 'cosmos-narrative-${nameSuffix}'
+var accountName = 'cosmos-nr-${nameSuffix}'
 var databaseName = 'narrative'
 
 resource account 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
