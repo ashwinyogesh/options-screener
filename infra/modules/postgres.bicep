@@ -39,7 +39,7 @@ param postgresVersion string = '16'
 @description('Storage size in MB. 32768 = 32 GiB minimum for Flexible Server.')
 param storageSizeMb int = 32768
 
-var serverName = 'psql-narrative-${nameSuffix}'
+var serverName = 'psql-narrative-${nameSuffix}-e2'
 var dbName = 'narrative'
 
 resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2023-12-01-preview' = {
