@@ -1,4 +1,4 @@
-name: Narrative — Build & Deploy ingestion worker
+name: Narrative — 01 Ingestion (Phase 1 · always-on poller)
 
 # Builds workers/ingestion/ image, pushes to ghcr.io, updates the
 # ca-ingestion Container App in Azure.

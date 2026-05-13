@@ -1,4 +1,4 @@
-name: Narrative — Deploy Infrastructure (Bicep)
+name: Narrative — 00 Deploy Infrastructure (Bicep)
 
 # Subscription-scoped Bicep deployment. Manual trigger only — infra changes
 # are deliberate. Validates with what-if before deploying.

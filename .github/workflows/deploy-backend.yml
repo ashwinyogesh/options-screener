@@ -1,4 +1,4 @@
-name: Deploy Backend to Azure Web App - optionsapi
+name: Deploy — Backend to Azure Web App
 
 on:
   push:

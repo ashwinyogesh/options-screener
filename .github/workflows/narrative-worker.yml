@@ -1,4 +1,4 @@
-name: Narrative — Reusable worker build & deploy (Container Apps Job)
+name: Narrative — Reusable worker build & deploy (internal)
 
 # Reusable workflow used by per-worker triggers. Builds the worker image,
 # pushes to ghcr.io, and updates the matching Container Apps Job.
