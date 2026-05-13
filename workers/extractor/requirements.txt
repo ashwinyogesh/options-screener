@@ -1,0 +1,6 @@
+# Phase 2 deps. Pinned at scaffolding; updated in Phase 2 implementation PR.
+azure-identity==1.17.1
+azure-keyvault-secrets==4.8.0
+azure-eventhub==5.12.1
+asyncpg==0.29.0
+openai==1.40.0

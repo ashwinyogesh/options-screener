@@ -1,0 +1,24 @@
+name: Narrative — Extractor (Phase 2)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/extractor/**'
+      - '.github/workflows/narrative-extractor.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: narrative-extractor
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/narrative-worker.yml
+    with:
+      worker_dir: extractor
+      job_name: job-extractor
+      image_base: ${{ vars.GHCR_IMAGE_EXTRACTOR }}
+    secrets:
+      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+      AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}

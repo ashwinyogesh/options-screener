@@ -12,13 +12,19 @@ import { EmRankInput } from './components/EmRankInput'
 import { EmRankTable } from './components/EmRankTable'
 import { SupplyChainView } from './components/SupplyChainView'
 import { DcfView } from './components/DcfView'
+import { SwingInput } from './components/SwingInput'
+import { SwingFilterPanel } from './components/SwingFilterPanel'
+import { SwingTable } from './components/SwingTable'
+import { NarrativeView } from './components/NarrativeView'
 import { useCsp } from './hooks/useCsp'
 import { useCc } from './hooks/useCc'
 import { useDitm } from './hooks/useDitm'
 import { useEmScan } from './hooks/useEmScan'
+import { useSwing } from './hooks/useSwing'
 import type { CspFilterState, CspResult } from './types/csp'
 import type { CcFilterState, CcResult } from './types/cc'
 import type { DitmFilterState, DitmResult } from './types/ditm'
+import type { SwingFilterState, SwingResult } from './types/swing'
 import type { UniverseKey } from './constants/universes'
 
 const DEFAULT_CSP_FILTERS: CspFilterState = {
@@ -40,6 +46,28 @@ const DEFAULT_DITM_FILTERS: DitmFilterState = {
   maxSpreadPct: 0,
   excludeEarningsWithinDte: false,
   maxCapital: 0,
+}
+
+const DEFAULT_SWING_FILTERS: SwingFilterState = {
+  setupType: 'all',
+  minRR: 0,
+  minScore: 0,
+  minConfidence: 'all',
+  excludeEarningsWarning: false,
+}
+
+function applySwingFilters(results: SwingResult[], filters: SwingFilterState): SwingResult[] {
+  return results.filter(r => {
+    if (filters.setupType !== 'all' && r.setup_type !== filters.setupType) return false
+    if (filters.minRR > 0 && r.rr < filters.minRR) return false
+    if (filters.minScore > 0 && r.swing_score < filters.minScore) return false
+    if (filters.minConfidence !== 'all') {
+      const order: Record<string, number> = { speculative: 0, medium: 1, high: 2 }
+      if (order[r.confidence] < order[filters.minConfidence]) return false
+    }
+    if (filters.excludeEarningsWarning && r.earnings_warning) return false
+    return true
+  })
 }
 
 function applyCspFilters(results: CspResult[], filters: CspFilterState): CspResult[] {
@@ -75,8 +103,12 @@ function applyDitmFilters(results: DitmResult[], filters: DitmFilterState): Ditm
   })
 }
 
+// Narrative tab is hidden by default until Phase 6 lands data; opt-in via
+// VITE_NARRATIVE_ENABLED=1. Same pattern as DCF (which is hidden behind a comment).
+const NARRATIVE_ENABLED = import.meta.env.VITE_NARRATIVE_ENABLED === '1'
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'csp' | 'cc' | 'ditm' | 'em-rank' | 'supply' | 'dcf'>('csp')
+  const [activeTab, setActiveTab] = useState<'csp' | 'cc' | 'ditm' | 'swing' | 'em-rank' | 'supply' | 'dcf' | 'narrative'>('csp')
 
   // CSP state
   const { results: cspResults, errors: cspErrors, loading: cspLoading, symbolCount: cspSymbolCount, isScanMode: cspIsScanMode, errorMessage: cspErrorMessage, cachedAt: cspCachedAt, run: runCsp, scan: scanCsp } = useCsp()
@@ -95,6 +127,11 @@ export default function App() {
 
   // EM Rank state
   const { results: emResults, errors: emErrors, loading: emLoading, symbolCount: emSymbolCount, isScanMode: emIsScanMode, errorMessage: emErrorMessage, cachedAt: emCachedAt, run: runEm, scan: scanEm } = useEmScan()
+
+  // Swing state
+  const { results: swingResults, regime: swingRegime, loading: swingLoading, isScanMode: swingIsScanMode, errorMessage: swingErrorMessage, cachedAt: swingCachedAt, scan: scanSwing, run: runSwing } = useSwing()
+  const [swingFilters, setSwingFilters] = useState<SwingFilterState>(DEFAULT_SWING_FILTERS)
+  const filteredSwing = useMemo(() => applySwingFilters(swingResults, swingFilters), [swingResults, swingFilters])
 
   return (
     <div className="app">
@@ -126,11 +163,25 @@ export default function App() {
             EM Rank
           </button>
           <button
+            className={`tab-btn${activeTab === 'swing' ? ' tab-btn-active' : ''}`}
+            onClick={() => setActiveTab('swing')}
+          >
+            Swing
+          </button>
+          <button
             className={`tab-btn${activeTab === 'supply' ? ' tab-btn-active' : ''}`}
             onClick={() => setActiveTab('supply')}
           >
             Supply Chain
           </button>
+          {NARRATIVE_ENABLED && (
+            <button
+              className={`tab-btn${activeTab === 'narrative' ? ' tab-btn-active' : ''}`}
+              onClick={() => setActiveTab('narrative')}
+            >
+              Narrative
+            </button>
+          )}
           {/* DCF tab hidden — verdict calibration in progress.
           <button
             className={`tab-btn${activeTab === 'dcf' ? ' tab-btn-active' : ''}`}
@@ -329,6 +380,104 @@ export default function App() {
 
         {activeTab === 'supply' && <SupplyChainView />}
         {activeTab === 'dcf' && <DcfView />}
+        {activeTab === 'narrative' && NARRATIVE_ENABLED && <NarrativeView />}
+
+        {activeTab === 'swing' && (
+          <>
+            <SwingInput
+              onScan={(topN, universe) => scanSwing(topN, universe)}
+              onCustom={(symbols) => runSwing(symbols)}
+              loading={swingLoading}
+            />
+            {swingResults.length > 0 && (
+              <SwingFilterPanel filters={swingFilters} onChange={setSwingFilters} />
+            )}
+            {swingLoading && (
+              <div className="loading-state">
+                <div className="spinner" />
+                {swingIsScanMode
+                  ? <p>Scanning <strong>swing-eligible universe</strong> &mdash; est. <strong>~45s</strong> (includes AI commentary for top 3)</p>
+                  : <p>Analyzing custom symbols &mdash; est. <strong>~20s</strong></p>
+                }
+              </div>
+            )}
+            {swingErrorMessage && (
+              <div className="error-banner"><strong>Error:</strong> {swingErrorMessage}</div>
+            )}
+            {!swingLoading && swingResults.length > 0 && (
+              <div className="results-meta">
+                Showing <strong>{filteredSwing.length}</strong> of <strong>{swingResults.length}</strong> qualified setup{swingResults.length !== 1 ? 's' : ''}
+                {filteredSwing.length < swingResults.length && ' (filters active)'}
+                {swingCachedAt !== null && (
+                  <span className="cache-notice"> · cached {Math.round((Date.now() - swingCachedAt) / 60000) < 1 ? '< 1' : Math.round((Date.now() - swingCachedAt) / 60000)} min ago</span>
+                )}
+              </div>
+            )}
+            {!swingLoading && swingRegime && (
+              <div
+                className="regime-banner"
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 12,
+                  padding: '10px 14px',
+                  margin: '8px 0 10px',
+                  background:
+                    swingRegime.regime_label === 'risk_on'  ? '#0f1f14' :
+                    swingRegime.regime_label === 'risk_off' ? '#2a0f0f' :
+                                                              '#1a1d2a',
+                  border:
+                    '1px solid ' + (
+                      swingRegime.regime_label === 'risk_on'  ? '#16a34a' :
+                      swingRegime.regime_label === 'risk_off' ? '#dc2626' :
+                                                                '#475569'
+                    ),
+                  borderRadius: 6,
+                  fontSize: 12,
+                  color: '#cbd5e1',
+                }}
+              >
+                <span style={{
+                  padding: '2px 10px',
+                  borderRadius: 4,
+                  fontWeight: 700,
+                  letterSpacing: 0.5,
+                  textTransform: 'uppercase',
+                  background:
+                    swingRegime.regime_label === 'risk_on'  ? '#16a34a' :
+                    swingRegime.regime_label === 'risk_off' ? '#dc2626' :
+                                                              '#475569',
+                  color: '#fff',
+                }}>
+                  {swingRegime.regime_label.replace('_', '-')}
+                </span>
+                <span><strong>Score:</strong> {swingRegime.risk_on_score.toFixed(0)}/100</span>
+                <span><strong>R:R gate:</strong> {swingRegime.rr_gate.toFixed(1)}</span>
+                <span><strong>Multiplier:</strong> ×{swingRegime.multiplier.toFixed(2)}</span>
+                <span><strong>SPY:</strong> {swingRegime.index_trend}</span>
+                <span><strong>VIX:</strong> {swingRegime.vix.toFixed(1)} ({swingRegime.vix_percentile.toFixed(0)}p, {swingRegime.vol_regime})</span>
+                <span><strong>Breadth:</strong> {swingRegime.breadth_pct.toFixed(0)}% &gt; EMA50</span>
+                <span><strong>IWM/SPY:</strong> {swingRegime.risk_appetite.toFixed(3)}</span>
+                {swingRegime.disable_setups.length > 0 && (
+                  <span style={{ color: '#fbbf24' }}>
+                    <strong>Disabled:</strong> {swingRegime.disable_setups.join(', ')}
+                  </span>
+                )}
+                {swingRegime.degraded && (
+                  <span style={{ color: '#fbbf24' }} title={swingRegime.drivers.join(' · ')}>
+                    ⚠ degraded data — using neutral defaults
+                  </span>
+                )}
+              </div>
+            )}
+            <SwingTable data={filteredSwing} />
+            {!swingLoading && swingResults.length === 0 && !swingErrorMessage && (
+              <div className="empty-state">
+                <p>Click <strong>🚀 Run</strong> to scan the swing-eligible universe for Breakout, Momentum, Reversion, and Retest setups. Hard gates: R:R ≥ 2.5, setup score ≥ 40. Top 3 receive AI commentary.</p>
+              </div>
+            )}
+          </>
+        )}
       </main>
     </div>
   )

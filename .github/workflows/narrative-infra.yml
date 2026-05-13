@@ -1,0 +1,68 @@
+name: Narrative — Deploy Infrastructure (Bicep)
+
+# Subscription-scoped Bicep deployment. Manual trigger only — infra changes
+# are deliberate. Validates with what-if before deploying.
+#
+# Required repo secrets:
+#   AZURE_CREDENTIALS         — service principal JSON (Contributor on subscription)
+#   AZURE_SUBSCRIPTION_ID     — target subscription
+#   NARRATIVE_NAME_SUFFIX     — 3–8 char alnum, fed to nameSuffix param
+#   NARRATIVE_KV_ADMIN_OBJECT_IDS — JSON array of AAD object IDs
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "what-if (preview) or deploy"
+        required: true
+        default: "what-if"
+        type: choice
+        options:
+          - what-if
+          - deploy
+
+concurrency:
+  group: narrative-infra
+  cancel-in-progress: false
+
+jobs:
+  bicep:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Bicep lint + build
+        run: |
+          az bicep build --file infra/main.bicep
+          az bicep build --file infra/modules/storage.bicep
+          az bicep build --file infra/modules/eventhubs.bicep
+          az bicep build --file infra/modules/keyvault.bicep
+          az bicep build --file infra/modules/containerapps.bicep
+          az bicep build --file infra/modules/monitoring.bicep
+
+      - name: What-if
+        if: ${{ inputs.mode == 'what-if' }}
+        run: |
+          az deployment sub what-if \
+            --location centralus \
+            --template-file infra/main.bicep \
+            --parameters nameSuffix=${{ secrets.NARRATIVE_NAME_SUFFIX }} \
+                         keyVaultAdminObjectIds=${{ secrets.NARRATIVE_KV_ADMIN_OBJECT_IDS }}
+
+      - name: Deploy
+        if: ${{ inputs.mode == 'deploy' }}
+        run: |
+          az deployment sub create \
+            --name narrative-$(date +%Y%m%d%H%M%S) \
+            --location centralus \
+            --template-file infra/main.bicep \
+            --parameters nameSuffix=${{ secrets.NARRATIVE_NAME_SUFFIX }} \
+                         keyVaultAdminObjectIds=${{ secrets.NARRATIVE_KV_ADMIN_OBJECT_IDS }}

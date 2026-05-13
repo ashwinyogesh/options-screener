@@ -19,7 +19,9 @@ from routers.cc import router as cc_router
 from routers.csp import router as csp_router
 from routers.dcf import router as dcf_router
 from routers.ditm import router as ditm_router
+from routers.narrative import router as narrative_router
 from routers.supply_chain import router as supply_chain_router
+from routers.swing import router as swing_router
 from services.scoring.config import SCORING_VERSION
 
 logging.basicConfig(
@@ -46,6 +48,10 @@ app.add_middleware(
         "https://optionsapi-ajdwhug5g9ena5bj.centralus-01.azurewebsites.net",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:5175",
+        "http://127.0.0.1:5175",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
@@ -59,6 +65,8 @@ app.include_router(cc_router)
 app.include_router(ditm_router)
 app.include_router(supply_chain_router)
 app.include_router(dcf_router)
+app.include_router(swing_router)
+app.include_router(narrative_router)
 
 
 @app.get("/health", tags=["meta"])
