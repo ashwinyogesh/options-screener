@@ -1,0 +1,64 @@
+name: Narrative — Build & Deploy ingestion worker
+
+# Builds workers/ingestion/ image, pushes to ghcr.io, updates the
+# ca-ingestion Container App in Azure.
+#
+# Required repo secrets:
+#   AZURE_CREDENTIALS                — SP with Contributor on the resource group
+#   GHCR_IMAGE_BASE                  — e.g. ghcr.io/<owner>/narrative-ingestion
+#   AZURE_RESOURCE_GROUP             — e.g. rg-narrative
+# GITHUB_TOKEN is used for ghcr.io login.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/ingestion/**'
+      - '.github/workflows/narrative-ingestion.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: narrative-ingestion
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: tag
+        run: echo "tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push image
+        uses: docker/build-push-action@v6
+        with:
+          context: workers/ingestion
+          push: true
+          tags: |
+            ${{ secrets.GHCR_IMAGE_BASE }}:${{ steps.tag.outputs.tag }}
+            ${{ secrets.GHCR_IMAGE_BASE }}:latest
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Update Container App
+        run: |
+          az containerapp update \
+            --name ca-ingestion \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --image ${{ secrets.GHCR_IMAGE_BASE }}:${{ steps.tag.outputs.tag }}

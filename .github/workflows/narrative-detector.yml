@@ -1,0 +1,24 @@
+name: Narrative — Detector (Phase 5)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/narrative-detector/**'
+      - '.github/workflows/narrative-detector.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: narrative-detector
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/narrative-worker.yml
+    with:
+      worker_dir: narrative-detector
+      job_name: job-narrative-detector
+      image_base: ${{ vars.GHCR_IMAGE_DETECTOR }}
+    secrets:
+      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+      AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}

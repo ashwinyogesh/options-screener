@@ -1,0 +1,63 @@
+name: Narrative — Reusable worker build & deploy (Container Apps Job)
+
+# Reusable workflow used by per-worker triggers. Builds the worker image,
+# pushes to ghcr.io, and updates the matching Container Apps Job.
+
+on:
+  workflow_call:
+    inputs:
+      worker_dir:
+        description: "Subdirectory under workers/ (e.g. extractor)"
+        required: true
+        type: string
+      job_name:
+        description: "Container Apps Job name (e.g. job-extractor)"
+        required: true
+        type: string
+      image_base:
+        description: "Full ghcr.io image base"
+        required: true
+        type: string
+    secrets:
+      AZURE_CREDENTIALS:
+        required: true
+      AZURE_RESOURCE_GROUP:
+        required: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push image
+        uses: docker/build-push-action@v6
+        with:
+          context: workers/${{ inputs.worker_dir }}
+          push: true
+          tags: |
+            ${{ inputs.image_base }}:${{ github.sha }}
+            ${{ inputs.image_base }}:latest
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Update Container Apps Job image
+        run: |
+          az containerapp job update \
+            --name ${{ inputs.job_name }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --image ${{ inputs.image_base }}:${{ github.sha }}

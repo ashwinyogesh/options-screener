@@ -1,0 +1,5 @@
+# Phase 3 deps. Pinned at scaffolding; updated in Phase 3 implementation PR.
+azure-identity==1.17.1
+azure-keyvault-secrets==4.8.0
+asyncpg==0.29.0
+numpy==2.0.1

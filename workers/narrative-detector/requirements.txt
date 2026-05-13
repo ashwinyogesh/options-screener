@@ -1,0 +1,9 @@
+# Phase 5 deps. Pinned at scaffolding.
+azure-identity==1.17.1
+azure-keyvault-secrets==4.8.0
+asyncpg==0.29.0
+numpy==2.0.1
+scipy==1.14.0
+scikit-learn==1.5.1
+hdbscan==0.8.38
+openai==1.40.0
