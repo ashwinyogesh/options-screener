@@ -1,58 +1,63 @@
-"""Postgres connection pool for narrative routes.
+"""Cosmos DB client for narrative routes.
 
-Phase 0 stub: pool is None and `get_pool()` raises NarrativeUnavailable.
-Phase 1 wires asyncpg with the connection string from Key Vault env var
-`NARRATIVE_PG_CONN`. Pool is shared across all narrative routes per the
-service-layering rule.
+Wraps azure-cosmos SDK with managed-identity auth (DefaultAzureCredential).
+The client is initialised once on FastAPI startup and shared across all
+narrative routes per the service-layering rule.
 
-Lifespan management: created on FastAPI startup, closed on shutdown. Until
-Phase 1 lands, no pool is created, so the existing /api/screener/* routes are
-unaffected.
+Env vars (set by Azure App Service / Container Apps):
+  NARRATIVE_COSMOS_ENDPOINT  — e.g. https://cosmos-narrative-tinkerhub.documents.azure.com:443/
+  NARRATIVE_COSMOS_DB        — database name, default "narrative"
+
+Auth: managed identity via DefaultAzureCredential — no connection strings in
+code or Key Vault. The Container App and App Service MIs must have the
+built-in Cosmos DB Data Contributor role (provisioned by infra/modules/cosmos.bicep).
 """
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING
 
 from services.narrative.errors import NarrativeUnavailable
 
-# Phase 1+: this becomes asyncpg.Pool.
-_pool: Any | None = None
+if TYPE_CHECKING:
+    from azure.cosmos.aio import CosmosClient, DatabaseProxy
+
+_client: "CosmosClient | None" = None
+_database: "DatabaseProxy | None" = None
 
 
-async def init_pool() -> None:
-    """Create the asyncpg pool. Called on FastAPI startup in Phase 1."""
-    global _pool
-    if _pool is not None:
+async def init_client() -> None:
+    """Create the Cosmos DB async client. Called on FastAPI startup."""
+    global _client, _database
+    if _client is not None:
         return
-    conn_str = os.getenv("NARRATIVE_PG_CONN")
-    if not conn_str:
-        # No connection string yet — leave pool as None. Routes will 503.
-        return
-    # Phase 1 implementation:
-    #   import asyncpg
-    #   _pool = await asyncpg.create_pool(conn_str, min_size=1, max_size=5)
-    raise NarrativeUnavailable(
-        "asyncpg integration not yet wired (Phase 1). "
-        "Set NARRATIVE_PG_CONN and land Phase 1 PR.",
-    )
+    endpoint = os.getenv("NARRATIVE_COSMOS_ENDPOINT")
+    if not endpoint:
+        return  # not configured yet — routes will 503
+    from azure.cosmos.aio import CosmosClient
+    from azure.identity.aio import DefaultAzureCredential
+
+    credential = DefaultAzureCredential()
+    _client = CosmosClient(endpoint, credential=credential)
+    db_name = os.getenv("NARRATIVE_COSMOS_DB", "narrative")
+    _database = _client.get_database_client(db_name)
 
 
-async def close_pool() -> None:
-    """Close the asyncpg pool on FastAPI shutdown."""
-    global _pool
-    if _pool is None:
-        return
-    # Phase 1 implementation:
-    #   await _pool.close()
-    _pool = None
+async def close_client() -> None:
+    """Close the Cosmos DB client on FastAPI shutdown."""
+    global _client, _database
+    if _client is not None:
+        await _client.close()
+    _client = None
+    _database = None
 
 
-def get_pool() -> Any:
-    """Return the active pool. Raises NarrativeUnavailable until Phase 1 lands."""
-    if _pool is None:
+def get_database() -> "DatabaseProxy":
+    """Return the active database proxy. Raises NarrativeUnavailable until configured."""
+    if _database is None:
         raise NarrativeUnavailable(
-            "Narrative Postgres pool not initialized. "
-            "This is expected until Phase 1 deploys the platform.",
+            "Narrative Cosmos DB client not initialized. "
+            "Set NARRATIVE_COSMOS_ENDPOINT and ensure the managed identity has "
+            "Cosmos DB Built-in Data Contributor.",
         )
-    return _pool
+    return _database

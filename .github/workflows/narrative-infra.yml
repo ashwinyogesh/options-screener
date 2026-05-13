@@ -48,45 +48,44 @@ jobs:
           az bicep build --file infra/modules/keyvault.bicep
           az bicep build --file infra/modules/containerapps.bicep
           az bicep build --file infra/modules/monitoring.bicep
-          az bicep build --file infra/modules/postgres.bicep
+          az bicep build --file infra/modules/cosmos.bicep
 
       - name: Render parameters file
         env:
           NAME_SUFFIX: ${{ secrets.NARRATIVE_NAME_SUFFIX }}
           RESOURCE_GROUP: ${{ secrets.NARRATIVE_RESOURCE_GROUP }}
           KV_ADMIN_OBJECT_IDS: ${{ secrets.NARRATIVE_KV_ADMIN_OBJECT_IDS }}
-          PG_ADMIN_OBJECT_ID: ${{ secrets.NARRATIVE_PG_ADMIN_OBJECT_ID }}
-          PG_LOCATION: ${{ vars.NARRATIVE_PG_LOCATION }}
+          COSMOS_PRINCIPAL_IDS: ${{ secrets.NARRATIVE_COSMOS_PRINCIPAL_IDS }}
         run: |
           # Build an ARM parameters file. Using env vars (not direct expression
-          # expansion) avoids shell-quoting issues with the JSON array.
-          # Validate KV_ADMIN_OBJECT_IDS is a JSON array first.
+          # expansion) avoids shell-quoting issues with the JSON arrays.
           echo "$KV_ADMIN_OBJECT_IDS" | jq -e 'type == "array"' > /dev/null \
-            || { echo "::error::NARRATIVE_KV_ADMIN_OBJECT_IDS must be a JSON array, e.g. [\"<guid>\"]"; exit 1; }
+            || { echo "::error::NARRATIVE_KV_ADMIN_OBJECT_IDS must be a JSON array"; exit 1; }
+          # COSMOS_PRINCIPAL_IDS defaults to empty array if unset.
+          COSMOS_IDS_JSON="${COSMOS_PRINCIPAL_IDS:-[]}"
+          echo "$COSMOS_IDS_JSON" | jq -e 'type == "array"' > /dev/null \
+            || { echo "::error::NARRATIVE_COSMOS_PRINCIPAL_IDS must be a JSON array"; exit 1; }
           jq -n \
             --arg suffix "$NAME_SUFFIX" \
             --arg rg "$RESOURCE_GROUP" \
-            --arg pgAdmin "$PG_ADMIN_OBJECT_ID" \
-            --arg pgLoc "$PG_LOCATION" \
             --argjson admins "$KV_ADMIN_OBJECT_IDS" \
+            --argjson cosmosPrincipals "$COSMOS_IDS_JSON" \
             '{
               "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
               "contentVersion": "1.0.0.0",
               "parameters": (
                 {
                   "nameSuffix": { "value": $suffix },
-                  "keyVaultAdminObjectIds": { "value": $admins }
+                  "keyVaultAdminObjectIds": { "value": $admins },
+                  "cosmosDataContributorPrincipalIds": { "value": $cosmosPrincipals }
                 }
                 | if $rg != "" then . + { "resourceGroupName": { "value": $rg } } else . end
-                | if $pgAdmin != "" then . + { "postgresAdminObjectId": { "value": $pgAdmin } } else . end
-                | if $pgLoc != "" then . + { "postgresLocation": { "value": $pgLoc } } else . end
               )
             }' > infra/main.parameters.json
-          # Print without secrets (admins array length only).
           echo "resourceGroupName=$RESOURCE_GROUP"
           echo "nameSuffix=$NAME_SUFFIX"
-          echo "pgAdmin provided: $([ -n "$PG_ADMIN_OBJECT_ID" ] && echo yes || echo no)"
-          echo "admin count: $(jq '.parameters.keyVaultAdminObjectIds.value | length' infra/main.parameters.json)"
+          echo "kv admin count: $(jq '.parameters.keyVaultAdminObjectIds.value | length' infra/main.parameters.json)"
+          echo "cosmos principals: $(jq '.parameters.cosmosDataContributorPrincipalIds.value | length' infra/main.parameters.json)"
 
       - name: What-if
         if: ${{ inputs.mode == 'what-if' }}

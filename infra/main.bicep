@@ -4,7 +4,7 @@
 //
 // Subscription-scoped (creates/uses the resource group), region: centralus.
 // Wires together: Storage, Event Hubs (Basic), Key Vault, Container Apps env,
-// App Insights, and Postgres Flexible Server B1ms (Phase 2).
+// App Insights, and Cosmos DB for NoSQL serverless (Phase 2).
 //
 // See docs/NARRATIVE_METHODOLOGY.md §8 for phasing. This file is safe to
 // `bicep build` today but the full Phase 1 deployment requires the parameters
@@ -30,11 +30,8 @@ param nameSuffix string
 @description('Azure AD principal IDs (object IDs) that should receive Key Vault Secrets Officer.')
 param keyVaultAdminObjectIds array = []
 
-@description('Azure AD object ID of the Postgres Entra admin principal. Required for Phase 2.')
-param postgresAdminObjectId string = ''
-
-@description('Region for Postgres Flexible Server. Defaults to eastus2 (eastus has quota restrictions).')
-param postgresLocation string = 'eastus2'
+@description('Principal IDs granted Cosmos DB Built-in Data Contributor (workers + backend MI). Pass as JSON array.')
+param cosmosDataContributorPrincipalIds array = []
 
 @description('Tag map applied to every resource.')
 param tags object = {
@@ -101,15 +98,15 @@ module containerapps 'modules/containerapps.bicep' = {
   }
 }
 
-// Phase 2 — Postgres Flexible Server B1ms + pgvector
-module postgres 'modules/postgres.bicep' = if (!empty(postgresAdminObjectId)) {
+// Phase 2 — Cosmos DB for NoSQL serverless (replaces Postgres; no region restrictions)
+module cosmos 'modules/cosmos.bicep' = {
   scope: rg
-  name: 'postgres'
+  name: 'cosmos'
   params: {
-    location: postgresLocation
+    location: location
     nameSuffix: nameSuffix
     tags: tags
-    postgresAdminObjectId: postgresAdminObjectId
+    dataContributorPrincipalIds: cosmosDataContributorPrincipalIds
   }
 }
 
@@ -118,4 +115,4 @@ output eventHubsNamespace string = eventhubs.outputs.namespaceName
 output keyVaultName string = keyvault.outputs.keyVaultName
 output containerAppsEnvId string = containerapps.outputs.envId
 output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString
-output postgresFqdn string = !empty(postgresAdminObjectId) ? postgres!.outputs.serverFqdn : ''
+output cosmosEndpoint string = cosmos.outputs.accountEndpoint
