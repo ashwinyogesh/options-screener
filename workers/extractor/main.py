@@ -1,21 +1,114 @@
-"""Ticker extraction worker (Phase 2).
+"""Extractor worker entry point (Phase 2).
 
-Phase 0 stub: logs and exits cleanly so the image builds and the Container
-Apps Job can be provisioned. Phase 2 PR replaces this with the actual
-Layer 1–5 extraction pipeline per docs/NARRATIVE_METHODOLOGY.md §3.
+Container Apps Job — runs on a schedule (e.g. every 5 minutes), consumes up
+to `max_events_per_run` messages from Event Hubs `reddit-raw-events`, extracts
+ticker + sentiment signals via GPT-4o-mini, and writes to Cosmos DB `signals`.
+
+Failure semantics:
+- Per-event extraction failures are logged and skipped.
+- Per-signal Cosmos write failures are logged; the event is not re-queued
+  (idempotent: re-running the job will not re-process already-checkpointed EH
+  offsets because the consumer group tracks its position).
 """
 from __future__ import annotations
 
+import json
 import logging
 import sys
 
+from azure.eventhub import EventHubConsumerClient
+from azure.identity import DefaultAzureCredential
+
+from config import ExtractorConfig, load_from_env
+from cosmos_writer import CosmosWriter
+from extractor import Extractor
+from secrets import fetch_secrets
+
+logger = logging.getLogger(__name__)
+
+
+def _setup_logging(level: str) -> None:
+    logging.basicConfig(
+        level=level.upper(),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        stream=sys.stdout,
+    )
+
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-    logging.getLogger(__name__).info(
-        "narrative-extractor: Phase 0 stub. See docs/NARRATIVE_METHODOLOGY.md §8 (Phase 2)."
+    config = load_from_env()
+    _setup_logging(config.log_level)
+    logger.info("Starting narrative extractor worker (Phase 2)")
+
+    secrets = fetch_secrets(config.keyvault_uri)
+    extractor = Extractor(
+        api_key=secrets.openai_api_key,
+        endpoint=secrets.openai_endpoint,
+        deployment=secrets.openai_deployment,
+        max_tokens=config.openai_max_tokens,
+    )
+    writer = CosmosWriter(
+        endpoint=config.cosmos_endpoint,
+        database=config.cosmos_db,
+    )
+
+    credential = DefaultAzureCredential()
+    eh_client = EventHubConsumerClient(
+        fully_qualified_namespace=config.event_hub_namespace,
+        eventhub_name=config.raw_events_hub,
+        consumer_group="$Default",
+        credential=credential,
+    )
+
+    events_processed = 0
+    signals_written = 0
+    collected: list[dict] = []
+
+    def _on_event(partition_context, event):
+        nonlocal events_processed
+        if events_processed >= config.max_events_per_run:
+            return
+        try:
+            raw = event.body_as_str()
+            data = json.loads(raw)
+            collected.append(data)
+            partition_context.update_checkpoint(event)
+            events_processed += 1
+        except Exception:
+            logger.exception("Failed to parse EH event")
+
+    try:
+        # Receive with a short timeout — this is a one-shot job.
+        eh_client.receive(
+            on_event=_on_event,
+            starting_position="-1",  # earliest unprocessed
+            max_wait_time=30,
+        )
+    finally:
+        eh_client.close()
+
+    logger.info("Consumed %d events from Event Hubs", events_processed)
+
+    for event_data in collected:
+        try:
+            signals = extractor.extract(event_data)
+            if signals:
+                written = writer.write_batch(signals)
+                signals_written += written
+                logger.debug(
+                    "post=%s signals=%d written=%d",
+                    event_data.get("post_id"), len(signals), written,
+                )
+        except Exception:
+            logger.exception("Extraction failed for post %s", event_data.get("post_id"))
+
+    writer.close()
+    logger.info(
+        "Extractor done. events=%d signals_written=%d",
+        events_processed, signals_written,
     )
 
 
 if __name__ == "__main__":
     main()
+

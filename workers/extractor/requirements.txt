@@ -1,6 +1,14 @@
-# Phase 2 deps. Pinned at scaffolding; updated in Phase 2 implementation PR.
+# Phase 2 extractor dependencies.
+# azure-identity        — DefaultAzureCredential for managed identity
+# azure-keyvault-secrets— fetch OpenAI key + Cosmos endpoint at startup
+# azure-eventhub        — consume reddit-raw-events
+# azure-cosmos          — write signals to Cosmos DB
+# openai                — GPT-4o-mini ticker/sentiment extraction
+# tenacity              — retry on transient OpenAI / Cosmos errors
+
 azure-identity==1.17.1
 azure-keyvault-secrets==4.8.0
 azure-eventhub==5.12.1
-asyncpg==0.29.0
+azure-cosmos==4.7.0
 openai==1.40.0
+tenacity==9.0.0
