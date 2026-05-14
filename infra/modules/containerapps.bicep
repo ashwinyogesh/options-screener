@@ -29,6 +29,11 @@ param logAnalyticsWorkspaceId string
 @description('Container image for the ingestion worker. Defaults to a public MCR placeholder; CI deploy overrides with the real ghcr.io image.')
 param ingestionImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
+@description('Minimum replicas for job-ingestor. Defaults to 0 so infra deploy never auto-starts it; the ingestion CI workflow sets this to 1 when deploying the real image.')
+@minValue(0)
+@maxValue(2)
+param ingestionMinReplicas int = 0
+
 @description('Container image for job-extractor. Preserved from live deployment by infra workflow.')
 param extractorImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 
@@ -129,7 +134,7 @@ resource ingestion 'Microsoft.App/containerApps@2024-03-01' = {
         }
       ]
       scale: {
-        minReplicas: 1
+        minReplicas: ingestionMinReplicas
         maxReplicas: 2 // hard cap per ADR-0014 cost discipline
       }
     }

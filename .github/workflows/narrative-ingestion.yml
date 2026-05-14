@@ -68,4 +68,6 @@ jobs:
           az containerapp update \
             --name job-ingestor \
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
-            --image ${{ vars.GHCR_IMAGE_BASE }}:${{ steps.tag.outputs.tag }}
+            --image ${{ vars.GHCR_IMAGE_BASE }}:${{ steps.tag.outputs.tag }} \
+            --min-replicas 1 \
+            --max-replicas 2

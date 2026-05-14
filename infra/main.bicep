@@ -39,6 +39,11 @@ param cosmosDataContributorPrincipalIds array = []
 @description('Container image for the ingestion worker. Infra deploy preserves the live image; only falls back to placeholder on first deploy.')
 param ingestionImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
+@description('Minimum replicas for job-ingestor. Set to 0 by default — the ingestion CI workflow sets it to 1 when deploying.')
+@minValue(0)
+@maxValue(2)
+param ingestionMinReplicas int = 0
+
 @description('Container image for job-extractor. Preserved by infra workflow.')
 param extractorImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 
@@ -118,6 +123,7 @@ module containerapps 'modules/containerapps.bicep' = {
     blobAccountName: storage.outputs.storageAccountName
     blobStorageId: storage.outputs.storageAccountId
     ingestionImage: ingestionImage
+    ingestionMinReplicas: ingestionMinReplicas
     extractorImage: extractorImage
     aggregatorImage: aggregatorImage
     classifierImage: classifierImage
