@@ -90,6 +90,29 @@ jobs:
           echo "kv admin count: $(jq '.parameters.keyVaultAdminObjectIds.value | length' infra/main.parameters.json)"
           echo "cosmos principals: $(jq '.parameters.cosmosDataContributorPrincipalIds.value | length' infra/main.parameters.json)"
 
+      - name: Preserve live ingestor image
+        if: ${{ inputs.mode == 'deploy' }}
+        env:
+          RESOURCE_GROUP: ${{ secrets.NARRATIVE_RESOURCE_GROUP }}
+        run: |
+          # Read the currently-deployed image so Bicep doesn't reset it to the
+          # placeholder. Falls back to the placeholder if job-ingestor doesn't
+          # exist yet (first deploy).
+          LIVE_IMAGE=$(az containerapp show \
+            --name job-ingestor \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "properties.template.containers[0].image" \
+            -o tsv 2>/dev/null || echo "")
+          if [ -n "$LIVE_IMAGE" ] && [ "$LIVE_IMAGE" != "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest" ]; then
+            echo "Preserving live image: $LIVE_IMAGE"
+            jq --arg img "$LIVE_IMAGE" \
+              '.parameters += {"ingestionImage": {"value": $img}}' \
+              infra/main.parameters.json > infra/main.parameters.tmp.json
+            mv infra/main.parameters.tmp.json infra/main.parameters.json
+          else
+            echo "No live image found or first deploy — using placeholder"
+          fi
+
       - name: What-if
         if: ${{ inputs.mode == 'what-if' }}
         run: |

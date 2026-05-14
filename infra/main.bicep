@@ -36,6 +36,9 @@ param cosmosLocation string = 'westus2'
 @description('Principal IDs granted Cosmos DB Built-in Data Contributor.')
 param cosmosDataContributorPrincipalIds array = []
 
+@description('Container image for the ingestion worker. Infra deploy preserves the live image; only falls back to placeholder on first deploy.')
+param ingestionImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
 @description('Tag map applied to every resource.')
 param tags object = {
   workload: 'narrative-intelligence'
@@ -104,6 +107,7 @@ module containerapps 'modules/containerapps.bicep' = {
     cosmosEndpoint: cosmos.outputs.accountEndpoint
     blobAccountName: storage.outputs.storageAccountName
     blobStorageId: storage.outputs.storageAccountId
+    ingestionImage: ingestionImage
   }
 }
 
