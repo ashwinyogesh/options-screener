@@ -372,11 +372,16 @@ Key Vault. Images via ghcr.io.
 
 ### Phase 5 — Narrative detection (weeks 10–12)
 
-- Bicep: pgvector index on `post_embeddings`; OpenAI deployment
-  `text-embedding-3-small` (100K TPM)
-- Code: embedding generation merged with classifier Job (one OpenAI round-trip
-  per post); `job-narrative-detector` (hourly) runs HDBSCAN + lifecycle
-  assignment; cluster merge cosine sim threshold 0.82
+- Bicep: embeddings co-located on the `signals` Cosmos container under the
+  `embedding` key (already pre-provisioned with `excludedPaths: ['/embedding/?']`
+  in Phase 2 Bicep — see [ADR-0017](adr/0017-narrative-phase5-detector.md)).
+  Azure OpenAI deployment `text-embedding-ada-002` (1 536-dim), overridable via
+  the `embed-deployment` Key Vault secret — see
+  [ADR-0018](adr/0018-classifier-embedding-soft-fail.md).
+- Code: embedding generation merged with the classifier Job (one OpenAI round-trip
+  per post; embedding failure is soft and recovered by a backfill loop on the next
+  cron). `job-narrative-detector` (hourly) runs HDBSCAN + lifecycle assignment;
+  cluster merge cosine sim threshold 0.82.
 - Test: ≥7/10 known historical narratives correctly staged (e.g. nuclear energy
   2023–2024, AI infrastructure 2023)
 
