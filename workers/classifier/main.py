@@ -123,7 +123,11 @@ def main() -> None:
                     "Failed to classify signal %s for ticker %s",
                     doc.get("id", "?"), ticker,
                 )
-                _skipped_ids.add(doc.get("id", ""))
+                # Only add a real id to the skip set; an empty string would not
+                # filter anything on the next fetch (real Cosmos ids are non-empty).
+                doc_id = doc.get("id")
+                if doc_id:
+                    _skipped_ids.add(doc_id)
                 skipped += 1
 
         remaining -= len(signals)
