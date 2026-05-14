@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "1369123310351207265"
+      "templateHash": "9603764296718937932"
     }
   },
   "parameters": {
@@ -38,6 +38,43 @@
       "defaultValue": "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest",
       "metadata": {
         "description": "Container image for the ingestion worker. Defaults to a public MCR placeholder; CI deploy overrides with the real ghcr.io image."
+      }
+    },
+    "ingestionMinReplicas": {
+      "type": "int",
+      "defaultValue": 0,
+      "minValue": 0,
+      "maxValue": 2,
+      "metadata": {
+        "description": "Minimum replicas for job-ingestor. Defaults to 0 so infra deploy never auto-starts it; the ingestion CI workflow sets this to 1 when deploying the real image."
+      }
+    },
+    "extractorImage": {
+      "type": "string",
+      "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
+      "metadata": {
+        "description": "Container image for job-extractor. Preserved from live deployment by infra workflow."
+      }
+    },
+    "aggregatorImage": {
+      "type": "string",
+      "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
+      "metadata": {
+        "description": "Container image for job-aggregator. Preserved from live deployment by infra workflow."
+      }
+    },
+    "classifierImage": {
+      "type": "string",
+      "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
+      "metadata": {
+        "description": "Container image for job-classifier. Preserved from live deployment by infra workflow."
+      }
+    },
+    "detectorImage": {
+      "type": "string",
+      "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
+      "metadata": {
+        "description": "Container image for job-narrative-detector. Preserved from live deployment by infra workflow."
       }
     },
     "keyVaultUri": {
@@ -74,11 +111,27 @@
       "metadata": {
         "description": "Resource ID of the Key Vault. Used to assign Key Vault Secrets User to worker managed identities."
       }
+    },
+    "blobStorageId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Resource ID of the Blob storage account. Used to assign Storage Blob Data Contributor to job-ingestor."
+      }
+    },
+    "eventHubNamespaceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Resource ID of the Event Hubs namespace. Used to assign EH Sender/Receiver roles."
+      }
     }
   },
   "variables": {
     "roleSecretsUser": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
-    "placeholderJobImage": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
+    "roleBlobContributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]",
+    "roleEhSender": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2b629674-e913-4c01-ae53-ef4638d8f975')]",
+    "roleEhReceiver": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a638d3c7-ab3a-418d-83e6-5f17a39d4fde')]",
     "envName": "[format('cae-narrative-{0}', parameters('nameSuffix'))]"
   },
   "resources": [
@@ -151,7 +204,7 @@
             }
           ],
           "scale": {
-            "minReplicas": 1,
+            "minReplicas": "[parameters('ingestionMinReplicas')]",
             "maxReplicas": 2
           }
         }
@@ -185,7 +238,7 @@
           "containers": [
             {
               "name": "extractor",
-              "image": "[variables('placeholderJobImage')]",
+              "image": "[parameters('extractorImage')]",
               "resources": {
                 "cpu": "[json('0.25')]",
                 "memory": "0.5Gi"
@@ -241,7 +294,7 @@
           "containers": [
             {
               "name": "aggregator",
-              "image": "[variables('placeholderJobImage')]",
+              "image": "[parameters('aggregatorImage')]",
               "resources": {
                 "cpu": "[json('0.25')]",
                 "memory": "0.5Gi"
@@ -289,7 +342,7 @@
           "containers": [
             {
               "name": "classifier",
-              "image": "[variables('placeholderJobImage')]",
+              "image": "[parameters('classifierImage')]",
               "resources": {
                 "cpu": "[json('0.5')]",
                 "memory": "1.0Gi"
@@ -317,12 +370,88 @@
       ]
     },
     {
+      "type": "Microsoft.App/jobs",
+      "apiVersion": "2024-03-01",
+      "name": "job-narrative-detector",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]",
+        "configuration": {
+          "triggerType": "Schedule",
+          "replicaTimeout": 3300,
+          "scheduleTriggerConfig": {
+            "cronExpression": "0 * * * *",
+            "parallelism": 1,
+            "replicaCompletionCount": 1
+          },
+          "registries": []
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "narrative-detector",
+              "image": "[parameters('detectorImage')]",
+              "resources": {
+                "cpu": "[json('0.5')]",
+                "memory": "1.0Gi"
+              },
+              "env": [
+                {
+                  "name": "COSMOS_ENDPOINT",
+                  "value": "[parameters('cosmosEndpoint')]"
+                },
+                {
+                  "name": "LOG_LEVEL",
+                  "value": "INFO"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('keyVaultId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(parameters('keyVaultId'), 'job-narrative-detector', variables('roleSecretsUser'))]",
+      "properties": {
+        "roleDefinitionId": "[variables('roleSecretsUser')]",
+        "principalId": "[reference(resourceId('Microsoft.App/jobs', 'job-narrative-detector'), '2024-03-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.App/jobs', 'job-narrative-detector')]"
+      ]
+    },
+    {
       "condition": "[not(empty(parameters('keyVaultId')))]",
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
       "name": "[guid(parameters('keyVaultId'), 'job-ingestor', variables('roleSecretsUser'))]",
       "properties": {
         "roleDefinitionId": "[variables('roleSecretsUser')]",
+        "principalId": "[reference(resourceId('Microsoft.App/containerApps', 'job-ingestor'), '2024-03-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.App/containerApps', 'job-ingestor')]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('blobStorageId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(parameters('blobStorageId'), 'job-ingestor', variables('roleBlobContributor'))]",
+      "properties": {
+        "roleDefinitionId": "[variables('roleBlobContributor')]",
         "principalId": "[reference(resourceId('Microsoft.App/containerApps', 'job-ingestor'), '2024-03-01', 'full').identity.principalId]",
         "principalType": "ServicePrincipal"
       },
@@ -357,6 +486,34 @@
       "dependsOn": [
         "[resourceId('Microsoft.App/jobs', 'job-classifier')]"
       ]
+    },
+    {
+      "condition": "[not(empty(parameters('eventHubNamespaceId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(parameters('eventHubNamespaceId'), 'job-ingestor', variables('roleEhSender'))]",
+      "properties": {
+        "roleDefinitionId": "[variables('roleEhSender')]",
+        "principalId": "[reference(resourceId('Microsoft.App/containerApps', 'job-ingestor'), '2024-03-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.App/containerApps', 'job-ingestor')]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('eventHubNamespaceId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(parameters('eventHubNamespaceId'), 'job-extractor', variables('roleEhReceiver'))]",
+      "properties": {
+        "roleDefinitionId": "[variables('roleEhReceiver')]",
+        "principalId": "[reference(resourceId('Microsoft.App/jobs', 'job-extractor'), '2024-03-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.App/jobs', 'job-extractor')]"
+      ]
     }
   ],
   "outputs": {
@@ -387,6 +544,10 @@
     "classifierJobPrincipalId": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.App/jobs', 'job-classifier'), '2024-03-01', 'full').identity.principalId]"
+    },
+    "detectorJobPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.App/jobs', 'job-narrative-detector'), '2024-03-01', 'full').identity.principalId]"
     }
   }
 }

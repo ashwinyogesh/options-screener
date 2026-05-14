@@ -62,11 +62,20 @@ class CosmosClassifierClient:
         doc: dict,
         conviction_state: str,
         conviction_confidence: float,
+        embedding: list[float] | None = None,
+        embedding_model: str | None = None,
     ) -> None:
-        """Upsert the signal document with conviction_state added."""
-        updated = {
+        """Upsert the signal document with conviction and (optionally) embedding fields.
+
+        embedding is stored under the key excluded from Cosmos range indexing
+        (/embedding/?) per the Phase 2 Bicep indexing policy in cosmos.bicep.
+        """
+        updated: dict = {
             **doc,
             "conviction_state": conviction_state,
             "conviction_confidence": conviction_confidence,
         }
+        if embedding is not None:
+            updated["embedding"] = embedding
+            updated["embedding_model"] = embedding_model or "text-embedding-3-small"
         self._signals.upsert_item(updated)

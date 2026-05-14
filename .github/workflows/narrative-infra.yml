@@ -118,17 +118,20 @@ jobs:
           EXTRACTOR_IMG=$(read_job_image job-extractor)
           AGGREGATOR_IMG=$(read_job_image job-aggregator)
           CLASSIFIER_IMG=$(read_job_image job-classifier)
+          DETECTOR_IMG=$(read_job_image job-narrative-detector)
 
           echo "Ingestor:   ${INGESTOR_IMG:-placeholder}"
           echo "Extractor:  ${EXTRACTOR_IMG:-placeholder}"
           echo "Aggregator: ${AGGREGATOR_IMG:-placeholder}"
           echo "Classifier: ${CLASSIFIER_IMG:-placeholder}"
+          echo "Detector:   ${DETECTOR_IMG:-placeholder}"
 
           PARAMS=$(cat infra/main.parameters.json)
           [ -n "$INGESTOR_IMG" ]  && PARAMS=$(echo "$PARAMS" | jq --arg v "$INGESTOR_IMG"  '.parameters += {"ingestionImage":  {"value": $v}}')
           [ -n "$EXTRACTOR_IMG" ] && PARAMS=$(echo "$PARAMS" | jq --arg v "$EXTRACTOR_IMG" '.parameters += {"extractorImage":  {"value": $v}}')
           [ -n "$AGGREGATOR_IMG" ] && PARAMS=$(echo "$PARAMS" | jq --arg v "$AGGREGATOR_IMG" '.parameters += {"aggregatorImage": {"value": $v}}')
           [ -n "$CLASSIFIER_IMG" ] && PARAMS=$(echo "$PARAMS" | jq --arg v "$CLASSIFIER_IMG" '.parameters += {"classifierImage": {"value": $v}}')
+          [ -n "$DETECTOR_IMG" ]  && PARAMS=$(echo "$PARAMS" | jq --arg v "$DETECTOR_IMG"  '.parameters += {"detectorImage":   {"value": $v}}')
           echo "$PARAMS" > infra/main.parameters.json
 
       - name: What-if

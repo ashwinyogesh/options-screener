@@ -8,13 +8,19 @@ Structured output via OpenAI JSON schema response_format — no parsing heuristi
 Prompt injection defence: instructions live in the `system` message; the
 untrusted Reddit post body is sent as a separate `user` message. The model's
 alignment ensures system instructions take precedence over user content.
+
+Phase 5 addition: EmbeddingGenerator batches rationale text through
+text-embedding-3-small and returns 1 536-dim float vectors. Called alongside
+classification in main.py; errors are soft-failed so conviction state is never
+blocked by an embedding failure.
 """
 from __future__ import annotations
 
-import json
 import logging
+from typing import Sequence
 
 from openai import AzureOpenAI
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -131,3 +137,52 @@ class ConvictionClassifier:
             logger.warning("Unexpected conviction_state %r — defaulting to uncertainty", state)
             state = "uncertainty"
         return state, confidence
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — embedding generator
+# ---------------------------------------------------------------------------
+
+_EMBEDDING_MODEL = "text-embedding-3-small"
+_EMBEDDING_DIMS = 1536
+# OpenAI embedding API hard limit per request.
+_EMBED_BATCH_LIMIT = 100
+
+
+class EmbeddingGenerator:
+    """Wraps text-embedding-3-small for batch embedding of rationale text.
+
+    Returns a list of 1 536-dim float vectors, one per input text.
+    Inputs that exceed the token limit are truncated to 8 191 tokens by the
+    API automatically; no client-side truncation needed.
+
+    Error handling: the caller (main.py) wraps calls in a try/except so that
+    embedding failures never block conviction-state writes.
+    """
+
+    def __init__(self, api_key: str, endpoint: str, deployment: str) -> None:
+        self._client = AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=endpoint,
+            api_version="2024-08-01-preview",
+        )
+        self._deployment = deployment
+
+    def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
+        """Return embeddings for each text. Raises on API error.
+
+        Splits into sub-batches of at most _EMBED_BATCH_LIMIT items.
+        Empty strings are replaced with a single space to avoid API rejection.
+        """
+        results: list[list[float]] = []
+        safe_texts = [t if t.strip() else " " for t in texts]
+        for i in range(0, len(safe_texts), _EMBED_BATCH_LIMIT):
+            chunk = safe_texts[i : i + _EMBED_BATCH_LIMIT]
+            response = self._client.embeddings.create(
+                model=self._deployment,
+                input=chunk,
+            )
+            # API returns items sorted by index.
+            chunk_vecs = [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
+            results.extend(chunk_vecs)
+        return results

@@ -1,4 +1,4 @@
-"""Conviction-state classifier entry point (Phase 4).
+"""Conviction-state classifier entry point (Phase 4 / Phase 5).
 
 Container Apps Job — runs on a 30-minute cron schedule.
 
@@ -6,12 +6,18 @@ What it does:
 1. Fetches up to MAX_SIGNALS_PER_RUN unclassified signals from Cosmos `signals`.
 2. For each signal, calls GPT-4o-mini (structured output) to classify into one
    of the 10 conviction states defined in docs/NARRATIVE_METHODOLOGY.md §3.
-3. Writes conviction_state + conviction_confidence back to the signal document.
+3. Calls text-embedding-3-small on the same rationale text (Phase 5).
+4. Writes conviction_state, conviction_confidence, embedding, and embedding_model
+   back to the signal document in a single upsert.
 
 The Phase 3 aggregator (job-aggregator, 15-min cron) reads conviction_state
 on its next run and computes conviction ratios for ticker_timeline.
+The Phase 5 detector (job-narrative-detector, hourly cron) reads embedding
+to run HDBSCAN clustering and assign lifecycle stages.
 
 Idempotent: already-classified signals are skipped by the Cosmos query.
+Embedding errors are soft-failed: conviction state is always written even if
+the embedding API call fails — the detector skips null-embedding signals.
 
 Env contract:
     KEYVAULT_URI           https://kv-narrative-<suffix>.vault.azure.net/
@@ -26,7 +32,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from classifier import ConvictionClassifier
+from classifier import ConvictionClassifier, EmbeddingGenerator
 from config import load_from_env
 from cosmos_client import CosmosClassifierClient
 from kv_secrets import fetch_secrets
@@ -45,7 +51,7 @@ def _setup_logging(level: str) -> None:
 def main() -> None:
     config = load_from_env()
     _setup_logging(config.log_level)
-    logger.info("Starting conviction classifier (Phase 4)")
+    logger.info("Starting conviction classifier + embedder (Phase 4/5)")
 
     secrets = fetch_secrets(config.keyvault_uri)
     client = CosmosClassifierClient(
@@ -57,6 +63,11 @@ def main() -> None:
         endpoint=secrets.openai_endpoint,
         deployment=secrets.openai_deployment,
         prompt_template=secrets.prompt_template,
+    )
+    embedder = EmbeddingGenerator(
+        api_key=secrets.openai_api_key,
+        endpoint=secrets.openai_endpoint,
+        deployment=secrets.embed_deployment,
     )
 
     classified = 0
@@ -71,18 +82,38 @@ def main() -> None:
             logger.info("No unclassified signals remaining")
             break
 
-        for doc in signals:
+        # --- Phase 5: batch-embed all rationales in this chunk ---
+        rationales = [doc.get("rationale", "") for doc in signals]
+        embeddings: list[list[float] | None] = [None] * len(signals)
+        try:
+            vecs = embedder.embed_batch(rationales)
+            embeddings = list(vecs)  # type: ignore[assignment]
+            logger.debug("Embedded %d signals", len(vecs))
+        except Exception:
+            logger.exception(
+                "Embedding batch failed for %d signals — conviction writes proceed without embedding",
+                len(signals),
+            )
+
+        for idx, doc in enumerate(signals):
             ticker = doc.get("ticker", "")
             sentiment = doc.get("sentiment", "neutral")
             rationale = doc.get("rationale", "")
 
             try:
                 state, confidence = clf.classify(ticker, sentiment, rationale)
-                client.write_conviction(doc, state, confidence)
+                client.write_conviction(
+                    doc,
+                    state,
+                    confidence,
+                    embedding=embeddings[idx],
+                    embedding_model=secrets.embed_deployment,
+                )
                 classified += 1
                 logger.debug(
-                    "  %s [%s] → %s (%.2f)",
+                    "  %s [%s] → %s (%.2f) embedded=%s",
                     ticker, doc.get("id", "")[:8], state, confidence,
+                    embeddings[idx] is not None,
                 )
             except Exception:
                 logger.exception(
