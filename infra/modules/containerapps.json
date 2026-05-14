@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "3134418174950261627"
+      "templateHash": "2658310660453934045"
     }
   },
   "parameters": {
@@ -178,8 +178,7 @@
         "workloadProfileName": "Consumption",
         "configuration": {
           "activeRevisionsMode": "Single",
-          "ingress": null,
-          "registries": []
+          "ingress": null
         },
         "template": {
           "containers": [
@@ -238,8 +237,7 @@
             "cronExpression": "*/5 * * * *",
             "parallelism": 1,
             "replicaCompletionCount": 1
-          },
-          "registries": []
+          }
         },
         "template": {
           "containers": [
@@ -294,8 +292,7 @@
             "cronExpression": "*/15 * * * *",
             "parallelism": 1,
             "replicaCompletionCount": 1
-          },
-          "registries": []
+          }
         },
         "template": {
           "containers": [
@@ -342,8 +339,7 @@
             "cronExpression": "*/30 * * * *",
             "parallelism": 1,
             "replicaCompletionCount": 1
-          },
-          "registries": []
+          }
         },
         "template": {
           "containers": [
@@ -394,8 +390,7 @@
             "cronExpression": "0 * * * *",
             "parallelism": 1,
             "replicaCompletionCount": 1
-          },
-          "registries": []
+          }
         },
         "template": {
           "containers": [
@@ -446,8 +441,7 @@
             "cronExpression": "*/15 * * * *",
             "parallelism": 1,
             "replicaCompletionCount": 1
-          },
-          "registries": []
+          }
         },
         "template": {
           "containers": [

@@ -90,51 +90,34 @@ jobs:
           echo "kv admin count: $(jq '.parameters.keyVaultAdminObjectIds.value | length' infra/main.parameters.json)"
           echo "cosmos principals: $(jq '.parameters.cosmosDataContributorPrincipalIds.value | length' infra/main.parameters.json)"
 
-      - name: Preserve live worker images
+      - name: Inject worker images from repo vars
         if: ${{ inputs.mode == 'deploy' }}
-        env:
-          RESOURCE_GROUP: ${{ secrets.NARRATIVE_RESOURCE_GROUP }}
         run: |
-          PLACEHOLDER_APP="mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
-          PLACEHOLDER_JOB="mcr.microsoft.com/k8se/quickstart-jobs:latest"
-
-          read_app_image() {
-            local name=$1 placeholder=$2
-            local img
-            img=$(az containerapp show --name "$name" --resource-group "$RESOURCE_GROUP" \
-              --query "properties.template.containers[0].image" -o tsv 2>/dev/null || echo "")
-            if [ -n "$img" ] && [ "$img" != "$placeholder" ]; then echo "$img"; else echo ""; fi
-          }
-
-          read_job_image() {
-            local name=$1
-            local img
-            img=$(az containerapp job show --name "$name" --resource-group "$RESOURCE_GROUP" \
-              --query "properties.template.containers[0].image" -o tsv 2>/dev/null || echo "")
-            if [ -n "$img" ] && [ "$img" != "$PLACEHOLDER_JOB" ]; then echo "$img"; else echo ""; fi
-          }
-
-          INGESTOR_IMG=$(read_app_image job-ingestor "$PLACEHOLDER_APP")
-          EXTRACTOR_IMG=$(read_job_image job-extractor)
-          AGGREGATOR_IMG=$(read_job_image job-aggregator)
-          CLASSIFIER_IMG=$(read_job_image job-classifier)
-          DETECTOR_IMG=$(read_job_image job-narrative-detector)
-          SCORER_IMG=$(read_job_image job-acs-scorer)
-
-          echo "Ingestor:   ${INGESTOR_IMG:-placeholder}"
-          echo "Extractor:  ${EXTRACTOR_IMG:-placeholder}"
-          echo "Aggregator: ${AGGREGATOR_IMG:-placeholder}"
-          echo "Classifier: ${CLASSIFIER_IMG:-placeholder}"
-          echo "Detector:   ${DETECTOR_IMG:-placeholder}"
-          echo "Scorer:     ${SCORER_IMG:-placeholder}"
-
+          # Source of truth: GHCR_IMAGE_* repo vars, set once in Settings → Variables → Actions.
+          # Each worker CI workflow pushes :latest + :sha — infra always deploys :latest.
+          # This replaces the fragile "read from live Azure" pattern which broke registry
+          # credentials (registries:[]) and was racy when jobs were in placeholder state.
           PARAMS=$(cat infra/main.parameters.json)
-          [ -n "$INGESTOR_IMG" ]  && PARAMS=$(echo "$PARAMS" | jq --arg v "$INGESTOR_IMG"  '.parameters += {"ingestionImage":  {"value": $v}}')
-          [ -n "$EXTRACTOR_IMG" ] && PARAMS=$(echo "$PARAMS" | jq --arg v "$EXTRACTOR_IMG" '.parameters += {"extractorImage":  {"value": $v}}')
-          [ -n "$AGGREGATOR_IMG" ] && PARAMS=$(echo "$PARAMS" | jq --arg v "$AGGREGATOR_IMG" '.parameters += {"aggregatorImage": {"value": $v}}')
-          [ -n "$CLASSIFIER_IMG" ] && PARAMS=$(echo "$PARAMS" | jq --arg v "$CLASSIFIER_IMG" '.parameters += {"classifierImage": {"value": $v}}')
-          [ -n "$DETECTOR_IMG" ]  && PARAMS=$(echo "$PARAMS" | jq --arg v "$DETECTOR_IMG"  '.parameters += {"detectorImage":   {"value": $v}}')
-          [ -n "$SCORER_IMG" ]    && PARAMS=$(echo "$PARAMS" | jq --arg v "$SCORER_IMG"    '.parameters += {"scorerImage":     {"value": $v}}')
+
+          inject() {
+            local param=$1 img_base=$2
+            if [ -n "$img_base" ]; then
+              PARAMS=$(echo "$PARAMS" | jq --arg v "${img_base}:latest" \
+                ".parameters += {\"${param}\": {\"value\": \$v}}")
+              echo "  ${param}: ${img_base}:latest"
+            else
+              echo "  ${param}: (var not set — keeping Bicep default placeholder)"
+            fi
+          }
+
+          echo "Worker images to inject:"
+          inject "ingestionImage"  "${{ vars.GHCR_IMAGE_INGESTOR }}"
+          inject "extractorImage"  "${{ vars.GHCR_IMAGE_EXTRACTOR }}"
+          inject "aggregatorImage" "${{ vars.GHCR_IMAGE_AGGREGATOR }}"
+          inject "classifierImage" "${{ vars.GHCR_IMAGE_CLASSIFIER }}"
+          inject "detectorImage"   "${{ vars.GHCR_IMAGE_DETECTOR }}"
+          inject "scorerImage"     "${{ vars.GHCR_IMAGE_SCORER }}"
+
           echo "$PARAMS" > infra/main.parameters.json
 
       - name: What-if

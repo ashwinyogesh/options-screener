@@ -121,7 +121,9 @@ resource ingestion 'Microsoft.App/containerApps@2024-03-01' = {
     configuration: {
       activeRevisionsMode: 'Single'
       ingress: null // background worker; no HTTP
-      registries: [] // CI workflow patches in ghcr.io credentials
+      // registries intentionally omitted — ARM incremental mode preserves the
+      // credentials set by each worker CI workflow (az containerapp registry set).
+      // Declaring registries:[] here would wipe them on every infra deploy.
     }
     template: {
       containers: [
@@ -164,7 +166,7 @@ resource extractorJob 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      registries: [] // CI workflow patches in ghcr.io credentials
+      // registries intentionally omitted — preserved across infra deploys.
     }
     template: {
       containers: [
@@ -202,7 +204,7 @@ resource aggregatorJob 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      registries: [] // CI workflow patches in ghcr.io credentials
+      // registries intentionally omitted — preserved across infra deploys.
     }
     template: {
       containers: [
@@ -238,7 +240,7 @@ resource classifierJob 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      registries: [] // CI workflow patches in ghcr.io credentials
+      // registries intentionally omitted — preserved across infra deploys.
     }
     template: {
       containers: [
@@ -275,7 +277,7 @@ resource detectorJob 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      registries: [] // CI workflow patches in ghcr.io credentials
+      // registries intentionally omitted — preserved across infra deploys.
     }
     template: {
       containers: [
@@ -312,7 +314,7 @@ resource scorerJob 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      registries: [] // CI workflow patches in ghcr.io credentials
+      // registries intentionally omitted — preserved across infra deploys.
     }
     template: {
       containers: [
