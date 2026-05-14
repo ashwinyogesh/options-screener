@@ -42,7 +42,7 @@ param ingestionImage string = 'mcr.microsoft.com/azuredocs/containerapps-hellowo
 @description('Minimum replicas for job-ingestor. Set to 0 by default — the ingestion CI workflow sets it to 1 when deploying.')
 @minValue(0)
 @maxValue(2)
-param ingestionMinReplicas int = 0
+param ingestionMinReplicas int = 1
 
 @description('Container image for job-extractor. Preserved by infra workflow.')
 param extractorImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'

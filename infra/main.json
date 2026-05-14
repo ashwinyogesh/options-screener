@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "3383803397119964152"
+      "templateHash": "1249345675820618157"
     }
   },
   "parameters": {
@@ -61,7 +61,7 @@
     },
     "ingestionMinReplicas": {
       "type": "int",
-      "defaultValue": 0,
+      "defaultValue": 1,
       "minValue": 0,
       "maxValue": 2,
       "metadata": {
@@ -723,7 +723,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "329403451536274126"
+              "templateHash": "3134418174950261627"
             }
           },
           "parameters": {
@@ -760,7 +760,7 @@
             },
             "ingestionMinReplicas": {
               "type": "int",
-              "defaultValue": 0,
+              "defaultValue": 1,
               "minValue": 0,
               "maxValue": 2,
               "metadata": {
@@ -1125,6 +1125,10 @@
                         "memory": "1.0Gi"
                       },
                       "env": [
+                        {
+                          "name": "KEYVAULT_URI",
+                          "value": "[parameters('keyVaultUri')]"
+                        },
                         {
                           "name": "COSMOS_ENDPOINT",
                           "value": "[parameters('cosmosEndpoint')]"
