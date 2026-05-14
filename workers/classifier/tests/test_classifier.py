@@ -5,12 +5,23 @@ External services (Azure OpenAI) are mocked. No network calls.
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from classifier import (
+# Pin sys.path BEFORE module-level imports of flat worker modules — see
+# conftest.py for the per-test variant (this guards collection-time imports).
+_WORKER_ROOT = str(Path(__file__).resolve().parent.parent)
+if _WORKER_ROOT in sys.path:
+    sys.path.remove(_WORKER_ROOT)
+sys.path.insert(0, _WORKER_ROOT)
+for _name in ("main", "config", "classifier", "cosmos_client", "kv_secrets"):
+    sys.modules.pop(_name, None)
+
+from classifier import (  # noqa: E402
     CONVICTION_STATES,
     DEFAULT_SYSTEM_PROMPT,
     ConvictionClassifier,

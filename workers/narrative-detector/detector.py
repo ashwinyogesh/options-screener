@@ -53,6 +53,18 @@ def cluster(
     if n == 0:
         return ClusterResult(labels=[], n_clusters=0, dominant_cluster=-1, dominant_fraction=0.0)
 
+    # HDBSCAN needs >=2 samples to fit, and >= min_cluster_size to form any
+    # cluster. Below that threshold everything is noise by definition — return
+    # a trivial result rather than letting sklearn raise. This is common in the
+    # ramp-up window where a ticker may have a single embedded signal.
+    if n < max(2, min_cluster_size):
+        return ClusterResult(
+            labels=[-1] * n,
+            n_clusters=0,
+            dominant_cluster=-1,
+            dominant_fraction=0.0,
+        )
+
     mat = np.array(embeddings, dtype=np.float32)
 
     # Normalise rows so that cosine distance = 1 - dot product.
