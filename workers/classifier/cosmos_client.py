@@ -57,6 +57,49 @@ class CosmosClassifierClient:
         stop=stop_after_attempt(3),
         reraise=True,
     )
+    def fetch_missing_embeddings(self, batch_size: int) -> list[dict]:
+        """Return signal docs that have conviction_state but no embedding.
+
+        Used to backfill embeddings for docs classified before Phase 5 was
+        active (e.g. embedding API was unavailable / soft-failed on prior run).
+        """
+        query = (
+            "SELECT * FROM c "
+            "WHERE IS_DEFINED(c.conviction_state) "
+            "AND NOT IS_DEFINED(c.embedding) "
+            "ORDER BY c._ts ASC OFFSET 0 LIMIT @batch_size"
+        )
+        params = [{"name": "@batch_size", "value": batch_size}]
+        items = list(
+            self._signals.query_items(
+                query=query,
+                parameters=params,
+                enable_cross_partition_query=True,
+            )
+        )
+        logger.debug("Fetched %d convicted-but-unembedded signals", len(items))
+        return items
+
+    def write_embedding(
+        self,
+        doc: dict,
+        embedding: list[float],
+        embedding_model: str,
+    ) -> None:
+        """Patch an existing signal doc with embedding fields only."""
+        updated = {
+            **doc,
+            "embedding": embedding,
+            "embedding_model": embedding_model,
+        }
+        self._signals.upsert_item(updated)
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        wait=wait_exponential(multiplier=1, min=1, max=15),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
     def write_conviction(
         self,
         doc: dict,

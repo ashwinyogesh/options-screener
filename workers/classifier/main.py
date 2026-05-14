@@ -128,9 +128,30 @@ def main() -> None:
         if len(signals) < batch_size:
             break
 
+    # --- Phase 5 backfill: embed docs that were classified before embeddings worked ---
+    # Catches docs where embedding soft-failed on a prior run (e.g. missing KV secret,
+    # transient API error). Conviction is not re-classified — only embedding is added.
+    backfilled = 0
+    while True:
+        docs = client.fetch_missing_embeddings(config.batch_size)
+        if not docs:
+            break
+        rationales = [doc.get("rationale", "") for doc in docs]
+        try:
+            vecs = embedder.embed_batch(rationales)
+            for doc, vec in zip(docs, vecs):
+                client.write_embedding(doc, vec, secrets.embed_deployment)
+                backfilled += 1
+            logger.info("Backfilled embeddings for %d signals", len(docs))
+        except Exception:
+            logger.exception("Embedding backfill batch failed — will retry on next run")
+            break
+        if len(docs) < config.batch_size:
+            break
+
     logger.info(
-        "Classifier complete — classified=%d skipped=%d",
-        classified, skipped,
+        "Classifier complete — classified=%d skipped=%d backfilled=%d",
+        classified, skipped, backfilled,
     )
 
     # Exit non-zero if every attempted signal failed — surfaces as job failure
