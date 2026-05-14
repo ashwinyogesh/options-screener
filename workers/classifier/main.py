@@ -69,6 +69,10 @@ def main() -> None:
         endpoint=secrets.openai_endpoint,
         deployment=secrets.embed_deployment,
     )
+    logger.info(
+        "Classifier init — gpt_deployment=%s embed_deployment=%s",
+        secrets.openai_deployment, secrets.embed_deployment,
+    )
 
     classified = 0
     skipped = 0
