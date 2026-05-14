@@ -25,7 +25,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Sequence
 
-from .types import DailyBucket, TickerTimelineSnapshot
+from types_ import DailyBucket, TickerTimelineSnapshot
 
 # ---------------------------------------------------------------------------
 # Constants — match §2 and SCORING_REFERENCE.md. Change only via ADR.
