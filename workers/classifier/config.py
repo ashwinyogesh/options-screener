@@ -11,7 +11,8 @@ Env contract (set by Container Apps Job):
 Secret contract (Key Vault):
     openai-api-key          Azure OpenAI key
     openai-endpoint         Azure OpenAI endpoint URL
-    openai-deployment       deployment name (default gpt-4o-mini)
+    openai-deployment       chat deployment name (default gpt-4o-mini)
+    embed-deployment        embedding deployment name (default text-embedding-ada-002)
     conviction-prompt-v1    system prompt template (optional, falls back to default)
 """
 from __future__ import annotations

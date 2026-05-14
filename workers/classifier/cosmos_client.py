@@ -112,6 +112,10 @@ class CosmosClassifierClient:
 
         embedding is stored under the key excluded from Cosmos range indexing
         (/embedding/?) per the Phase 2 Bicep indexing policy in cosmos.bicep.
+
+        If ``embedding`` is provided, ``embedding_model`` MUST be provided too
+        — callers always have it (it is the deployment name from KV) and a
+        silent default would hide drift if the deployment name changes.
         """
         updated: dict = {
             **doc,
@@ -119,6 +123,8 @@ class CosmosClassifierClient:
             "conviction_confidence": conviction_confidence,
         }
         if embedding is not None:
+            if not embedding_model:
+                raise ValueError("embedding_model is required when embedding is provided")
             updated["embedding"] = embedding
-            updated["embedding_model"] = embedding_model or "text-embedding-3-small"
+            updated["embedding_model"] = embedding_model
         self._signals.upsert_item(updated)

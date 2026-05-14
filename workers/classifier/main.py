@@ -6,7 +6,9 @@ What it does:
 1. Fetches up to MAX_SIGNALS_PER_RUN unclassified signals from Cosmos `signals`.
 2. For each signal, calls GPT-4o-mini (structured output) to classify into one
    of the 10 conviction states defined in docs/NARRATIVE_METHODOLOGY.md §3.
-3. Calls text-embedding-3-small on the same rationale text (Phase 5).
+3. Calls the configured embedding deployment (default text-embedding-ada-002,
+   overridable via the `embed-deployment` KV secret) on the same rationale
+   text (Phase 5).
 4. Writes conviction_state, conviction_confidence, embedding, and embedding_model
    back to the signal document in a single upsert.
 
@@ -132,10 +134,24 @@ def main() -> None:
     # --- Phase 5 backfill: embed docs that were classified before embeddings worked ---
     # Catches docs where embedding soft-failed on a prior run (e.g. missing KV secret,
     # transient API error). Conviction is not re-classified — only embedding is added.
+    #
+    # Progress guard: if the next fetch returns only ids we have already seen this run,
+    # we break to avoid spinning on a write that silently no-ops (e.g. a future Cosmos
+    # indexing change strips /embedding, or a code bug). Worst case we waste one extra
+    # round-trip per stuck doc, not the whole replica timeout.
+    seen_backfill_ids: set[str] = set()
     while True:
         docs = client.fetch_missing_embeddings(config.batch_size)
         if not docs:
             break
+        new_ids = {d.get("id", "") for d in docs} - seen_backfill_ids
+        if not new_ids:
+            logger.warning(
+                "Backfill loop stalled — %d docs still report missing embeddings after write; breaking",
+                len(docs),
+            )
+            break
+        seen_backfill_ids.update(d.get("id", "") for d in docs)
         rationales = [doc.get("rationale", "") for doc in docs]
         try:
             vecs = embedder.embed_batch(rationales)
