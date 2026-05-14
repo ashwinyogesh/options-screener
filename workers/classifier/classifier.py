@@ -186,6 +186,7 @@ class EmbeddingGenerator:
         for i in range(0, len(safe_texts), _EMBED_BATCH_LIMIT):
             chunk = safe_texts[i : i + _EMBED_BATCH_LIMIT]
             response = self._client.embeddings.create(
+                model=self._deployment,
                 input=chunk,
             )
             # API returns items sorted by index.
