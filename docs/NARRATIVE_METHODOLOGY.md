@@ -364,9 +364,12 @@ Key Vault. Images via ghcr.io.
 
 - Bicep: Azure OpenAI deployment `gpt-4o-mini` (50K TPM / 50 RPM conservative);
   region check `centralus` first, fallback `eastus2`
-- Code: `job-classifier` (30-min cron) processes `conviction_state IS NULL` rows;
-  structured-output JSON; prompt template stored in Key Vault as
-  `conviction-prompt-v1`
+- Code: `job-classifier` (30-min cron) processes signals where
+  `NOT IS_DEFINED(c.conviction_state)`; structured-output JSON; prompt template
+  stored in Key Vault as `conviction-prompt-v1`. Embedding generation runs in
+  the same job (see Phase 5); an embedding failure does **not** block the
+  conviction-state write — see
+  [ADR-0018](adr/0018-classifier-embedding-soft-fail.md).
 - **No Azure ML.** Fine-tune escalation gated on F1 < 0.78
 - Test: F1 ≥ 0.78 on `researched_bull` against a 300-post eval set
 
