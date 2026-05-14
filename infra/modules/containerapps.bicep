@@ -56,10 +56,17 @@ param keyVaultId string = ''
 @description('Resource ID of the Blob storage account. Used to assign Storage Blob Data Contributor to job-ingestor.')
 param blobStorageId string = ''
 
+@description('Resource ID of the Event Hubs namespace. Used to assign EH Sender/Receiver roles.')
+param eventHubNamespaceId string = ''
+
 // Built-in: Key Vault Secrets User
 var roleSecretsUser = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
 // Built-in: Storage Blob Data Contributor
 var roleBlobContributor = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+// Built-in: Azure Event Hubs Data Sender
+var roleEhSender = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2b629674-e913-4c01-ae53-ef4638d8f975')
+// Built-in: Azure Event Hubs Data Receiver
+var roleEhReceiver = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a638d3c8-0f6e-4e09-a2b7-3e4440e0f4d5')
 
 // Placeholder used only if individual image params are not supplied (should not happen after first deploy).
 
@@ -289,6 +296,32 @@ resource classifierKvRole 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   properties: {
     roleDefinitionId: roleSecretsUser
     principalId: classifierJob.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Event Hubs role assignments.
+// job-ingestor: Sender on reddit-raw-events (publishes ingested posts)
+// job-extractor: Receiver on reddit-raw-events (consumes for extraction)
+// ---------------------------------------------------------------------------
+
+resource ingestionEhSenderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(eventHubNamespaceId)) {
+  name: guid(eventHubNamespaceId, ingestion.name, roleEhSender)
+  scope: resourceGroup()
+  properties: {
+    roleDefinitionId: roleEhSender
+    principalId: ingestion.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource extractorEhReceiverRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(eventHubNamespaceId)) {
+  name: guid(eventHubNamespaceId, extractorJob.name, roleEhReceiver)
+  scope: resourceGroup()
+  properties: {
+    roleDefinitionId: roleEhReceiver
+    principalId: extractorJob.identity.principalId
     principalType: 'ServicePrincipal'
   }
 }

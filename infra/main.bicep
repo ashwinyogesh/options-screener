@@ -113,6 +113,7 @@ module containerapps 'modules/containerapps.bicep' = {
     keyVaultUri: keyvault.outputs.keyVaultUri
     keyVaultId: keyvault.outputs.keyVaultId
     eventHubNamespaceFqdn: '${eventhubs.outputs.namespaceName}.servicebus.windows.net'
+    eventHubNamespaceId: eventhubs.outputs.namespaceId
     cosmosEndpoint: cosmos.outputs.accountEndpoint
     blobAccountName: storage.outputs.storageAccountName
     blobStorageId: storage.outputs.storageAccountId
