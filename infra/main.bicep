@@ -98,6 +98,9 @@ module containerapps 'modules/containerapps.bicep' = {
     nameSuffix: nameSuffix
     tags: tags
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
+    keyVaultUri: keyvault.outputs.keyVaultUri
+    eventHubNamespaceFqdn: '${eventhubs.outputs.namespaceName}.servicebus.windows.net'
+    cosmosEndpoint: cosmos.outputs.accountEndpoint
   }
 }
 
@@ -118,4 +121,6 @@ output eventHubsNamespace string = eventhubs.outputs.namespaceName
 output keyVaultName string = keyvault.outputs.keyVaultName
 output containerAppsEnvId string = containerapps.outputs.envId
 output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString
+output extractorJobPrincipalId string = containerapps.outputs.extractorJobPrincipalId
+output aggregatorJobPrincipalId string = containerapps.outputs.aggregatorJobPrincipalId
 output cosmosEndpoint string = cosmos.outputs.accountEndpoint

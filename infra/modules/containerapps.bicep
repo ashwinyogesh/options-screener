@@ -1,14 +1,17 @@
 // =============================================================================
-// Container Apps environment + ingestion app.
+// Container Apps environment + ingestion app + scheduled batch jobs.
 //
-// One Consumption-plan environment hosts the always-on `ca-ingestion` worker
-// plus all batch Container Apps Jobs (provisioned in their owning workflows).
+// One Consumption-plan environment hosts:
+//   ca-ingestion  — always-on ingestion worker
+//   job-extractor — scheduled every 5 min (EH → GPT-4o-mini → Cosmos signals)
+//   job-aggregator— scheduled every 15 min (Cosmos signals → ticker_timeline)
 //
-// The ingestion app is the only thing that runs continuously. Everything else
-// is a Job (scale-to-zero) for cost.
+// Jobs are provisioned here as stubs with a placeholder image; CI workflows
+// (narrative-extractor.yml / narrative-aggregator.yml) update the image on
+// every push to main.
 //
-// Image is pulled from ghcr.io. The pull credential lives in a separate
-// secret-named registry on the Container App (set by the deploy workflow).
+// Pull credentials for ghcr.io are patched in by the CI workflow via
+// `az containerapp job registry set`.
 // =============================================================================
 
 @description('Azure region.')
@@ -34,6 +37,12 @@ param eventHubNamespaceFqdn string = ''
 
 @description('Storage account name passed to workers as BLOB_ACCOUNT_NAME.')
 param blobAccountName string = ''
+
+@description('Cosmos DB account endpoint passed to extractor and aggregator workers as COSMOS_ENDPOINT.')
+param cosmosEndpoint string = ''
+
+// Placeholder image for jobs. CI deploy overwrites with the real ghcr.io image.
+var placeholderJobImage = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 
 var envName = 'cae-narrative-${nameSuffix}'
 
@@ -101,7 +110,83 @@ resource ingestion 'Microsoft.App/containerApps@2024-03-01' = {
   }
 }
 
+resource extractorJob 'Microsoft.App/jobs@2024-03-01' = {
+  name: 'job-extractor'
+  location: location
+  tags: tags
+  identity: { type: 'SystemAssigned' }
+  properties: {
+    environmentId: env.id
+    configuration: {
+      triggerType: 'Schedule'
+      replicaTimeout: 120
+      scheduleTriggerConfig: {
+        cronExpression: '*/5 * * * *'
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      registries: [] // CI workflow patches in ghcr.io credentials
+    }
+    template: {
+      containers: [
+        {
+          name: 'extractor'
+          image: placeholderJobImage
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          env: [
+            { name: 'KEYVAULT_URI',        value: keyVaultUri }
+            { name: 'EVENT_HUB_NAMESPACE', value: eventHubNamespaceFqdn }
+            { name: 'COSMOS_ENDPOINT',     value: cosmosEndpoint }
+            { name: 'LOG_LEVEL',           value: 'INFO' }
+          ]
+        }
+      ]
+    }
+  }
+}
+
+resource aggregatorJob 'Microsoft.App/jobs@2024-03-01' = {
+  name: 'job-aggregator'
+  location: location
+  tags: tags
+  identity: { type: 'SystemAssigned' }
+  properties: {
+    environmentId: env.id
+    configuration: {
+      triggerType: 'Schedule'
+      replicaTimeout: 120
+      scheduleTriggerConfig: {
+        cronExpression: '*/15 * * * *'
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      registries: [] // CI workflow patches in ghcr.io credentials
+    }
+    template: {
+      containers: [
+        {
+          name: 'aggregator'
+          image: placeholderJobImage
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          env: [
+            { name: 'COSMOS_ENDPOINT', value: cosmosEndpoint }
+            { name: 'LOG_LEVEL',       value: 'INFO' }
+          ]
+        }
+      ]
+    }
+  }
+}
+
 output envId string = env.id
 output envName string = env.name
 output ingestionAppName string = ingestion.name
 output ingestionPrincipalId string = ingestion.identity.principalId
+output extractorJobPrincipalId string = extractorJob.identity.principalId
+output aggregatorJobPrincipalId string = aggregatorJob.identity.principalId
