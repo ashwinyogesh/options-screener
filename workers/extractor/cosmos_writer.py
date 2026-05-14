@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from datetime import datetime, timezone
 
 from azure.cosmos import CosmosClient, PartitionKey
@@ -29,7 +28,7 @@ class CosmosWriter:
     )
     def write(self, signal: ExtractedSignal) -> None:
         doc = {
-            "id": str(uuid.uuid4()),
+            "id": f"{signal.post_id}_{signal.ticker}",
             "ticker": signal.ticker,
             "sentiment": signal.sentiment,
             "confidence": signal.confidence,
