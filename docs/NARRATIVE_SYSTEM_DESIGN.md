@@ -27,6 +27,7 @@ doc. If you want the infra provisioning, go to `infra/`.
 11. [Inter-component contracts](#11-inter-component-contracts)
 12. [Failure and recovery](#12-failure-and-recovery)
 13. [Cosmos DB schema reference](#13-cosmos-db-schema-reference)
+14. [End-user guide — reading the Narrative tab](#14-end-user-guide--reading-the-narrative-tab)
 
 ---
 
@@ -883,8 +884,203 @@ These are `null` until the classifier has processed at least one signal for this
 
 ---
 
+## 14. End-user guide — reading the Narrative tab
+
+The Narrative tab surfaces companies where Reddit discussion is in the **early
+to mid stages of a narrative lifecycle** (stages 1–3) with high-quality,
+researched attention — *before* institutional consensus forms. This section
+explains every element you see and how to act on it.
+
+### What the tab shows
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Narrative Intelligence                                                     │
+│  Reddit-driven attention & conviction — surfacing companies in stages 1–3  │
+│                                         [Ticker search]  [Updated 3 min ago]│
+├─────────────────────┬────────────────────────┬──────────────────────────────┤
+│  Top by ACS         │  Emerging (stages 1–3) │  Alerts                      │
+│  Full ranked list   │  Rising attention only │  ACS threshold crossings     │
+│  (all stages)       │  sorted by decay ACS   │                              │
+└─────────────────────┴────────────────────────┴──────────────────────────────┘
+         │  click any row
+         ▼
+┌───────────────────┐
+│  Detail panel     │  ACS breakdown, sparkline, tier mix, conviction ratios  │
+└───────────────────┘
+```
+
+**Top by ACS** — all tracked tickers ranked by their current ACS. Use this when
+you want the broadest view regardless of stage.
+
+**Emerging (stages 1–3)** — filtered to tickers in the target lifecycle window
+and sorted by `decay_acs` (recency-weighted). This is the primary signal list
+for finding early opportunities.
+
+**Alerts** — fired when ACS crosses a threshold or a stage transition is
+detected. Each alert shows the ticker, type, and time.
+
+---
+
+### The table columns
+
+| Column | What it shows | How to read it |
+|---|---|---|
+| **Ticker** | Stock symbol | Click to open the detail panel |
+| **ACS** | Attention Conviction Score (0–100). Shown as `score (lo–hi)` where the range is the 95% bootstrap CI. | Higher = stronger combined attention quality + conviction. **Treat the CI band as a reliability signal**: a wide band (e.g. `42 (28–61)`) means fewer data days; a narrow band (e.g. `55 (52–58)`) means stable signal. |
+| **Decay** | ACS after a time-decay penalty (λ=0.07/day, half-life ≈10 days). | If Decay is much lower than ACS, the most recent scoring run is old — treat the score as stale. |
+| **Stage** | Lifecycle stage 1–6 as a colour badge. Hover for the description. | 🟢 Stages 2–3 are the target window. 🟡 Stage 4 = late, partial signal. 🔴 Stages 5–6 = avoid. |
+| **Components** | Five pills labelled A–E, each showing its sub-score. | See the component table below. A zero pill (greyed out) is a drag on the total. |
+| **Signal** | Dominant conviction signal extracted by the classifier (e.g. `"researched_bull"`). | The single most prevalent `conviction_state` across recent posts. |
+| **Flags** | Active haircuts that reduced the ACS. | See the flags table below. A ticker with no flags hit its score cleanly. |
+
+**Sort any column** by clicking its header. ACS descending is the default.
+
+---
+
+### The ACS components (A–E)
+
+ACS = A + B + C + D + E, max 100 (E is 0 in the current release).
+
+| Component | Max | What it measures | When it is high |
+|---|---|---|---|
+| **A** — Attention persistence | 25 | Decay-weighted mention density over 14 days | Discussion has been sustained and recent, not a one-day spike |
+| **B** — Contributor quality | 20 | Author breadth relative to volume, penalised by Gini concentration | Many distinct authors posting, not one person flooding | 
+| **C** — Narrative strength | 20 | Lifecycle stage × stage confidence (from HDBSCAN cluster coherence) | Narratives have coalesced into a coherent thesis cluster |
+| **D** — Thesis quality | 20 | Researched bull/bear ratios + DD intensity (conviction_dd_norm) | Significant fraction of posts are analytical, not emotional |
+| **E** — Market confirmation | 15 | Price / options flow confirmation *(not yet implemented — always 0)* | — |
+
+A strong ACS score is one where **A, B, and D are all meaningful** — sustained
+attention + diverse authors + analytical content. A score driven only by A
+suggests volume without conviction quality.
+
+---
+
+### Lifecycle stage colour guide
+
+| Badge | Stage | Meaning | Action |
+|---|---|---|---|
+| ⬜ `—` | 0 | Detector hasn't run yet for this ticker | Wait for next hourly detector run |
+| ⬛ `1` | Pre-narrative | Isolated, early mentions — low persistence | Monitor; no action yet |
+| 🟢 `2` | Forming | Recurring across subreddits, fundamental discussion emerging | **Primary target window** — investigate further |
+| 🟢 `3` | Expanding | Contributor base growing rapidly week-over-week | **Still in target window** — thesis gaining traction |
+| 🟡 `4` | Institutional | Institutional-watch signals appearing — late entry | Reduced upside; risk/reward worse |
+| 🟠 `5` | Consensus | Mainstream coverage, emotional buying | Saturation approaching — avoid new entries |
+| 🔴 `6` | Exhaustion | Momentum decay, exit signals in posts | Avoid or exit |
+
+The **stage confidence** (shown in the badge tooltip, e.g. `conf 84%`) is how
+certain the HDBSCAN cluster analysis is. Low confidence at stage 2–3 means
+the narrative is still fragmented — treat it as a weaker signal.
+
+---
+
+### Flags (haircuts that reduced ACS)
+
+Flags appear in the last column and on the detail panel. They indicate the
+ACS was reduced before display:
+
+| Flag | Haircut | What it means | What to do |
+|---|---|---|---|
+| `gini_high` | ×0.6 | Gini > 0.65 — one or a few authors dominate the discussion | Possible coordinated pumping; check the original posts before acting |
+| `decelerating_3d` | ×0.8 | Mention rate has decelerated for 3 consecutive days | Momentum is fading; reconsider timing |
+| `late_stage` | ×0.5 | Lifecycle stage > 3 | Narrative is past the target entry window |
+| `small_cap` | ×0.85 | Market cap < $100M | Higher manipulation risk; apply your own liquidity filter |
+
+> **A ticker with no flags** means the score is unpenalised — the signal passed
+> all four quality gates cleanly.
+
+---
+
+### Reading the detail panel
+
+Click any row (or type a ticker in the search box) to open the detail panel.
+
+```
+┌──────────────────────────────────────────────────┐
+│  NVDA  [Stage 2]                               × │
+│  ACS  57.3  (CI 53–62)                           │
+│  Dominant signal  researched_bull                │
+│                                                  │
+│  14-day mentions  ▁▂▃▅▇▆▄▇  142 · 38 authors    │
+│  Tier mix         ████████▓▓░░                   │
+│  Gini (14d)       0.31                           │
+│  Contributor growth (7d)  +18%                   │
+│                                                  │
+│  Conviction                                      │
+│  Researched bull    52%                          │
+│  Researched bear     6%                          │
+│  Emotional bull     21%                          │
+│  DD intensity (norm)  0.74                       │
+│  Classified posts    89                          │
+└──────────────────────────────────────────────────┘
+```
+
+**Sparkline** — 14-day daily mention count. A rising right-hand edge with
+sustained volume (not a single spike) is the shape you want.
+
+**Tier mix bar** — green = tier-1 (investing, stocks, fundamentals-focused);
+yellow = tier-2 (WSB, options, retail); grey = tier-3 (sector-specific).
+A bar that is mostly green means the discussion is analytical; mostly yellow
+means it is hype-driven.
+
+**Gini (14d)** — concentration of posting. Below 0.40 is healthy (many authors
+contributing roughly equally). Above 0.65 triggers the `gini_high` haircut.
+
+**Contributor growth (7d)** — week-over-week change in unique authors. ≥30%
+is the stage-3 threshold (rapidly expanding community). Negative growth with
+high ACS means volume is holding but the contributor base is contracting —
+a warning sign.
+
+**Conviction section** — derived from GPT-4o-mini classification of each post:
+- *Researched bull/bear* — analytical posts; the signal you want
+- *Emotional bull* — hype posts; drives the stage-5/6 saturation rules
+- *DD intensity (norm)* — normalised weighted conviction score (−0.5 to 1.0);
+  above 0.5 is a strong analytical positive signal
+- *Classified posts* — how many posts have been processed; low counts
+  (< 10) mean conviction ratios are unreliable
+
+---
+
+### Practical workflow
+
+1. **Open the Emerging tab** — filter is already set to stages 1–3.
+2. **Sort by ACS descending** (default). Look for tickers where A ≥ 15 and D ≥ 10.
+3. **Check the stage badge.** Prefer stage 2 over stage 3 (earlier entry).
+   Hover the badge to see stage confidence — skip if < 50%.
+4. **Verify no red flags.** `gini_high` is the most important to check manually;
+   it does not mean the signal is fake, but it warrants a look at the source
+   posts.
+5. **Open the detail panel.** Check:
+   - Sparkline shape: rising or steady, not a one-day spike
+   - Tier mix: majority green (tier-1)
+   - Researched bull ratio > emotional bull ratio
+   - Contributor growth positive
+6. **Cross-reference with the Options Screener CSP/CC tabs** for the same ticker
+   to see if current IV and strike placement make a position sensible.
+
+---
+
+### What the platform does NOT do
+
+- **It does not predict price.** ACS measures narrative attention quality, not
+  stock performance. A high ACS means the signal is analytically grounded and
+  persistent — it does not guarantee price movement.
+- **Component E (market confirmation) is 0.** Until Phase 6.1 ships, there is
+  no options flow or price momentum confirmation. A high ACS with E=0 means
+  the market has not yet confirmed the narrative — which is intentional
+  (early entry) but also means more risk.
+- **Data is delayed by ~5 minutes.** The ingestion → extraction → scoring
+  pipeline runs on crons. The "Updated X min ago" timestamp in the header
+  shows the age of the last scorer run.
+- **Only Reddit is sourced.** Earnings calls, SEC filings, and news are not
+  ingested. Use the Options Screener's other tabs and your own research for
+  those signals.
+
+---
+
 ## Change log
 
+- **2026-05-15** — Added §14 End-user guide (reading the Narrative tab).
 - **2026-05-15** — Added §13 Cosmos DB schema reference (all fields, all writers, rationale).
 - **2026-05-15** — Document created. Covers Phase 1–6 architecture as deployed.
   Component E (market confirmation) is deferred to Phase 6.1 per
