@@ -45,7 +45,7 @@ _FINANCIAL_TERMS: frozenset[str] = frozenset({
     "buyback", "dividend", "debt", "fcf", "free cash", "moat", "competitive",
     "market share", "gross margin", "operating", "capex", "sector", "index",
     "analyst", "upgrade", "downgrade", "target price", "pt ", "beat", "miss",
-    "guidance", "outlook", "macro", "fed", "rate", "inflation", "yield",
+    "outlook", "macro", "fed", "rate", "inflation", "yield",
 })
 
 # Flair or title keywords that mark a DD (due diligence) post (§2.4).
@@ -265,6 +265,41 @@ def compute_tier_pcts(subreddits: Sequence[str | None]) -> tuple[float, float, f
     return t1 / known, t2 / known, t3 / known
 
 
+def compute_contributor_growth(
+    authors_by_day: dict[date, set[str]],
+    reference_date: date,
+) -> float:
+    """Return relative growth in unique contributors over the last 7 days
+    versus the prior 7 days.
+
+    growth = (unique_authors_last_7d - unique_authors_prior_7d) / unique_authors_prior_7d
+
+    Detector stage 3 (expanding awareness) fires when this is ≥ 0.30, i.e.
+    the contributor base grew by ≥30% week-over-week.
+
+    Zero-safe: if the prior 7d window has zero contributors, returns 0.0
+    when the current window is also empty, or 1.0 (capped, "new narrative")
+    when only the current window has authors. Callers consuming this for
+    stage logic only care about the >= 0.30 threshold so the exact cap
+    doesn't matter as long as it crosses.
+    """
+    last_window_start = reference_date - timedelta(days=_WINDOW_7D - 1)
+    prior_window_start = reference_date - timedelta(days=2 * _WINDOW_7D - 1)
+    prior_window_end = reference_date - timedelta(days=_WINDOW_7D)
+
+    last_authors: set[str] = set()
+    prior_authors: set[str] = set()
+    for day, authors in authors_by_day.items():
+        if last_window_start <= day <= reference_date:
+            last_authors.update(authors)
+        elif prior_window_start <= day <= prior_window_end:
+            prior_authors.update(authors)
+
+    if not prior_authors:
+        return 1.0 if last_authors else 0.0
+    return (len(last_authors) - len(prior_authors)) / len(prior_authors)
+
+
 # ---------------------------------------------------------------------------
 # §2.5 — Composite attention quality score
 # ---------------------------------------------------------------------------
@@ -425,6 +460,7 @@ def build_snapshot(
         for a in all_14d_authors
     ]
     gini_14d = compute_gini(mention_counts_14d)
+    contributor_growth_7d = compute_contributor_growth(authors_by_day, bucket_date)
 
     # --- §2.4 Depth ---
     ft_density = compute_financial_term_density(bodies_14d)
@@ -461,6 +497,7 @@ def build_snapshot(
         acceleration_7d=accel,
         unique_authors_14d=unique_authors_14d,
         gini_14d=gini_14d,
+        contributor_count_growth_7d=contributor_growth_7d,
         avg_body_len=avg_body_len,
         dd_post_ratio=dd_ratio,
         financial_term_density=ft_density,

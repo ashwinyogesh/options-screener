@@ -185,7 +185,8 @@ def assign_stage(
     gini_14d: float = timeline.get("gini_14d") or 0.0
     dd_post_ratio: float = timeline.get("dd_post_ratio") or 0.0
     financial_term_density: float = timeline.get("financial_term_density") or 0.0
-    # contributor_count_growth_7d: not yet stored by aggregator; default 0.0
+    # contributor_count_growth_7d: week-over-week change in unique contributors,
+    # written by the aggregator (workers/aggregator/attention.compute_contributor_growth).
     contributor_growth: float = timeline.get("contributor_count_growth_7d") or 0.0
     emotional_bull_ratio: float = timeline.get("conviction_emotional_bull_ratio") or 0.0
 

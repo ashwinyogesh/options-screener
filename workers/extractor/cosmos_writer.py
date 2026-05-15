@@ -35,6 +35,7 @@ class CosmosWriter:
             "rationale": signal.rationale,
             "postId": signal.post_id,
             "subreddit": signal.subreddit,
+            "flair": signal.flair,
             "authorHash": signal.author_hash,
             "createdUtc": signal.created_utc,
             "source": signal.source,

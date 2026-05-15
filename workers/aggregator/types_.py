@@ -77,6 +77,9 @@ class TickerTimelineSnapshot:
     # --- §2.3 Contributor diversity ---
     unique_authors_14d: int = 0        # distinct author_hash values in 14d window
     gini_14d: float = 0.0              # Gini coefficient [0,1]; >0.65 = concentration flag
+    # Week-over-week relative growth in distinct contributors.
+    # Detector stage 3 (expanding awareness) fires when this is >= 0.30.
+    contributor_count_growth_7d: float = 0.0
 
     # --- §2.4 Discussion depth ---
     avg_body_len: float = 0.0          # average body length of signals in 14d window

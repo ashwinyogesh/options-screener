@@ -54,6 +54,9 @@ class ExtractedSignal:
     author_hash: str
     created_utc: int
     source: str
+    # Reddit post flair (e.g. "DD", "News", "Discussion"). Forwarded from the
+    # ingestion event verbatim so aggregator dd_post_ratio can fire on real data.
+    flair: str | None = None
 
 
 class Extractor:
@@ -95,6 +98,7 @@ class Extractor:
                     author_hash=event.get("author_hash", ""),
                     created_utc=int(event.get("created_utc", 0)),
                     source=event.get("source", "reddit_json"),
+                    flair=event.get("flair"),
                 ))
             except (KeyError, ValueError, TypeError):
                 logger.warning("Malformed signal item from OpenAI: %s", item)
