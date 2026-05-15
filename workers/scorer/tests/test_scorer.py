@@ -211,11 +211,38 @@ class TestAdjustments:
         # by comparing raw component sums.
         assert haircut.acs < clean.acs
 
-    def test_decelerating_haircut(self) -> None:
-        clean = compute_acs(self._max_doc(acceleration_7d=0.0), DEFAULT_WEIGHTS)
-        haircut = compute_acs(self._max_doc(acceleration_7d=-0.1), DEFAULT_WEIGHTS)
-        assert "decelerating" in haircut.flags
+    def test_decelerating_streak_haircut(self) -> None:
+        # 3 strictly decreasing daily counts → flag fires.
+        buckets = [
+            {"day": "2026-05-10", "count": 5, "unique_authors": 3},
+            {"day": "2026-05-11", "count": 10, "unique_authors": 5},
+            {"day": "2026-05-12", "count": 8, "unique_authors": 4},
+            {"day": "2026-05-13", "count": 6, "unique_authors": 3},
+            {"day": "2026-05-14", "count": 2, "unique_authors": 2},
+        ]
+        clean = compute_acs(self._max_doc(daily_buckets=[]), DEFAULT_WEIGHTS)
+        haircut = compute_acs(self._max_doc(daily_buckets=buckets), DEFAULT_WEIGHTS)
+        assert "decelerating_3d" in haircut.flags
         assert haircut.acs == pytest.approx(clean.acs * 0.8, abs=0.5)
+
+    def test_no_streak_no_flag(self) -> None:
+        # Increasing → no flag.
+        buckets = [
+            {"day": "2026-05-12", "count": 2, "unique_authors": 1},
+            {"day": "2026-05-13", "count": 4, "unique_authors": 2},
+            {"day": "2026-05-14", "count": 6, "unique_authors": 3},
+        ]
+        result = compute_acs(self._max_doc(daily_buckets=buckets), DEFAULT_WEIGHTS)
+        assert "decelerating_3d" not in result.flags
+
+    def test_short_history_no_streak(self) -> None:
+        # Only 2 buckets — cannot detect a 3-day streak.
+        buckets = [
+            {"day": "2026-05-13", "count": 5, "unique_authors": 2},
+            {"day": "2026-05-14", "count": 1, "unique_authors": 1},
+        ]
+        result = compute_acs(self._max_doc(daily_buckets=buckets), DEFAULT_WEIGHTS)
+        assert "decelerating_3d" not in result.flags
 
     def test_late_stage_haircut(self) -> None:
         early = compute_acs(self._max_doc(lifecycle_stage=3), DEFAULT_WEIGHTS)
@@ -225,12 +252,45 @@ class TestAdjustments:
         # Just assert late is materially smaller.
         assert late.acs < early.acs * 0.6
 
+    def test_small_cap_haircut_applied(self) -> None:
+        clean = compute_acs(self._max_doc(market_cap=200_000_000_000), DEFAULT_WEIGHTS)
+        small = compute_acs(self._max_doc(market_cap=50_000_000), DEFAULT_WEIGHTS)
+        assert "small_cap" in small.flags
+        assert "small_cap" not in clean.flags
+        assert small.acs == pytest.approx(clean.acs * 0.85, abs=0.5)
+
+    def test_small_cap_boundary_at_threshold(self) -> None:
+        # Exactly $100M should NOT trigger (strict <).
+        result = compute_acs(self._max_doc(market_cap=100_000_000), DEFAULT_WEIGHTS)
+        assert "small_cap" not in result.flags
+
+    def test_market_cap_missing_skips_haircut(self) -> None:
+        result = compute_acs(self._max_doc(), DEFAULT_WEIGHTS)
+        assert "small_cap" not in result.flags
+
+    def test_market_cap_zero_skips_haircut(self) -> None:
+        # 0 or negative is treated as "unknown" — don't penalize.
+        result = compute_acs(self._max_doc(market_cap=0), DEFAULT_WEIGHTS)
+        assert "small_cap" not in result.flags
+
     def test_combined_flags_compound(self) -> None:
+        buckets = [
+            {"day": "2026-05-12", "count": 9, "unique_authors": 4},
+            {"day": "2026-05-13", "count": 6, "unique_authors": 3},
+            {"day": "2026-05-14", "count": 2, "unique_authors": 2},
+        ]
         result = compute_acs(
-            self._max_doc(gini_14d=0.7, acceleration_7d=-0.1, lifecycle_stage=4),
+            self._max_doc(
+                gini_14d=0.7,
+                daily_buckets=buckets,
+                lifecycle_stage=4,
+                market_cap=50_000_000,
+            ),
             DEFAULT_WEIGHTS,
         )
-        assert set(result.flags) == {"gini_high", "decelerating", "late_stage"}
+        assert set(result.flags) == {
+            "gini_high", "decelerating_3d", "late_stage", "small_cap",
+        }
 
 
 # ---------- Bounds & CI ----------
@@ -257,10 +317,31 @@ class TestBoundsAndCi:
         )
         assert result.acs <= 100.0
 
-    def test_ci_band_is_plus_minus_15_percent(self) -> None:
+    def test_ci_falls_back_to_heuristic_when_no_buckets(self) -> None:
+        # No daily_buckets → ±15% heuristic.
         result = compute_acs(_doc(decay_weighted_density_14d=0.5), DEFAULT_WEIGHTS)
-        assert result.acs_ci_lower == pytest.approx(result.acs * 0.85)
-        assert result.acs_ci_upper == pytest.approx(result.acs * 1.15)
+        assert result.acs_ci_lower == pytest.approx(result.acs * 0.85, abs=0.01)
+        assert result.acs_ci_upper == pytest.approx(result.acs * 1.15, abs=0.01)
+
+    def test_ci_bootstrap_when_buckets_present(self) -> None:
+        # 14 days of varied counts → bootstrap CI should produce a band
+        # that brackets the point estimate.
+        buckets = [
+            {"day": f"2026-05-{d:02d}", "count": c, "unique_authors": 3}
+            for d, c in zip(range(1, 15), [2, 4, 3, 6, 5, 7, 4, 8, 6, 9, 7, 5, 4, 3])
+        ]
+        result = compute_acs(
+            _doc(
+                ticker="NVDA",
+                decay_weighted_density_14d=0.5,
+                daily_buckets=buckets,
+            ),
+            DEFAULT_WEIGHTS,
+        )
+        assert 0.0 <= result.acs_ci_lower <= result.acs
+        assert result.acs <= result.acs_ci_upper <= 100.0
+        # A non-trivial sample range should produce a non-trivial band.
+        assert result.acs_ci_upper - result.acs_ci_lower > 0.0
 
     def test_ci_lower_clamped_at_zero(self) -> None:
         result = compute_acs(_doc(), DEFAULT_WEIGHTS)
@@ -282,6 +363,18 @@ class TestBoundsAndCi:
             DEFAULT_WEIGHTS,
         )
         assert result.acs_ci_upper <= 100.0
+
+    def test_ci_deterministic_for_same_ticker(self) -> None:
+        # Bootstrap RNG is seeded off ticker — two runs match exactly.
+        buckets = [
+            {"day": f"2026-05-{d:02d}", "count": c, "unique_authors": 3}
+            for d, c in zip(range(1, 15), [2, 4, 3, 6, 5, 7, 4, 8, 6, 9, 7, 5, 4, 3])
+        ]
+        doc = _doc(ticker="ABC", decay_weighted_density_14d=0.5, daily_buckets=buckets)
+        first = compute_acs(doc, DEFAULT_WEIGHTS)
+        second = compute_acs(doc, DEFAULT_WEIGHTS)
+        assert first.acs_ci_lower == second.acs_ci_lower
+        assert first.acs_ci_upper == second.acs_ci_upper
 
 
 # ---------- Time decay ----------

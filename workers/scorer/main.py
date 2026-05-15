@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from config import load_from_env
 from cosmos_client import ScorerCosmosClient
 from kv_secrets import fetch_secrets
+from market_cap_lookup import get_market_cap
 from scorer import compute_acs
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,11 @@ def main() -> None:
     for doc in docs:
         ticker = doc.get("ticker", "?")
         try:
+            # §5.3 small-cap haircut requires market_cap; fetch once per ticker
+            # (cached per run). Failures are non-fatal — the haircut is simply
+            # skipped for tickers where yfinance is unreachable.
+            if "market_cap" not in doc:
+                doc["market_cap"] = get_market_cap(ticker)
             result = compute_acs(doc, secrets.weights)
             cosmos.write_acs(
                 doc,

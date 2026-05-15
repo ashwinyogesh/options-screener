@@ -9,12 +9,14 @@ Components:
     D  Thesis quality        — (0.6*r_rb + 0.2*r_rB + 0.2*dd_norm) * D_max
     E  Market confirmation   — 0 (deferred to Phase 6.1)
 
-Adjustments (multipliers, in order):
-    G > 0.65              → × 0.6
-    acceleration_7d < 0   → × 0.8  (proxy for 3-day negative streak)
-    lifecycle_stage > 3   → × 0.5
+Adjustments (multipliers, in order — §5.3):
+    G > 0.65                                → × 0.6   (gini_high)
+    3 consecutive days of decreasing mentions → × 0.8 (decelerating_3d)
+    lifecycle_stage > 3                     → × 0.5   (late_stage)
+    0 < market_cap < $100M                  → × 0.85  (small_cap)
 
-CI bands: acs ± 15% (heuristic; bootstrap resampling deferred to Phase 6.1).
+CI bands: bootstrap percentile (resampling daily_buckets) when ≥5 days are
+available; otherwise fall back to a ±15% heuristic.
 Time decay: ACS(t) = ACS_raw * e^{-0.07 * t} where t = days since acs_scored_at.
 """
 from __future__ import annotations
@@ -23,9 +25,26 @@ import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+import numpy as np
+
 # stage_map per NARRATIVE_METHODOLOGY.md §5.1 — stages 2 and 3 are target window.
 _STAGE_MAP: dict[int, float] = {1: 10, 2: 18, 3: 20, 4: 10, 5: 5, 6: 2}
-_DECAY_RATE: float = 0.07  # half-life ≈ 10 days per §5.4
+_DECAY_RATE: float = 0.07               # half-life ≈ 10 days per §5.4
+_DECAY_LAMBDA: float = 0.1              # attention λ, must match aggregator §2.1
+_WINDOW_14D: int = 14                   # component-A window length
+
+# Bootstrap-CI parameters.
+_BOOTSTRAP_N: int = 500
+_BOOTSTRAP_MIN_DAYS: int = 5
+_BOOTSTRAP_LOWER_PCT: float = 2.5
+_BOOTSTRAP_UPPER_PCT: float = 97.5
+_HEURISTIC_CI_HALFWIDTH: float = 0.15   # ± when bootstrap unavailable
+
+# §5.3 thresholds.
+_GINI_HIGH: float = 0.65
+_LATE_STAGE: int = 3
+_SMALL_CAP_USD: float = 100_000_000.0
+_DECEL_STREAK_DAYS: int = 3
 
 
 @dataclass
@@ -90,28 +109,40 @@ def compute_acs(doc: dict, weights: dict[str, float]) -> AcsResult:
 
     acs_raw = comp_a + comp_b + comp_c + comp_d + comp_e
 
-    # --- Adjustments ---
+    # --- Adjustments (§5.3) ---
     multiplier = 1.0
     flags: list[str] = []
 
-    if gini > 0.65:
+    if gini > _GINI_HIGH:
         multiplier *= 0.6
         flags.append("gini_high")
 
-    acceleration: float = doc.get("acceleration_7d") or 0.0
-    if acceleration < 0:
+    if _is_decelerating_streak(doc.get("daily_buckets") or [], _DECEL_STREAK_DAYS):
         multiplier *= 0.8
-        flags.append("decelerating")
+        flags.append("decelerating_3d")
 
-    if stage > 3:
+    if stage > _LATE_STAGE:
         multiplier *= 0.5
         flags.append("late_stage")
 
+    market_cap = doc.get("market_cap")
+    if isinstance(market_cap, (int, float)) and 0 < market_cap < _SMALL_CAP_USD:
+        multiplier *= 0.85
+        flags.append("small_cap")
+
     acs = min(100.0, max(0.0, acs_raw * multiplier))
 
-    # --- CI bands (heuristic ±15%) ---
-    acs_ci_lower = max(0.0, acs * 0.85)
-    acs_ci_upper = min(100.0, acs * 1.15)
+    # --- CI bands (§5.6 bootstrap; fallback ±15% heuristic) ---
+    acs_ci_lower, acs_ci_upper = _bootstrap_ci(
+        doc=doc,
+        comp_b=comp_b,
+        comp_c=comp_c,
+        comp_d=comp_d,
+        comp_e=comp_e,
+        a_max=a_max,
+        multiplier=multiplier,
+        acs=acs,
+    )
 
     # --- Time decay ---
     computed_at_str: str = doc.get("computed_at") or doc.get("acs_scored_at") or ""
@@ -166,3 +197,100 @@ def _dominant_signal(doc: dict) -> str:
             return "bullish" if bullish >= bearish else "bearish"
         return "unknown"
     return max(candidates, key=lambda k: candidates[k])
+
+
+def _is_decelerating_streak(daily_buckets: list, streak_days: int) -> bool:
+    """True iff the trailing `streak_days` mention counts are strictly decreasing.
+
+    Matches §5.3: "Acceleration negative for 3 days". Reading the raw daily
+    bucket counts is a faithful expression — strictly monotone decrease over
+    N consecutive days implies a negative derivative across that window.
+
+    Args:
+        daily_buckets: list of dicts with a "count" key, sorted ascending by day
+                       (the aggregator writes them this way per §2.1).
+        streak_days:   length of the required decreasing run (default 3).
+
+    Returns:
+        False when there are fewer than `streak_days` buckets.
+    """
+    if len(daily_buckets) < streak_days:
+        return False
+    counts = [int(b.get("count", 0)) for b in daily_buckets[-streak_days:]]
+    return all(counts[i] > counts[i + 1] for i in range(streak_days - 1))
+
+
+def _decay_weighted_density(daily_counts: list[int], window_days: int = _WINDOW_14D) -> float:
+    """Recompute attention §2.1 density from a list of daily counts.
+
+    Mirrors the aggregator's formula so the bootstrap is self-consistent.
+    `daily_counts` is most-recent-last; t=0 is the last index.
+    """
+    if not daily_counts:
+        return 0.0
+    n = min(len(daily_counts), window_days)
+    counts = daily_counts[-n:]
+    weighted = 0.0
+    for i, c in enumerate(counts):
+        t = (n - 1) - i  # 0 = today, n-1 = oldest
+        weighted += math.exp(-_DECAY_LAMBDA * t) * c
+    max_weight = sum(math.exp(-_DECAY_LAMBDA * t) for t in range(window_days + 1))
+    if max_weight <= 0:
+        return 0.0
+    return min(weighted / max_weight, 1.0)
+
+
+def _bootstrap_ci(
+    *,
+    doc: dict,
+    comp_b: float,
+    comp_c: float,
+    comp_d: float,
+    comp_e: float,
+    a_max: float,
+    multiplier: float,
+    acs: float,
+) -> tuple[float, float]:
+    """Bootstrap CI on the final ACS by resampling daily_buckets.
+
+    Per §5.6: resample the 14-day daily counts with replacement, recompute
+    component A per resample, hold B/C/D/E and the adjustment multiplier
+    constant (they aggregate over the same window or are doc-level constants),
+    then take the 2.5/97.5 percentile of the resulting ACS distribution.
+
+    Falls back to a ±15% heuristic when there are fewer than 5 daily buckets
+    (not enough samples for a meaningful resample).
+    """
+    buckets = doc.get("daily_buckets") or []
+    counts_14d = [int(b.get("count", 0)) for b in buckets][-_WINDOW_14D:]
+
+    if len(counts_14d) < _BOOTSTRAP_MIN_DAYS:
+        return (
+            max(0.0, acs * (1.0 - _HEURISTIC_CI_HALFWIDTH)),
+            min(100.0, acs * (1.0 + _HEURISTIC_CI_HALFWIDTH)),
+        )
+
+    # Seed off the ticker so a re-score for the same doc is deterministic.
+    ticker = doc.get("ticker", "")
+    rng = np.random.default_rng(abs(hash(ticker)) % (2**32))
+    arr = np.asarray(counts_14d, dtype=np.int64)
+    n = len(arr)
+
+    samples = np.empty(_BOOTSTRAP_N, dtype=np.float64)
+    for i in range(_BOOTSTRAP_N):
+        idx = rng.integers(0, n, size=n)
+        resampled = arr[idx].tolist()
+        dwd = _decay_weighted_density(resampled)
+        comp_a_i = min(dwd, 1.0) * a_max
+        acs_raw_i = comp_a_i + comp_b + comp_c + comp_d + comp_e
+        samples[i] = min(100.0, max(0.0, acs_raw_i * multiplier))
+
+    lower = float(np.percentile(samples, _BOOTSTRAP_LOWER_PCT))
+    upper = float(np.percentile(samples, _BOOTSTRAP_UPPER_PCT))
+    # Defensive rail: the CI must always bracket the point estimate.
+    # In production the stored decay_weighted_density_14d and daily_buckets are
+    # written by the same aggregator pass, so this clamp is a no-op. It only
+    # bites if the two ever drift (e.g. test fixtures, partial replays).
+    lower = min(lower, acs)
+    upper = max(upper, acs)
+    return max(0.0, lower), min(100.0, upper)

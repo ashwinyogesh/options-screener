@@ -119,9 +119,41 @@ local-runnable harness. Decision:
 
 ## Validation
 
-- `pytest workers/scorer/tests backend/tests/unit/test_narrative_read_service.py backend/tests/unit/test_backtest_narrative.py` — 66 passed.
+- `pytest workers/scorer/tests backend/tests/unit/test_narrative_read_service.py backend/tests/unit/test_backtest_narrative.py` — 74 passed.
 - `npm run build` — clean.
 - `python scripts/backtest_narrative.py --input backend/tests/fixtures/narrative/timeline_sample.jsonl --horizon 30` — runs end-to-end against yfinance with a synthetic 12-pair fixture (FAIL is expected from toy data; criterion will be re-checked against the live 90-day window once Cosmos history fills out).
+
+## Addendum (2026-05-14b) — §5 audit fixes
+
+A post-implementation audit against [NARRATIVE_METHODOLOGY.md §5.3 / §5.6](../NARRATIVE_METHODOLOGY.md) surfaced three gaps that have now been closed:
+
+1. **Small-cap haircut (§5.3)** — `market_cap < $100M → ×0.85` was in the
+   methodology but missing from the scorer. The aggregator does not persist
+   `market_cap` on `ticker_timeline`, so the scorer worker now performs a
+   per-ticker yfinance lookup (cached in-process per run) via
+   [workers/scorer/market_cap_lookup.py](../../workers/scorer/market_cap_lookup.py).
+   Lookup failures are non-fatal: the haircut is silently skipped for that
+   ticker rather than failing the run. `yfinance==0.2.65` added to the scorer
+   image only.
+2. **Decelerating-streak detection (§5.3)** — the original implementation
+   proxied "acceleration negative for 3 days" with `acceleration_7d < 0`. That
+   has been replaced with the literal test: read the trailing three entries
+   from `daily_buckets` and require strict monotonic decrease in `count`. The
+   flag was renamed from `decelerating` to `decelerating_3d` so the
+   methodology and the emitted label match.
+3. **Bootstrap CI (§5.6)** — the heuristic ±15% CI is replaced by a bootstrap
+   over the 14-day `daily_buckets`: resample with replacement (n=500), reseeded
+   off the ticker for determinism, recompute component A per resample, hold
+   B/C/D/E and the adjustment multiplier fixed (they aggregate over the same
+   window or are doc-level constants), and take the 2.5 / 97.5 percentiles of
+   the resulting ACS distribution. If fewer than 5 daily buckets are available
+   the function falls back to the heuristic so cold-start tickers still get a
+   band. A defensive clamp guarantees `lower ≤ acs ≤ upper` for cases where
+   the stored density and `daily_buckets` drift apart (test fixtures, partial
+   replays).
+
+Net effect: the scorer is now methodology-complete except for component E,
+which remains deferred per the original ADR.
 
 ## References
 

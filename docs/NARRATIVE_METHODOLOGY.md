@@ -406,6 +406,14 @@ Key Vault. Images via ghcr.io.
 
 ## Change log
 
+- **2026-05-14b** — Scorer brought into full §5 compliance: small-cap haircut
+  (`market_cap < $100M × 0.85`) wired with a yfinance lookup in the scorer
+  worker; the `acceleration_7d < 0` proxy replaced by a true 3-day decreasing
+  mention-count streak read from `daily_buckets`; the ±15% heuristic CI
+  replaced by a bootstrap (n=500, seeded off ticker) over the same
+  `daily_buckets`, falling back to the heuristic when fewer than 5 days are
+  available. Flag rename: `decelerating` → `decelerating_3d`; new flag
+  `small_cap`. See [ADR-0019](adr/0019-narrative-phase6-scorer.md).
 - **2026-05-14** — Phase 6 closed out: `job-acs-scorer` writing ACS, CI bands,
   decay_acs, components, and flags onto `ticker_timeline` every 15 min;
   FastAPI `/api/narrative/*` routes serve directly from Cosmos (no Redis,
