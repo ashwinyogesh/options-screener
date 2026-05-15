@@ -20,7 +20,7 @@ interface ColumnDef {
 
 const COLUMNS: ColumnDef[] = [
   { key: 'ticker', label: 'Ticker' },
-  { key: 'acs', label: 'ACS', title: 'Attention Conviction Score with 95% bootstrap CI', align: 'right' },
+  { key: 'acs', label: 'ACS', title: 'Attention Conviction Score with 95% bootstrap CI', align: 'center' },
   { key: 'decay_acs', label: 'Decay', title: 'Time-decayed ACS (λ=0.07/day, half-life ≈10d)', align: 'right' },
   { key: 'stage', label: 'Stage', title: 'Lifecycle stage 1–6 (methodology §4)', align: 'center' },
   {
@@ -90,7 +90,8 @@ export function NarrativeTickerTable({ rows, emptyMessage, onSelect }: Narrative
   }
 
   return (
-    <table className="narrative-table">
+    <div className="narrative-table-wrap">
+      <table className="narrative-table">
       <thead>
         <tr>
           {COLUMNS.map((col) => {
@@ -131,7 +132,7 @@ export function NarrativeTickerTable({ rows, emptyMessage, onSelect }: Narrative
               <td>
                 <strong>{row.ticker}</strong>
               </td>
-              <td style={{ textAlign: 'right' }}>
+              <td style={{ textAlign: 'center' }}>
                 <div className="acs-cell">
                   <span className="acs-cell-primary">{row.acs.toFixed(1)}</span>
                   <span className="acs-cell-ci">
@@ -165,5 +166,6 @@ export function NarrativeTickerTable({ rows, emptyMessage, onSelect }: Narrative
         })}
       </tbody>
     </table>
+    </div>
   )
 }

@@ -1101,7 +1101,9 @@ body {
 /* Three-column grid (top / emerging / alerts) */
 .narrative-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 360px;
+  /* Top by ACS gets the most weight since it carries the primary data;
+     Emerging is secondary; Alerts is a fixed-width sidebar. */
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr) 280px;
   gap: 16px;
   align-items: start;
 }
@@ -1109,18 +1111,18 @@ body {
   background: #1a1d27;
   border: 1px solid #2d3148;
   border-radius: 8px;
-  padding: 12px 14px 14px;
+  padding: 14px 16px 16px;
   min-width: 0;  /* allow table overflow */
 }
 .narrative-grid h3 {
   font-size: 13px;
   font-weight: 700;
   color: #e2e8f0;
-  margin-bottom: 10px;
+  margin: 0 0 12px;
   letter-spacing: 0.02em;
 }
 @media (max-width: 1400px) {
-  .narrative-grid { grid-template-columns: 1fr 1fr; }
+  .narrative-grid { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
   .narrative-grid > section:last-child { grid-column: 1 / -1; }
 }
 @media (max-width: 900px) {
@@ -1133,7 +1135,10 @@ body {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
-  display: block;
+  table-layout: auto;
+}
+.narrative-table-wrap {
+  width: 100%;
   overflow-x: auto;
 }
 .narrative-table thead th {
@@ -1159,55 +1164,60 @@ body {
 .narrative-table tbody tr:hover { background: #1e2235; }
 .narrative-table tbody td strong { color: #e2e8f0; }
 
-/* ACS cell: primary number with smaller CI band underneath */
+/* ACS cell: primary number with CI band underneath, both centered on column. */
 .acs-cell {
   display: inline-flex;
   flex-direction: column;
-  align-items: flex-end;
-  line-height: 1.15;
+  align-items: center;
+  line-height: 1.2;
+  gap: 1px;
 }
 .acs-cell-primary {
-  font-weight: 600;
+  font-weight: 700;
   color: #e2e8f0;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 .acs-cell-ci {
   font-size: 10px;
   color: #64748b;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
 /* Component pills: compact A/B/C/D/E inline display */
 .acs-pills {
   display: inline-flex;
   gap: 4px;
+  flex-wrap: nowrap;
 }
 .acs-pill {
   display: inline-flex;
-  align-items: baseline;
-  gap: 3px;
+  align-items: center;
+  gap: 4px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: #1a1f2e;
-  border: 1px solid #2d3148;
+  background: #161a26;
+  border: 1px solid #262a3c;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  min-width: 32px;
+  min-width: 30px;
   justify-content: center;
+  line-height: 1.4;
 }
 .acs-pill-letter {
-  color: #64748b;
+  color: #6b7280;
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
 .acs-pill-value {
   color: #cbd5e1;
   font-weight: 600;
 }
 .acs-pill-zero {
-  opacity: 0.4;
+  opacity: 0.35;
 }
 .acs-pill-zero .acs-pill-value { color: #64748b; font-weight: 400; }
 
