@@ -170,6 +170,19 @@ class TestComponentD:
         )
         assert result.components["D"] == pytest.approx(20.0)
 
+    def test_floored_at_zero_for_exit_signal_dominant(self) -> None:
+        """conv_norm < 0 (e.g. exit_signal-heavy 14d window) must not push
+        Component D negative — every ACS component is bounded in [0, max]."""
+        result = compute_acs(
+            _doc(
+                conviction_researched_bull_ratio=0.0,
+                conviction_researched_bear_ratio=0.0,
+                conviction_dd_norm=-0.5,  # all exit_signal extreme
+            ),
+            DEFAULT_WEIGHTS,
+        )
+        assert result.components["D"] == 0.0
+
 
 # ---------- Component E ----------
 

@@ -193,6 +193,21 @@ comment is classified into exactly one of:
 signal than *90% `emotional_bull`*. The former is active thesis-testing; the latter
 is euphoria.
 
+**Persisted aggregates (per 14d window).** The aggregator computes four
+conviction summaries onto each `ticker_timeline` document:
+
+- `conviction_researched_bull_ratio` — fraction of classified 14d signals.
+- `conviction_researched_bear_ratio` — same.
+- `conviction_emotional_bull_ratio` — same. Used by §4 lifecycle stages 5/6.
+- `conviction_dd_norm` — the **weighted-conviction mean**: the average of the
+  per-state weights above, taken over all classified 14d signals. Range
+  $[-0.5, 1.0]$. Fed into §5 Component D as `conv_norm`.
+
+The remaining seven states (`emotional_bear`, `uncertainty`, `earnings_focused`,
+`product_thesis`, `ecosystem_thesis`, `institutional_watch`, `exit_signal`) are
+not persisted as separate ratios; their effect on scoring flows entirely through
+`conviction_dd_norm`.
+
 ### 3.1 Trajectories
 
 The **direction of change** in the conviction-state mix is more predictive than
@@ -203,6 +218,10 @@ the snapshot:
 - **Late (avoid):** `emotional_bull` dominant → `uncertainty` growing →
   `emotional_bear` rising.
 
+> **Status:** descriptive. Trajectory deltas are recoverable from the
+> `ticker_timeline` history (each snapshot stores a same-day point estimate)
+> but no metric, flag, or ACS adjustment currently consumes them. Phase 6.1
+> candidate — see [ADR-0019](adr/0019-narrative-phase6-scorer.md).
 ---
 
 ## 4. Narrative lifecycle
@@ -240,7 +259,7 @@ narrative lifecycle (§4), and market confirmation (§6) for a single ticker.
 | A | Attention persistence index | 25 | $\text{decay\_weighted\_density}_{14d} \cdot 25$ (normalized to $[0,1]$ first) |
 | B | Contributor quality | 20 | $\dfrac{\text{unique\_authors}_{14d}}{\log(\text{mentions}_{14d})} \cdot (1 - G) \cdot 20$ |
 | C | Narrative strength | 20 | $\text{stage\_map}[\text{stage}] \cdot \text{stage\_confidence}$ |
-| D | Thesis quality | 20 | $(0.6 \cdot r_{\text{rb}} + 0.2 \cdot r_{\text{rB}} + 0.2 \cdot \text{dd\_norm}) \cdot 20$ |
+| D | Thesis quality | 20 | $\max(0, \min(0.6 \cdot r_{\text{rb}} + 0.2 \cdot r_{\text{rB}} + 0.2 \cdot \text{conv\_norm},\ 1)) \cdot 20$ |
 | E | Market confirmation | 15 | $6 \cdot \text{RS}_{14d} + 5 \cdot \text{opt\_ratio} + 4 \cdot \text{13F\_change}$ |
 
 Where:
@@ -248,8 +267,12 @@ Where:
 - $G$ is the Gini coefficient over contributor mentions in the 14-day window.
 - $r_{\text{rb}}$ and $r_{\text{rB}}$ are the ratios of `researched_bull` and
   `researched_bear` posts to total classified posts.
-- `dd_norm` is the count of DD-flagged posts normalized to $[0,1]$ across the
-  current universe.
+- `conv_norm` is the field stored as `conviction_dd_norm` on `ticker_timeline`:
+  the mean of the §3 per-state weights over classified 14d signals, range
+  $[-0.5, 1.0]$. Component D is then floored at 0 so every component stays in
+  $[0, \text{max}]$ — a wave of `exit_signal` posts cannot drive D negative.
+  (The legacy name `dd_norm` is retained in the Cosmos field for backward
+  compatibility; treat it as `conv_norm` everywhere in this doc.)
 - `stage_map` is `{1: 10, 2: 18, 3: 20, 4: 10, 5: 5, 6: 2}`. Stages 2 and 3 are
   the target window.
 - $\text{RS}_{14d}$ is sector-relative strength over 14 days from yfinance.
@@ -440,6 +463,25 @@ Key Vault. Images via ghcr.io.
 
 ## Change log
 
+- **2026-05-15** — §3 / §5.1 conviction alignment pass:
+  - **Code fix (§5.1 Component D)**: scorer now floors `comp_d` at 0
+    (`max(0, min(thesis_score, 1)) * D_max`). An `exit_signal`-dominated 14d
+    window previously could push the component negative because the third
+    term `conv_norm ∈ [-0.5, 1.0]`. New regression test
+    `test_floored_at_zero_for_exit_signal_dominant`. Local variable renamed
+    `dd_norm` → `conv_norm` in the scorer; the Cosmos field stays
+    `conviction_dd_norm` for backward compatibility.
+  - **Doc fix (§3)**: documented the four persisted aggregates
+    (`researched_bull` / `researched_bear` / `emotional_bull` ratios +
+    `conviction_dd_norm` weighted mean). Noted explicitly that the other
+    seven states feed scoring only via the weighted mean.
+  - **Doc fix (§3.1)**: marked trajectories as descriptive — recoverable from
+    `ticker_timeline` history but not yet consumed by any metric or
+    adjustment. Phase 6.1 candidate.
+  - **Doc fix (§5.1)**: corrected the third Component D term — was claimed
+    to be "DD-flagged posts normalized to [0,1] across the current universe",
+    is actually `conv_norm` (mean of §3 conviction weights). Formula updated
+    to show the new $\max(0, \min(\cdot, 1))$ floor.
 - **2026-05-14c** — Attention model §2 audit pass:
   - **Code fix (§2.3)**: `gini_14d` now uses per-author mention counts scoped
     to the 14-day window (`author_mentions_14d`). Previously it used 30-day

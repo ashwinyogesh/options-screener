@@ -6,7 +6,7 @@ Components:
     A  Attention persistence  — decay_weighted_density_14d * A_max
     B  Contributor quality   — unique_authors / log(mentions) * (1-G) * B_max
     C  Narrative strength    — stage_map[stage] * stage_confidence * (C_max / 20)
-    D  Thesis quality        — (0.6*r_rb + 0.2*r_rB + 0.2*dd_norm) * D_max
+    D  Thesis quality        — (0.6*r_rb + 0.2*r_rB + 0.2*conv_norm) * D_max, floored at 0
     E  Market confirmation   — 0 (deferred to Phase 6.1)
 
 Adjustments (multipliers, in order — §5.3):
@@ -109,11 +109,15 @@ def compute_acs(doc: dict, weights: dict[str, float]) -> AcsResult:
         comp_c = 0.0
 
     # --- Component D: thesis quality ---
+    # conv_norm is the §3 weighted-conviction mean over classified 14d signals,
+    # range [-0.5, 1.0]. A wave of exit_signal posts can push thesis_score
+    # negative; we floor comp_d at 0 so every ACS component is bounded in
+    # [0, max] and calibration math stays well-behaved (§5.1).
     r_rb: float = doc.get("conviction_researched_bull_ratio") or 0.0
     r_rB: float = doc.get("conviction_researched_bear_ratio") or 0.0
-    dd_norm: float = doc.get("conviction_dd_norm") or 0.0
-    thesis_score = (0.6 * r_rb) + (0.2 * r_rB) + (0.2 * dd_norm)
-    comp_d = min(thesis_score, 1.0) * d_max
+    conv_norm: float = doc.get("conviction_dd_norm") or 0.0
+    thesis_score = (0.6 * r_rb) + (0.2 * r_rB) + (0.2 * conv_norm)
+    comp_d = max(0.0, min(thesis_score, 1.0)) * d_max
 
     # --- Component E: deferred ---
     comp_e = 0.0
