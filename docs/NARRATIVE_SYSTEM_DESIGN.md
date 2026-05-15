@@ -26,6 +26,7 @@ doc. If you want the infra provisioning, go to `infra/`.
 10. [Azure infrastructure map](#10-azure-infrastructure-map)
 11. [Inter-component contracts](#11-inter-component-contracts)
 12. [Failure and recovery](#12-failure-and-recovery)
+13. [Cosmos DB schema reference](#13-cosmos-db-schema-reference)
 
 ---
 
@@ -708,8 +709,183 @@ respectively. The scorer reads the combined output of all three.
 
 ---
 
+## 13. Cosmos DB schema reference
+
+Both containers use **Cosmos DB Serverless** (database `narrative`).
+Documents are JSON; there is no enforced schema — the tables below document
+what the platform writes and what each field means.
+
+### `signals` container  (partition key: `/ticker`)
+
+One document per `(post_id, ticker)` pair. The extractor creates it; the
+classifier enriches it in-place.
+
+#### Identity and routing
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `id` | str | Extractor | `"{post_id}_{ticker}"` — Cosmos document ID and natural dedup key. A post mentioning three tickers produces three documents, each with a distinct `id`. |
+| `ticker` | str | Extractor | Uppercase ticker symbol (e.g. `"NVDA"`). Also the partition key — all documents for the same ticker land in the same logical partition, making per-ticker queries cheap. |
+| `postId` | str | Extractor | Raw Reddit post or comment ID (e.g. `"t3_abc123"`). Shared across all ticker documents for the same post. Used by the pre-flight dedup query in the extractor. |
+| `source` | str | Extractor | Origin of the post: `"reddit"` for live ingestion, `"seed_script"` for fixture data. Lets analytics filter out seeded test data. |
+
+#### Extraction output (Phase 2)
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `sentiment` | str | Extractor | GPT-4o-mini's top-level read: `"bullish"`, `"bearish"`, or `"neutral"`. Coarser than `conviction_state` — used for quick ratio rollups in the aggregator before the classifier has run. |
+| `confidence` | float `[0,1]` | Extractor | How confident GPT-4o-mini is in its own extraction (self-reported). Values below 0.5 are treated as low-signal by the aggregator's `avg_confidence` rollup. |
+| `rationale` | str | Extractor | One-sentence justification extracted from the post body (e.g. `"Strong Q1 data-center beat; FCF guide raised"`). Used as the embedding input for the classifier, and displayed in the UI detail panel. |
+| `extractedAt` | str (ISO 8601) | Extractor | UTC timestamp when the OpenAI extraction call completed. Separate from `createdUtc` so latency between posting and extraction can be monitored. |
+
+#### Post metadata (Phase 1 — passed through from ingestor)
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `subreddit` | str | Extractor | Subreddit name without the `r/` prefix (e.g. `"stocks"`). Used by the aggregator to compute `tier1_pct / tier2_pct / tier3_pct` tier fractions. |
+| `flair` | str \| null | Extractor | Post flair assigned by the author or moderators (e.g. `"DD"`, `"News"`). `null` when absent. Used by the aggregator to detect due-diligence posts for `dd_post_ratio`. |
+| `authorHash` | str | Ingestor | `SHA-256(reddit_username + KV_salt)`, truncated to 16 hex chars. Raw usernames are never stored. The hash is stable across poll cycles so the aggregator can count `unique_authors_14d` correctly. |
+| `createdUtc` | int | Extractor | Unix timestamp when the Reddit post was created. All time-window queries (`createdUtc >= cutoff`) use this field. Indexed by Cosmos range index. |
+
+#### Conviction and embedding (Phase 4 — added by classifier)
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `conviction_state` | str \| absent | Classifier | One of 10 fine-grained states (see table below). `absent` on documents not yet classified — the classifier uses `WHERE NOT IS_DEFINED(c.conviction_state)` to find unclassified documents. |
+| `conviction_confidence` | float \| absent | Classifier | Classifier's self-reported confidence in the assigned state. Values ≥ 0.80 are considered reliable; the aggregator weights them equally regardless (no threshold cut-off). |
+| `embedding` | float[1536] \| null | Classifier | `text-embedding-ada-002` vector of the `rationale` text. `null` on soft-fail (embedding API error); backfilled on the next classifier run. The narrative detector skips documents where this is `null`. |
+| `embedding_model` | str \| absent | Classifier | Model name that produced the embedding (e.g. `"text-embedding-ada-002"`). Stored so future embedding model migrations can filter by generation. |
+
+**The 10 conviction states:**
+
+| State | §3 weight | What it means |
+|---|---|---|
+| `researched_bull` | 1.0 | Bullish view backed by quantitative or fundamental analysis |
+| `researched_bear` | 1.0 | Bearish view backed by quantitative or fundamental analysis |
+| `emotional_bull` | 0.4 | Bullish but driven by hype, FOMO, or crowd momentum |
+| `emotional_bear` | 0.4 | Bearish but driven by panic or reflexive negativity |
+| `uncertainty` | 0.0 | Poster is undecided or explicitly sitting out |
+| `earnings_focused` | 0.8 | Thesis anchored to a specific earnings event |
+| `product_thesis` | 0.8 | Thesis anchored to a product launch or pipeline |
+| `ecosystem_thesis` | 0.8 | Thesis about the broader sector or supply chain |
+| `institutional_watch` | 0.9 | Reports institutional activity: filings, block trades, option flow |
+| `exit_signal` | −0.5 | Poster reports closing or reducing a position |
+
+---
+
+### `ticker_timeline` container  (partition key: `/ticker`)
+
+One document per `(ticker, bucket_date)` pair. The aggregator creates it; the
+detector and scorer enrich it in-place. Today's document is overwritten on
+every cron run; prior-day documents accumulate as history.
+
+#### Identity
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `id` | str | Aggregator | `"{ticker}_{bucket_date}"` (e.g. `"NVDA_2026-05-15"`). One row per ticker per day. Upserted on every aggregator run, so it is always the freshest snapshot of today's metrics. |
+| `ticker` | str | Aggregator | Uppercase ticker symbol. Partition key — enables cheap single-ticker queries by the FastAPI read path. |
+| `bucket_date` | str (ISO date) | Aggregator | Calendar date of this snapshot (UTC). The scorer's `decay_acs` uses `days_since_scored = today - bucket_date` for temporal decay. |
+| `computed_at` | str (ISO 8601) | Aggregator | UTC timestamp of the most recent aggregator run that wrote this document. Useful for debugging stale data. |
+
+#### Volume
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `mentions_7d` | int | Aggregator | Count of signals with `createdUtc` in the last 7 days. Raw volume — not decay-weighted. |
+| `mentions_14d` | int | Aggregator | Same for 14 days. The primary volume denominator used for ratio fields (e.g. `bullish_ratio`). |
+| `mentions_30d` | int | Aggregator | Same for 30 days. Used as the baseline in the acceleration formula. |
+
+#### §2.1 Persistence — decay-weighted density
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `decay_weighted_density_7d` | float `[0,1]` | Aggregator | Exponentially decay-weighted signal density over the last 7 days (λ=0.1, recency-biased). A 7d DWD close to the 30d DWD means interest has been steady. |
+| `decay_weighted_density_14d` | float `[0,1]` | Aggregator | 14-day window. **Primary persistence input for ACS component A.** Higher = more sustained attention. |
+| `decay_weighted_density_30d` | float `[0,1]` | Aggregator | 30-day window. Serves as the acceleration baseline: a high 30d DWD with low 7d DWD signals fading interest. |
+| `daily_buckets` | list[object] | Aggregator | Array of `{day, count, unique_authors}` objects, one per calendar day in the last 30 days (sorted ASC). Used by the scorer's bootstrap CI — requires ≥5 buckets for statistical CI; otherwise falls back to ±15% heuristic. |
+
+#### §2.2 Acceleration
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `acceleration_7d` | float `[−1, +∞]` | Aggregator | `(dwd_7d − dwd_30d) / dwd_30d`. Positive = attention is picking up relative to the 30d baseline. Negative = fading. The scorer applies a `decelerating_3d` haircut if this is negative for 3 consecutive daily buckets. |
+
+#### §2.3 Contributor diversity
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `unique_authors_14d` | int | Aggregator | Count of distinct `authorHash` values in the 14d window. Used in ACS component B: `B ∝ unique_authors / log(mentions)`. More authors relative to mentions = more organic. |
+| `gini_14d` | float `[0,1]` | Aggregator | Gini coefficient of per-author signal counts in the 14d window. 0 = perfectly even (every author posts once); 1 = one author posts everything. Values above 0.65 trigger the `gini_high` haircut (ACS × 0.6). |
+| `contributor_count_growth_7d` | float | Aggregator | Week-over-week growth rate of unique authors. ≥0.30 fires stage-3 detection in the narrative detector (rapid community expansion). |
+
+#### §2.4 Discussion depth
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `avg_body_len` | float | Aggregator | Average character length of signal bodies in the 14d window. Displayed in the UI; not scored directly (correlates with `financial_term_density`). |
+| `dd_post_ratio` | float `[0,1]` | Aggregator | Fraction of signals that have flair `"DD"` or body keywords matching due-diligence terms. Stage-2 detection fires when this ≥ 0.10. |
+| `financial_term_density` | float `[0,1]` | Aggregator | Average fraction of tokens in each signal body that are financial terms (P/E, EPS, FCF, EBITDA, etc.). Stage-1 detection fires when this ≥ 0.15. |
+
+#### §2.5 Composite quality
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `attention_quality` | float `[0,1]` | Aggregator | Weighted composite: `0.35×persistence + 0.25×diversity + 0.25×depth + 0.15×acceleration`. Single number summarising signal quality — used as context in the UI, not directly in ACS. |
+
+#### Sentiment rollup
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `bullish_ratio` | float `[0,1]` | Aggregator | Fraction of 14d signals where GPT extraction `sentiment = "bullish"`. Coarse signal — used as a fallback before conviction classification completes. |
+| `bearish_ratio` | float `[0,1]` | Aggregator | Same for `"bearish"`. |
+| `avg_confidence` | float `[0,1]` | Aggregator | Mean extraction `confidence` across 14d signals. Low values (< 0.5) indicate the model was uncertain — a proxy for ambiguous or short posts. |
+
+#### Subreddit tier fractions
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `tier1_pct` | float `[0,1]` | Aggregator | Fraction of 14d signals from tier-1 subreddits (investing, stocks, SecurityAnalysis, ValueInvesting, Bogleheads). Higher = more fundamentally-oriented discussion. Used in stage-1 and stage-2 detection thresholds. |
+| `tier2_pct` | float `[0,1]` | Aggregator | Fraction from tier-2 subreddits (wallstreetbets, options, pennystocks, …). Higher = more retail/emotional crowd. Feeds `conviction_emotional_bull_ratio` stage rules. |
+| `tier3_pct` | float `[0,1]` | Aggregator | Fraction from tier-3 sector-specific subreddits (artificial, SemiConductors, biotech, …). Higher = niche enthusiast discussion rather than broad retail. |
+
+#### Conviction ratios (aggregated from Phase 4 classifier output)
+
+These are `null` until the classifier has processed at least one signal for this ticker.
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `conviction_researched_bull_ratio` | float \| null | Aggregator | Fraction of classified signals (14d) with `conviction_state = "researched_bull"`. ACS component D weights this at 0.60. |
+| `conviction_researched_bear_ratio` | float \| null | Aggregator | Same for `"researched_bear"`. ACS component D weights this at 0.20 (negative direction). |
+| `conviction_emotional_bull_ratio` | float \| null | Aggregator | Same for `"emotional_bull"`. Stage-5 and stage-6 detection use this field directly. |
+| `conviction_dd_norm` | float \| null | Aggregator | Weighted mean of conviction state weights (§3 column) across all classified signals in the 14d window. Range `[−0.5, 1.0]`. ACS component D weights this at 0.20. `null` until classified. |
+| `conviction_classified_14d` | int \| null | Aggregator | Count of signals in the 14d window that have been classified. The denominator for the ratios above. |
+
+#### Phase 5 — Lifecycle stage (added by narrative detector)
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `lifecycle_stage` | int `1–6` | Detector | Stage of the narrative lifecycle as assigned by `assign_stage()`. 1 = early organic, 2 = fundamental validation, 3 = rapid expansion, 5 = saturation approaching, 6 = saturated/fading. Stage 4 is reserved. The ACS `late_stage` haircut fires when this > 3. |
+| `stage_confidence` | float `[0,1]` | Detector | Confidence in the stage assignment from HDBSCAN cluster analysis. Multiplied into ACS component C. Low confidence → lower C score. |
+| `dominant_cluster_fraction` | float `[0,1]` | Detector | Fraction of signals in the 72h embedding window that belong to the largest narrative cluster. High values indicate discourse is converging on a single thesis. |
+
+#### Phase 6 — ACS score (added by scorer)
+
+| Field | Type | Written by | Meaning |
+|---|---|---|---|
+| `acs` | float `[0,75]` | Scorer | Final Attention Conviction Score after haircuts. Sum of components A + B + C + D (E = 0 in Phase 6.0). The primary ranking field for the Narrative tab. |
+| `acs_ci_lower` | float `[0,75]` | Scorer | Lower bound of the 95% confidence interval (2.5th bootstrap percentile, or `acs × 0.85` heuristic when fewer than 5 daily buckets). |
+| `acs_ci_upper` | float `[0,75]` | Scorer | Upper bound of the CI (97.5th percentile, or `acs × 1.15` heuristic). Wide CI = high uncertainty — displayed as an error bar in the UI. |
+| `decay_acs` | float `[0,75]` | Scorer | `acs × e^{-0.07 × days_since_scored}`. Temporal penalty so old snapshots rank lower than fresh ones. Pre-computed so the read path never does date arithmetic. |
+| `acs_components` | object | Scorer | Breakdown: `{a, b, c, d, e}` (each rounded to 4 decimal places). Shown in the UI detail panel so contributors can see which dimension is driving or suppressing the score. |
+| `acs_flags` | list[str] | Scorer | Active haircut flags: `"gini_high"` (×0.6), `"decelerating_3d"` (×0.8), `"late_stage"` (×0.5), `"small_cap"` (×0.85). Empty list = no haircuts applied. Displayed in the UI as warning badges. |
+| `acs_scored_at` | str (ISO 8601) | Scorer | UTC timestamp of the last scorer run that wrote this document. The `acs_staleness_seconds` App Insights alert fires when `now − acs_scored_at > 900s`. |
+
+---
+
 ## Change log
 
+- **2026-05-15** — Added §13 Cosmos DB schema reference (all fields, all writers, rationale).
 - **2026-05-15** — Document created. Covers Phase 1–6 architecture as deployed.
   Component E (market confirmation) is deferred to Phase 6.1 per
   [ADR-0019](adr/0019-narrative-phase6-scorer.md).
