@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "2899724812209633092"
+      "templateHash": "5268922967204466742"
     }
   },
   "parameters": {
@@ -84,11 +84,18 @@
         "description": "Container image for job-acs-scorer. Preserved from live deployment by infra workflow."
       }
     },
-    "embedderImage": {
+    "ghcrUsername": {
       "type": "string",
-      "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
+      "defaultValue": "",
       "metadata": {
-        "description": "Container image for job-embedder. Preserved from live deployment by infra workflow."
+        "description": "GHCR username for pulling worker images. Leave empty to skip registry binding (placeholder/public images only)."
+      }
+    },
+    "ghcrPassword": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "GHCR password / PAT with read:packages. Provided by infra workflow via secret param."
       }
     },
     "keyVaultUri": {
@@ -146,6 +153,10 @@
     "roleBlobContributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]",
     "roleEhSender": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2b629674-e913-4c01-ae53-ef4638d8f975')]",
     "roleEhReceiver": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a638d3c7-ab3a-418d-83e6-5f17a39d4fde')]",
+    "ghcrConfigured": "[not(empty(parameters('ghcrUsername')))]",
+    "ghcrSecretName": "ghcr-password",
+    "ghcrSecrets": "[if(variables('ghcrConfigured'), createArray(createObject('name', variables('ghcrSecretName'), 'value', parameters('ghcrPassword'))), createArray())]",
+    "ghcrRegistries": "[if(variables('ghcrConfigured'), createArray(createObject('server', 'ghcr.io', 'username', parameters('ghcrUsername'), 'passwordSecretRef', variables('ghcrSecretName'))), createArray())]",
     "envName": "[format('cae-narrative-{0}', parameters('nameSuffix'))]"
   },
   "resources": [
@@ -185,7 +196,9 @@
         "workloadProfileName": "Consumption",
         "configuration": {
           "activeRevisionsMode": "Single",
-          "ingress": null
+          "ingress": null,
+          "secrets": "[variables('ghcrSecrets')]",
+          "registries": "[variables('ghcrRegistries')]"
         },
         "template": {
           "containers": [
@@ -244,7 +257,9 @@
             "cronExpression": "*/5 * * * *",
             "parallelism": 1,
             "replicaCompletionCount": 1
-          }
+          },
+          "secrets": "[variables('ghcrSecrets')]",
+          "registries": "[variables('ghcrRegistries')]"
         },
         "template": {
           "containers": [
@@ -299,7 +314,9 @@
             "cronExpression": "*/15 * * * *",
             "parallelism": 1,
             "replicaCompletionCount": 1
-          }
+          },
+          "secrets": "[variables('ghcrSecrets')]",
+          "registries": "[variables('ghcrRegistries')]"
         },
         "template": {
           "containers": [
@@ -346,7 +363,9 @@
             "cronExpression": "*/30 * * * *",
             "parallelism": 1,
             "replicaCompletionCount": 1
-          }
+          },
+          "secrets": "[variables('ghcrSecrets')]",
+          "registries": "[variables('ghcrRegistries')]"
         },
         "template": {
           "containers": [
@@ -397,7 +416,9 @@
             "cronExpression": "0 * * * *",
             "parallelism": 1,
             "replicaCompletionCount": 1
-          }
+          },
+          "secrets": "[variables('ghcrSecrets')]",
+          "registries": "[variables('ghcrRegistries')]"
         },
         "template": {
           "containers": [
@@ -448,7 +469,9 @@
             "cronExpression": "*/15 * * * *",
             "parallelism": 1,
             "replicaCompletionCount": 1
-          }
+          },
+          "secrets": "[variables('ghcrSecrets')]",
+          "registries": "[variables('ghcrRegistries')]"
         },
         "template": {
           "containers": [
@@ -479,71 +502,6 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]"
-      ]
-    },
-    {
-      "type": "Microsoft.App/jobs",
-      "apiVersion": "2024-03-01",
-      "name": "job-embedder",
-      "location": "[parameters('location')]",
-      "tags": "[parameters('tags')]",
-      "identity": {
-        "type": "SystemAssigned"
-      },
-      "properties": {
-        "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]",
-        "configuration": {
-          "triggerType": "Schedule",
-          "replicaTimeout": 1700,
-          "scheduleTriggerConfig": {
-            "cronExpression": "*/30 * * * *",
-            "parallelism": 1,
-            "replicaCompletionCount": 1
-          }
-        },
-        "template": {
-          "containers": [
-            {
-              "name": "embedder",
-              "image": "[parameters('embedderImage')]",
-              "resources": {
-                "cpu": "[json('0.25')]",
-                "memory": "0.5Gi"
-              },
-              "env": [
-                {
-                  "name": "KEYVAULT_URI",
-                  "value": "[parameters('keyVaultUri')]"
-                },
-                {
-                  "name": "COSMOS_ENDPOINT",
-                  "value": "[parameters('cosmosEndpoint')]"
-                },
-                {
-                  "name": "LOG_LEVEL",
-                  "value": "INFO"
-                }
-              ]
-            }
-          ]
-        }
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]"
-      ]
-    },
-    {
-      "condition": "[not(empty(parameters('keyVaultId')))]",
-      "type": "Microsoft.Authorization/roleAssignments",
-      "apiVersion": "2022-04-01",
-      "name": "[guid(parameters('keyVaultId'), 'job-embedder', variables('roleSecretsUser'))]",
-      "properties": {
-        "roleDefinitionId": "[variables('roleSecretsUser')]",
-        "principalId": "[reference(resourceId('Microsoft.App/jobs', 'job-embedder'), '2024-03-01', 'full').identity.principalId]",
-        "principalType": "ServicePrincipal"
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.App/jobs', 'job-embedder')]"
       ]
     },
     {
@@ -695,10 +653,6 @@
     "scorerJobPrincipalId": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.App/jobs', 'job-acs-scorer'), '2024-03-01', 'full').identity.principalId]"
-    },
-    "embedderJobPrincipalId": {
-      "type": "string",
-      "value": "[reference(resourceId('Microsoft.App/jobs', 'job-embedder'), '2024-03-01', 'full').identity.principalId]"
     }
   }
 }

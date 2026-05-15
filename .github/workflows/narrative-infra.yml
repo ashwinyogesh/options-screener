@@ -119,6 +119,18 @@ jobs:
           inject "detectorImage"   "${{ vars.GHCR_IMAGE_DETECTOR }}"
           inject "scorerImage"     "${{ vars.GHCR_IMAGE_SCORER }}"
 
+          # GHCR pull credentials — bicep declares the registry block when these are non-empty.
+          if [ -n "${{ secrets.GHCR_PAT }}" ]; then
+            PARAMS=$(echo "$PARAMS" | jq \
+              --arg u "${{ github.actor }}" \
+              --arg p "${{ secrets.GHCR_PAT }}" \
+              '.parameters += {"ghcrUsername": {"value": $u}, "ghcrPassword": {"value": $p}}')
+            echo "  ghcrUsername: ${{ github.actor }}"
+            echo "  ghcrPassword: (***)"
+          else
+            echo "::warning::GHCR_PAT secret not set — registry binding will be skipped; jobs that point at ghcr.io will fail to pull."
+          fi
+
           echo "$PARAMS" > infra/main.parameters.json
 
       - name: What-if

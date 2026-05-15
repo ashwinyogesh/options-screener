@@ -59,6 +59,13 @@ param detectorImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 @description('Container image for job-acs-scorer. Preserved by infra workflow.')
 param scorerImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 
+@description('GHCR username for pulling worker images. Leave empty to skip registry binding.')
+param ghcrUsername string = ''
+
+@description('GHCR PAT (read:packages). Passed through to Container Apps as a registry secret.')
+@secure()
+param ghcrPassword string = ''
+
 @description('Tag map applied to every resource.')
 param tags object = {
   workload: 'narrative-intelligence'
@@ -135,6 +142,8 @@ module containerapps 'modules/containerapps.bicep' = {
     classifierImage: classifierImage
     detectorImage: detectorImage
     scorerImage: scorerImage
+    ghcrUsername: ghcrUsername
+    ghcrPassword: ghcrPassword
   }
 }
 

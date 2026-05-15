@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "6160134908688140649"
+      "templateHash": "6148497227086561994"
     }
   },
   "parameters": {
@@ -101,6 +101,20 @@
       "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
       "metadata": {
         "description": "Container image for job-acs-scorer. Preserved by infra workflow."
+      }
+    },
+    "ghcrUsername": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "GHCR username for pulling worker images. Leave empty to skip registry binding."
+      }
+    },
+    "ghcrPassword": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "GHCR PAT (read:packages). Passed through to Container Apps as a registry secret."
       }
     },
     "tags": {
@@ -714,6 +728,12 @@
           },
           "scorerImage": {
             "value": "[parameters('scorerImage')]"
+          },
+          "ghcrUsername": {
+            "value": "[parameters('ghcrUsername')]"
+          },
+          "ghcrPassword": {
+            "value": "[parameters('ghcrPassword')]"
           }
         },
         "template": {
@@ -723,7 +743,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "2658310660453934045"
+              "templateHash": "5268922967204466742"
             }
           },
           "parameters": {
@@ -802,6 +822,20 @@
                 "description": "Container image for job-acs-scorer. Preserved from live deployment by infra workflow."
               }
             },
+            "ghcrUsername": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "GHCR username for pulling worker images. Leave empty to skip registry binding (placeholder/public images only)."
+              }
+            },
+            "ghcrPassword": {
+              "type": "securestring",
+              "defaultValue": "",
+              "metadata": {
+                "description": "GHCR password / PAT with read:packages. Provided by infra workflow via secret param."
+              }
+            },
             "keyVaultUri": {
               "type": "string",
               "defaultValue": "",
@@ -857,6 +891,10 @@
             "roleBlobContributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]",
             "roleEhSender": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2b629674-e913-4c01-ae53-ef4638d8f975')]",
             "roleEhReceiver": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a638d3c7-ab3a-418d-83e6-5f17a39d4fde')]",
+            "ghcrConfigured": "[not(empty(parameters('ghcrUsername')))]",
+            "ghcrSecretName": "ghcr-password",
+            "ghcrSecrets": "[if(variables('ghcrConfigured'), createArray(createObject('name', variables('ghcrSecretName'), 'value', parameters('ghcrPassword'))), createArray())]",
+            "ghcrRegistries": "[if(variables('ghcrConfigured'), createArray(createObject('server', 'ghcr.io', 'username', parameters('ghcrUsername'), 'passwordSecretRef', variables('ghcrSecretName'))), createArray())]",
             "envName": "[format('cae-narrative-{0}', parameters('nameSuffix'))]"
           },
           "resources": [
@@ -896,7 +934,9 @@
                 "workloadProfileName": "Consumption",
                 "configuration": {
                   "activeRevisionsMode": "Single",
-                  "ingress": null
+                  "ingress": null,
+                  "secrets": "[variables('ghcrSecrets')]",
+                  "registries": "[variables('ghcrRegistries')]"
                 },
                 "template": {
                   "containers": [
@@ -955,7 +995,9 @@
                     "cronExpression": "*/5 * * * *",
                     "parallelism": 1,
                     "replicaCompletionCount": 1
-                  }
+                  },
+                  "secrets": "[variables('ghcrSecrets')]",
+                  "registries": "[variables('ghcrRegistries')]"
                 },
                 "template": {
                   "containers": [
@@ -1010,7 +1052,9 @@
                     "cronExpression": "*/15 * * * *",
                     "parallelism": 1,
                     "replicaCompletionCount": 1
-                  }
+                  },
+                  "secrets": "[variables('ghcrSecrets')]",
+                  "registries": "[variables('ghcrRegistries')]"
                 },
                 "template": {
                   "containers": [
@@ -1057,7 +1101,9 @@
                     "cronExpression": "*/30 * * * *",
                     "parallelism": 1,
                     "replicaCompletionCount": 1
-                  }
+                  },
+                  "secrets": "[variables('ghcrSecrets')]",
+                  "registries": "[variables('ghcrRegistries')]"
                 },
                 "template": {
                   "containers": [
@@ -1108,7 +1154,9 @@
                     "cronExpression": "0 * * * *",
                     "parallelism": 1,
                     "replicaCompletionCount": 1
-                  }
+                  },
+                  "secrets": "[variables('ghcrSecrets')]",
+                  "registries": "[variables('ghcrRegistries')]"
                 },
                 "template": {
                   "containers": [
@@ -1159,7 +1207,9 @@
                     "cronExpression": "*/15 * * * *",
                     "parallelism": 1,
                     "replicaCompletionCount": 1
-                  }
+                  },
+                  "secrets": "[variables('ghcrSecrets')]",
+                  "registries": "[variables('ghcrRegistries')]"
                 },
                 "template": {
                   "containers": [

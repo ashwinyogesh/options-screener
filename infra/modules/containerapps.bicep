@@ -51,6 +51,13 @@ param detectorImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 @description('Container image for job-acs-scorer. Preserved from live deployment by infra workflow.')
 param scorerImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 
+@description('GHCR username for pulling worker images. Leave empty to skip registry binding (placeholder/public images only).')
+param ghcrUsername string = ''
+
+@description('GHCR password / PAT with read:packages. Provided by infra workflow via secret param.')
+@secure()
+param ghcrPassword string = ''
+
 @description('Key Vault URI passed to workers as KEYVAULT_URI.')
 param keyVaultUri string = ''
 
@@ -80,6 +87,27 @@ var roleBlobContributor = subscriptionResourceId('Microsoft.Authorization/roleDe
 var roleEhSender = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2b629674-e913-4c01-ae53-ef4638d8f975')
 // Built-in: Azure Event Hubs Data Receiver
 var roleEhReceiver = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a638d3c7-ab3a-418d-83e6-5f17a39d4fde')
+
+// GHCR pull-credential blocks. When ghcrUsername is non-empty the deployment
+// is authoritative for these registry credentials — declaring them once here
+// replaces the older "set via az CLI side-channel" pattern (which broke when
+// the worker job had never been deployed). When the params are empty we omit
+// the blocks entirely so existing credentials are preserved across deploys.
+var ghcrConfigured = !empty(ghcrUsername)
+var ghcrSecretName = 'ghcr-password'
+var ghcrSecrets = ghcrConfigured ? [
+  {
+    name: ghcrSecretName
+    value: ghcrPassword
+  }
+] : []
+var ghcrRegistries = ghcrConfigured ? [
+  {
+    server: 'ghcr.io'
+    username: ghcrUsername
+    passwordSecretRef: ghcrSecretName
+  }
+] : []
 
 // Placeholder used only if individual image params are not supplied (should not happen after first deploy).
 
@@ -121,9 +149,8 @@ resource ingestion 'Microsoft.App/containerApps@2024-03-01' = {
     configuration: {
       activeRevisionsMode: 'Single'
       ingress: null // background worker; no HTTP
-      // registries intentionally omitted — ARM incremental mode preserves the
-      // credentials set by each worker CI workflow (az containerapp registry set).
-      // Declaring registries:[] here would wipe them on every infra deploy.
+      secrets: ghcrSecrets
+      registries: ghcrRegistries
     }
     template: {
       containers: [
@@ -166,7 +193,8 @@ resource extractorJob 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      // registries intentionally omitted — preserved across infra deploys.
+      secrets: ghcrSecrets
+      registries: ghcrRegistries
     }
     template: {
       containers: [
@@ -204,7 +232,8 @@ resource aggregatorJob 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      // registries intentionally omitted — preserved across infra deploys.
+      secrets: ghcrSecrets
+      registries: ghcrRegistries
     }
     template: {
       containers: [
@@ -240,7 +269,8 @@ resource classifierJob 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      // registries intentionally omitted — preserved across infra deploys.
+      secrets: ghcrSecrets
+      registries: ghcrRegistries
     }
     template: {
       containers: [
@@ -277,7 +307,8 @@ resource detectorJob 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      // registries intentionally omitted — preserved across infra deploys.
+      secrets: ghcrSecrets
+      registries: ghcrRegistries
     }
     template: {
       containers: [
@@ -314,7 +345,8 @@ resource scorerJob 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      // registries intentionally omitted — preserved across infra deploys.
+      secrets: ghcrSecrets
+      registries: ghcrRegistries
     }
     template: {
       containers: [
