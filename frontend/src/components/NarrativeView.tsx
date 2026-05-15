@@ -119,6 +119,7 @@ export function NarrativeView() {
           <NarrativeTickerTable
             rows={top}
             emptyMessage="No ACS scores yet."
+            loading={loading}
             onSelect={(t) => void loadDetail(t)}
           />
         </section>
@@ -127,6 +128,7 @@ export function NarrativeView() {
           <NarrativeTickerTable
             rows={emerging}
             emptyMessage="No emerging tickers yet."
+            loading={loading}
             onSelect={(t) => void loadDetail(t)}
           />
         </section>

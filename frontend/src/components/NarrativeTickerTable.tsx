@@ -5,6 +5,7 @@ import { StageBadge } from './StageBadge'
 interface NarrativeTickerTableProps {
   rows: AcsScore[]
   emptyMessage: string
+  loading?: boolean
   onSelect?: (ticker: string) => void
 }
 
@@ -59,7 +60,7 @@ function ComponentPill({ letter, value, title }: { letter: string; value: number
   )
 }
 
-export function NarrativeTickerTable({ rows, emptyMessage, onSelect }: NarrativeTickerTableProps) {
+export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect }: NarrativeTickerTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('acs')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
 
@@ -75,6 +76,10 @@ export function NarrativeTickerTable({ rows, emptyMessage, onSelect }: Narrative
     })
     return copy
   }, [rows, sortKey, sortDir])
+
+  if (loading && rows.length === 0) {
+    return <p className="muted">Loading…</p>
+  }
 
   if (rows.length === 0) {
     return <p className="muted">{emptyMessage}</p>

@@ -41,7 +41,8 @@ export function useNarrative(): UseNarrativeReturn {
   const [top, setTop] = useState<AcsScore[]>([])
   const [emerging, setEmerging] = useState<AcsScore[]>([])
   const [alerts, setAlerts] = useState<NarrativeAlert[]>([])
-  const [loading, setLoading] = useState(false)
+  // Start true so tables never flash "No scores yet." before the first fetch.
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<NarrativeError | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
   const intervalRef = useRef<number | null>(null)
@@ -54,13 +55,17 @@ export function useNarrative(): UseNarrativeReturn {
       safeFetch<AcsScore[]>(`${API_BASE}/api/narrative/emerging?limit=50`),
       safeFetch<NarrativeAlert[]>(`${API_BASE}/api/narrative/alerts?limit=50`),
     ])
-    // If any sibling reports 503, surface it once — they will all be 503 in Phase 0.
-    const firstError = topRes.error ?? emergingRes.error ?? alertsRes.error
-    if (firstError) setError(firstError)
-    setTop(topRes.data ?? [])
-    setEmerging(emergingRes.data ?? [])
-    setAlerts(alertsRes.data ?? [])
-    if (!firstError) setLastUpdatedAt(new Date())
+    // Alerts is Phase 7 (not yet implemented — always returns 503). Exclude it
+    // from the data-error check so its failure does not poison the banner or
+    // prevent lastUpdatedAt from updating when top/emerging are healthy.
+    const dataError = topRes.error ?? emergingRes.error
+    if (dataError) setError(dataError)
+    // Only replace data when the request succeeded — preserve the previous rows
+    // on transient network errors so the UI does not flash empty on auto-refresh.
+    if (topRes.data !== null) setTop(topRes.data)
+    if (emergingRes.data !== null) setEmerging(emergingRes.data)
+    if (alertsRes.data !== null) setAlerts(alertsRes.data)
+    if (!dataError) setLastUpdatedAt(new Date())
     setLoading(false)
   }, [])
 
