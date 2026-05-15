@@ -304,6 +304,53 @@ def compute_contributor_growth(
 # §2.5 — Composite attention quality score
 # ---------------------------------------------------------------------------
 
+# Normalization saturation points. These are calibration constants that
+# convert raw aggregator metrics to [0, 1] inputs for compute_attention_quality.
+# Chosen to match the §2 quality-signal thresholds:
+#   - 20 unique authors is the diversity saturation point (matches the
+#     §2.3 healthy floor when paired with low Gini).
+#   - Acceleration is rescaled vs the §2.2 "1.5× baseline = regime shift"
+#     threshold; raw accel of 0.5 saturates the quality score.
+_QUALITY_DIVERSITY_AUTHOR_SAT: int = 20
+_QUALITY_ACCEL_SAT: float = 0.5
+
+
+def _normalize_for_quality(
+    *,
+    dwd_14d: float,
+    unique_authors_14d: int,
+    gini_14d: float,
+    financial_term_density: float,
+    dd_post_ratio: float,
+    acceleration_7d: float,
+) -> tuple[float, float, float, float]:
+    """Convert raw aggregator metrics to the four [0, 1] inputs for §2.5.
+
+    Returns (persistence, contributor_diversity, discussion_depth, acceleration).
+
+    Decisions:
+      - persistence = clip(dwd_14d, 0, 1). dwd is already decay-weighted [0,1].
+      - diversity   = author_breadth × (1 − gini); reward distinct authors AND
+                      even distribution. Saturates at _QUALITY_DIVERSITY_AUTHOR_SAT.
+      - depth       = 0.5·financial_term_density + 0.5·dd_post_ratio. Equal weight
+                      between qualitative depth (DD posts) and lexical depth
+                      (financial-term density). Both inputs already live in [0,1].
+      - acceleration = clip(accel / _QUALITY_ACCEL_SAT, 0, 1). Negative accel
+                       contributes 0 (deceleration is not "quality").
+    """
+    persistence = max(0.0, min(dwd_14d, 1.0))
+
+    author_breadth = min(unique_authors_14d / _QUALITY_DIVERSITY_AUTHOR_SAT, 1.0)
+    diversity = author_breadth * max(0.0, 1.0 - gini_14d)
+
+    depth = 0.5 * max(0.0, min(financial_term_density, 1.0)) \
+        + 0.5 * max(0.0, min(dd_post_ratio, 1.0))
+
+    accel_norm = max(0.0, min(acceleration_7d / _QUALITY_ACCEL_SAT, 1.0))
+
+    return persistence, diversity, depth, accel_norm
+
+
 def compute_attention_quality(
     persistence: float,
     contributor_diversity: float,
@@ -318,8 +365,8 @@ def compute_attention_quality(
         discussion_depth      0.25
         acceleration          0.15
 
-    All inputs should be normalized to [0, 1] before calling.
-    Acceleration is clipped to [0, 1] here (negative acceleration = 0 contrib).
+    All inputs should be normalized to [0, 1] before calling — see
+    _normalize_for_quality(). Acceleration is clipped again here defensively.
     """
     accel_clipped = max(0.0, min(acceleration, 1.0))
     return (
@@ -482,6 +529,22 @@ def build_snapshot(
         compute_conviction_ratios(sigs_14d)
     )
 
+    # --- §2.5 Composite attention quality ---
+    persistence_n, diversity_n, depth_n, accel_n = _normalize_for_quality(
+        dwd_14d=dwd_14d,
+        unique_authors_14d=unique_authors_14d,
+        gini_14d=gini_14d,
+        financial_term_density=ft_density,
+        dd_post_ratio=dd_ratio,
+        acceleration_7d=accel,
+    )
+    attention_quality = compute_attention_quality(
+        persistence=persistence_n,
+        contributor_diversity=diversity_n,
+        discussion_depth=depth_n,
+        acceleration=accel_n,
+    )
+
     return TickerTimelineSnapshot(
         id=f"{ticker}_{bucket_str}",
         ticker=ticker,
@@ -501,6 +564,7 @@ def build_snapshot(
         avg_body_len=avg_body_len,
         dd_post_ratio=dd_ratio,
         financial_term_density=ft_density,
+        attention_quality=attention_quality,
         bullish_ratio=bullish_ratio,
         bearish_ratio=bearish_ratio,
         avg_confidence=avg_confidence,

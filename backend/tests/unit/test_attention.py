@@ -235,6 +235,78 @@ class TestComputeAttentionQuality:
 
 
 # ---------------------------------------------------------------------------
+# _normalize_for_quality
+# ---------------------------------------------------------------------------
+
+class TestNormalizeForQuality:
+    def test_returns_unit_interval(self) -> None:
+        from services.narrative.attention import _normalize_for_quality
+
+        p, d, depth, a = _normalize_for_quality(
+            dwd_14d=0.6,
+            unique_authors_14d=10,
+            gini_14d=0.4,
+            financial_term_density=0.2,
+            dd_post_ratio=0.3,
+            acceleration_7d=0.25,
+        )
+        assert 0.0 <= p <= 1.0
+        assert 0.0 <= d <= 1.0
+        assert 0.0 <= depth <= 1.0
+        assert 0.0 <= a <= 1.0
+        # Persistence is the raw dwd, capped.
+        assert p == pytest.approx(0.6)
+        # Diversity = (10/20) * (1 - 0.4) = 0.3
+        assert d == pytest.approx(0.3)
+        # Depth = 0.5*0.2 + 0.5*0.3 = 0.25
+        assert depth == pytest.approx(0.25)
+        # Acceleration = 0.25 / 0.5 = 0.5
+        assert a == pytest.approx(0.5)
+
+    def test_saturation_clamps_to_one(self) -> None:
+        from services.narrative.attention import _normalize_for_quality
+
+        p, d, depth, a = _normalize_for_quality(
+            dwd_14d=5.0,
+            unique_authors_14d=500,
+            gini_14d=0.0,
+            financial_term_density=2.0,
+            dd_post_ratio=2.0,
+            acceleration_7d=10.0,
+        )
+        assert p == 1.0
+        assert d == 1.0
+        assert depth == 1.0
+        assert a == 1.0
+
+    def test_negative_accel_floors_at_zero(self) -> None:
+        from services.narrative.attention import _normalize_for_quality
+
+        _, _, _, a = _normalize_for_quality(
+            dwd_14d=0.5,
+            unique_authors_14d=5,
+            gini_14d=0.5,
+            financial_term_density=0.1,
+            dd_post_ratio=0.1,
+            acceleration_7d=-0.3,
+        )
+        assert a == 0.0
+
+    def test_high_gini_kills_diversity(self) -> None:
+        from services.narrative.attention import _normalize_for_quality
+
+        _, d, _, _ = _normalize_for_quality(
+            dwd_14d=0.5,
+            unique_authors_14d=20,
+            gini_14d=1.0,
+            financial_term_density=0.0,
+            dd_post_ratio=0.0,
+            acceleration_7d=0.0,
+        )
+        assert d == 0.0
+
+
+# ---------------------------------------------------------------------------
 # build_snapshot (integration of pure functions)
 # ---------------------------------------------------------------------------
 
@@ -272,6 +344,8 @@ class TestBuildSnapshot:
         assert snap.ticker == "NVDA"
         assert snap.bucket_date == "2026-05-01"
         assert snap.id == "NVDA_2026-05-01"
+        # §2.5 attention_quality is populated and within [0, 1].
+        assert 0.0 <= snap.attention_quality <= 1.0
 
     def test_mentions_counts_correct(self) -> None:
         anchor = date(2026, 5, 1)

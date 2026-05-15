@@ -26,7 +26,7 @@ for _name in ("main", "config", "cosmos_client", "kv_secrets", "scorer"):
     sys.modules.pop(_name, None)
 
 from scorer import (  # noqa: E402
-    _DECAY_RATE,
+    _ACS_TIME_DECAY_RATE,
     _STAGE_MAP,
     _days_since,
     _dominant_signal,
@@ -392,7 +392,7 @@ class TestTimeDecay:
             _doc(decay_weighted_density_14d=0.5, computed_at=ten_days_ago),
             DEFAULT_WEIGHTS,
         )
-        expected = result.acs * math.exp(-_DECAY_RATE * 10)
+        expected = result.acs * math.exp(-_ACS_TIME_DECAY_RATE * 10)
         assert result.decay_acs == pytest.approx(expected, abs=0.5)
 
     def test_days_since_zero_when_unparseable(self) -> None:

@@ -7,7 +7,7 @@
 //   job-aggregator         — scheduled every 15 min (Cosmos signals → ticker_timeline)
 //   job-classifier         — scheduled every 30 min (conviction-state classification + embeddings)
 //   job-narrative-detector — scheduled hourly (HDBSCAN clustering → lifecycle stage assignment)
-//   job-acs-scorer         — scheduled every 15 min (ACS components A–D → ticker_timeline)
+//   job-acs-scorer         — scheduled every 20 min (ACS components A–D → ticker_timeline)
 //
 // Jobs are provisioned here as stubs with a placeholder image; CI workflows
 // update the image on every push to main via `az containerapp job update`.
@@ -339,9 +339,9 @@ resource scorerJob 'Microsoft.App/jobs@2024-03-01' = {
     environmentId: env.id
     configuration: {
       triggerType: 'Schedule'
-      replicaTimeout: 840  // 14 min — fits inside 15-min cron window with buffer
+      replicaTimeout: 840  // 14 min — fits inside 20-min cron window with 6-min buffer (§6.3)
       scheduleTriggerConfig: {
-        cronExpression: '*/15 * * * *'
+        cronExpression: '*/20 * * * *'
         parallelism: 1
         replicaCompletionCount: 1
       }

@@ -131,6 +131,20 @@ Persistence is the strongest single signal because it is the hardest to fake.
 Acceleration is the lowest-weighted because it is the most easily produced by
 coordinated activity.
 
+Each input must be in $[0, 1]$ before the weighted sum. Normalization is
+implemented in `_normalize_for_quality` (`backend/services/narrative/attention.py`
+and the worker mirror):
+
+- persistence = $\text{clip}(\text{dwd}_{14d}, 0, 1)$.
+- diversity   = $\min(\frac{\text{unique\_authors}_{14d}}{20}, 1) \cdot (1 - G_{14d})$.
+- depth       = $0.5 \cdot \text{financial\_term\_density} + 0.5 \cdot \text{dd\_post\_ratio}$.
+- acceleration = $\text{clip}(\frac{\text{acceleration}_{7d}}{0.5}, 0, 1)$ (negative
+  acceleration contributes 0).
+
+The result is written as `attention_quality` on every `ticker_timeline` document.
+The ACS components (§5) continue to consume the raw inputs directly; the
+composite is a dashboard / ranking signal, not an ACS input.
+
 ---
 
 ## 3. Conviction states

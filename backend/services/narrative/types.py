@@ -84,6 +84,14 @@ class TickerTimelineSnapshot:
     dd_post_ratio: float = 0.0         # fraction of signals with DD-flagged flair/terms
     financial_term_density: float = 0.0  # avg fraction of tokens that are financial terms
 
+    # --- §2.5 Composite attention quality (normalized [0, 1]) ---
+    # Weighted combination of the four §2 dimensions:
+    #   0.35·persistence + 0.25·diversity + 0.25·depth + 0.15·acceleration
+    # Normalization functions defined in attention._normalize_for_quality.
+    # Useful for ranking and dashboards; ACS components A–D continue to use
+    # the raw inputs directly per §5.
+    attention_quality: float = 0.0
+
     # --- Sentiment distribution (from extractor, not conviction classifier) ---
     # Simple polarity ratios from GPT-4o-mini extraction (Phase 2 output).
     # These are NOT the conviction states (Phase 4). Useful for early signal.

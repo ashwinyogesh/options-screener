@@ -29,8 +29,19 @@ import numpy as np
 
 # stage_map per NARRATIVE_METHODOLOGY.md §5.1 — stages 2 and 3 are target window.
 _STAGE_MAP: dict[int, float] = {1: 10, 2: 18, 3: 20, 4: 10, 5: 5, 6: 2}
-_DECAY_RATE: float = 0.07               # half-life ≈ 10 days per §5.4
-_DECAY_LAMBDA: float = 0.1              # attention λ, must match aggregator §2.1
+# Invariant (§5.1): the peak of stage_map defines the denominator in Component
+# C so that a perfectly-staged, fully-confident narrative scores exactly C_max.
+# If this is ever broken (e.g. stage_map is rescaled), Component C silently
+# saturates above or below C_max and the ACS becomes uncalibrated.
+_STAGE_MAP_PEAK: float = max(_STAGE_MAP.values())
+assert _STAGE_MAP_PEAK == 20.0, "Component C denominator (see §5.1) drifted from stage_map peak."
+# Two distinct decay constants — do not collapse:
+#   ACS_TIME_DECAY (§5.4): exponential staleness of a *score* over days since
+#     it was computed. half-life ≈ 10 days.
+#   ATTENTION_DECAY (§2.1): exponential weighting of *signals* by age inside
+#     the 14-day attention window. half-life ≈ 6.9 days. Must match aggregator.
+_ACS_TIME_DECAY_RATE: float = 0.07
+_ATTENTION_DECAY_LAMBDA: float = 0.1
 _WINDOW_14D: int = 14                   # component-A window length
 
 # Bootstrap-CI parameters.
@@ -93,7 +104,7 @@ def compute_acs(doc: dict, weights: dict[str, float]) -> AcsResult:
     stage: int = doc.get("lifecycle_stage") or 0
     stage_conf: float = doc.get("stage_confidence") or 0.0
     if stage in _STAGE_MAP:
-        comp_c = (_STAGE_MAP[stage] / 20.0) * stage_conf * c_max
+        comp_c = (_STAGE_MAP[stage] / _STAGE_MAP_PEAK) * stage_conf * c_max
     else:
         comp_c = 0.0
 
@@ -147,7 +158,7 @@ def compute_acs(doc: dict, weights: dict[str, float]) -> AcsResult:
     # --- Time decay ---
     computed_at_str: str = doc.get("computed_at") or doc.get("acs_scored_at") or ""
     days_stale = _days_since(computed_at_str)
-    decay_acs = acs * math.exp(-_DECAY_RATE * days_stale) if days_stale > 0 else acs
+    decay_acs = acs * math.exp(-_ACS_TIME_DECAY_RATE * days_stale) if days_stale > 0 else acs
 
     # --- Dominant signal ---
     dominant_signal = _dominant_signal(doc)
@@ -233,8 +244,8 @@ def _decay_weighted_density(daily_counts: list[int], window_days: int = _WINDOW_
     weighted = 0.0
     for i, c in enumerate(counts):
         t = (n - 1) - i  # 0 = today, n-1 = oldest
-        weighted += math.exp(-_DECAY_LAMBDA * t) * c
-    max_weight = sum(math.exp(-_DECAY_LAMBDA * t) for t in range(window_days + 1))
+        weighted += math.exp(-_ATTENTION_DECAY_LAMBDA * t) * c
+    max_weight = sum(math.exp(-_ATTENTION_DECAY_LAMBDA * t) for t in range(window_days + 1))
     if max_weight <= 0:
         return 0.0
     return min(weighted / max_weight, 1.0)
