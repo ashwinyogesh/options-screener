@@ -19,6 +19,7 @@ Companion architectural records:
 - [ADR-0014 — Cost substitutions for the $150/mo budget](adr/0014-narrative-cost-substitutions.md)
 - [ADR-0015 — Extractor architecture simplification (no ticker-events hub, no raw-posts container)](adr/0015-extractor-architecture-simplification.md)
 - [ADR-0016 — Extractor runtime defaults: body-only gate, receive window, @latest position](adr/0016-extractor-runtime-defaults.md)
+- [NARRATIVE_SYSTEM_DESIGN.md — End-to-end component diagram, data flow, and design rationale](NARRATIVE_SYSTEM_DESIGN.md)
 
 ## Sections
 
