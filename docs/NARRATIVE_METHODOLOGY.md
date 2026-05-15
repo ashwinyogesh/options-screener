@@ -394,8 +394,14 @@ Early confirmation signals, ordered by temporal precedence:
 5. **Management language shift** — guidance moves from defensive to expansive.
 6. **Insider buying** — open-market purchases (not option exercises).
 
-ACS Component E captures (1)–(3) at scoring time. (4)–(6) are flagged manually in
-the Narrative tab and surfaced in the per-ticker drilldown when present.
+ACS Component E is **the intended home for signals (1)–(3)** at scoring time,
+but is currently hardcoded to 0 (see §5.1 Component E row). The fields
+`rs_14d`, `opt_ratio`, and `institutional_13f_change` are reserved as
+commented placeholders in `backend/services/narrative/types.py` and not yet
+populated by the scorer. Signals (4)–(6) have no implementation in either
+the scorer or the Narrative tab — there is no manual-flag UI in
+`TickerDetailPanel.tsx` today. Bringing (1)–(6) online is the Phase 6.1
+scope; see [ADR-0019](adr/0019-narrative-phase6-scorer.md).
 
 **Avoid using price action as the primary signal.** A stock that is up 30% has
 already confirmed, and is probably no longer in stages 1–3.
@@ -518,6 +524,14 @@ Key Vault. Images via ghcr.io.
 
 ## Change log
 
+- **2026-05-15d** — §6 market confirmation alignment pass (doc-only):
+  - **Doc fix (§6)**: corrected the "Component E captures (1)–(3) at scoring
+    time / (4)–(6) are flagged manually in the Narrative tab" paragraph.
+    Neither is true today: the scorer hardcodes `comp_e = 0.0`, the
+    `rs_14d` / `opt_ratio` / `institutional_13f_change` fields are
+    commented-out placeholders in `backend/services/narrative/types.py`,
+    and `TickerDetailPanel.tsx` has no manual-flag UI for (4)–(6). Section
+    now states design intent explicitly and points to Phase 6.1 (ADR-0019).
 - **2026-05-15c** — §5 ACS alignment pass (doc-only, no code changes):
   - **Doc fix (§5.1)**: Component A formula now shows the explicit $\min(\cdot, 1)$
     clip and uses $A_{\max}$ (KV-overridable) rather than the hardcoded 25.
