@@ -406,4 +406,9 @@ Key Vault. Images via ghcr.io.
 
 ## Change log
 
+- **2026-05-14** — Phase 6 closed out: `job-acs-scorer` writing ACS, CI bands,
+  decay_acs, components, and flags onto `ticker_timeline` every 15 min;
+  FastAPI `/api/narrative/*` routes serve directly from Cosmos (no Redis,
+  per ADR-0019); `scripts/backtest_narrative.py` provides the IC@T+30
+  calibration harness. Component E remains 0 (deferred to Phase 6.1).
 - **2026-05-12** — Initial document created alongside ADR-0013 and ADR-0014.

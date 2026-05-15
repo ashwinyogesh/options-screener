@@ -15,6 +15,7 @@ export function NarrativeTickerTable({ rows, emptyMessage }: NarrativeTickerTabl
         <tr>
           <th>Ticker</th>
           <th>ACS</th>
+          <th>Decay</th>
           <th>CI</th>
           <th>A</th>
           <th>B</th>
@@ -30,6 +31,7 @@ export function NarrativeTickerTable({ rows, emptyMessage }: NarrativeTickerTabl
           <tr key={`${row.ticker}-${row.scored_at}`}>
             <td><strong>{row.ticker}</strong></td>
             <td>{row.acs.toFixed(1)}</td>
+            <td className="muted" title="Time-decayed ACS (λ=0.07/day)">{row.decay_acs.toFixed(1)}</td>
             <td className="muted">{row.acs_ci_lower.toFixed(0)}–{row.acs_ci_upper.toFixed(0)}</td>
             <td>{row.components.a_attention_persistence.toFixed(1)}</td>
             <td>{row.components.b_contributor_quality.toFixed(1)}</td>
