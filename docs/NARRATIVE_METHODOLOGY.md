@@ -287,11 +287,11 @@ narrative lifecycle (§4), and market confirmation (§6) for a single ticker.
 
 | Symbol | Component | Max | Formula |
 |---|---|---|---|
-| A | Attention persistence index | 25 | $\text{decay\_weighted\_density}_{14d} \cdot 25$ (normalized to $[0,1]$ first) |
-| B | Contributor quality | 20 | $\dfrac{\text{unique\_authors}_{14d}}{\log(\text{mentions}_{14d})} \cdot (1 - G) \cdot 20$ |
-| C | Narrative strength | 20 | $\text{stage\_map}[\text{stage}] \cdot \text{stage\_confidence}$ |
-| D | Thesis quality | 20 | $\max(0, \min(0.6 \cdot r_{\text{rb}} + 0.2 \cdot r_{\text{rB}} + 0.2 \cdot \text{conv\_norm},\ 1)) \cdot 20$ |
-| E | Market confirmation | 15 | $6 \cdot \text{RS}_{14d} + 5 \cdot \text{opt\_ratio} + 4 \cdot \text{13F\_change}$ |
+| A | Attention persistence index | 25 | $\min(\text{decay\_weighted\_density}_{14d},\ 1) \cdot A_{\max}$ |
+| B | Contributor quality | 20 | $\min\!\left(\dfrac{\text{unique\_authors}_{14d}}{\log(\text{mentions}_{14d})} \cdot (1 - G) \cdot B_{\max},\ B_{\max}\right)$; $0$ when $\text{mentions}_{14d} \le 1$ |
+| C | Narrative strength | 20 | $\dfrac{\text{stage\_map}[\text{stage}]}{\max(\text{stage\_map})} \cdot \text{stage\_confidence} \cdot C_{\max}$ |
+| D | Thesis quality | 20 | $\max(0,\ \min(0.6 \cdot r_{\text{rb}} + 0.2 \cdot r_{\text{rB}} + 0.2 \cdot \text{conv\_norm},\ 1)) \cdot D_{\max}$ |
+| E | Market confirmation | 15 | $6 \cdot \text{RS}_{14d} + 5 \cdot \text{opt\_ratio} + 4 \cdot \text{13F\_change}$ — **not yet implemented** (hardcoded to 0 in the scorer; deferred to Phase 6.1, see [ADR-0019](adr/0019-narrative-phase6-scorer.md)) |
 
 Where:
 
@@ -305,7 +305,10 @@ Where:
   (The legacy name `dd_norm` is retained in the Cosmos field for backward
   compatibility; treat it as `conv_norm` everywhere in this doc.)
 - `stage_map` is `{1: 10, 2: 18, 3: 20, 4: 10, 5: 5, 6: 2}`. Stages 2 and 3 are
-  the target window.
+  the target window. Component C divides by $\max(\text{stage\_map}) = 20$ so
+  that a perfectly-staged, fully-confident narrative scores exactly $C_{\max}$
+  regardless of how the KV-overridable $C_{\max}$ is recalibrated (§5.5). An
+  assertion in the scorer enforces this invariant at module load.
 - $\text{RS}_{14d}$ is sector-relative strength over 14 days from yfinance.
 - `opt_ratio` is options volume / open interest from yfinance options chain.
 - `13F_change` is the most recent quarterly change from SEC EDGAR 13F filings.
@@ -326,7 +329,11 @@ so a punished score remains debuggable.
 | $G > 0.65$ | $\times 0.6$ | Concentration / coordination risk |
 | Acceleration negative for 3 days | $\times 0.8$ | Decay penalty |
 | Lifecycle stage > 3 | $\times 0.5$ | Lateness penalty |
-| Market cap < $100M | $\times 0.85$ | Liquidity discount |
+| $0 < \text{market\_cap} < \$100\text{M}$ | $\times 0.85$ | Liquidity discount |
+
+The small-cap guard requires a **strictly positive** market cap: a missing or
+zero `market_cap` field (yfinance lookup failed, or ticker is a non-equity)
+leaves the multiplier at 1.0 rather than punishing the score for absent data.
 
 ### 5.4 Time decay
 
@@ -348,9 +355,25 @@ review and (after sign-off) the Key Vault secret is updated.
 
 ### 5.6 Confidence interval
 
-The scorer emits `acs_ci_lower` and `acs_ci_upper` per ticker, derived from
-bootstrap resampling of the 14-day post window. Used to suppress alerts where
-the CI straddles the alert threshold.
+The scorer emits `acs_ci_lower` and `acs_ci_upper` per ticker. The primary
+estimator is a **percentile bootstrap** (n = 500, seeded off the ticker for
+reproducibility) over the 14-day `daily_buckets`: each resample recomputes
+Component A from a with-replacement draw of the daily mention counts while
+holding B/C/D/E and the §5.3 multiplier constant (they aggregate over the same
+window or are doc-level constants), then takes the 2.5 / 97.5 percentiles of
+the resulting ACS distribution.
+
+**Fallback.** When fewer than 5 daily buckets are available (not enough samples
+for a meaningful resample), the scorer emits a $\pm 15\%$ heuristic band
+($\text{acs} \cdot [0.85,\ 1.15]$, clipped to $[0, 100]$).
+
+**Defensive clamp.** The returned CI is clamped to bracket the point estimate
+($\text{lower} \le \text{acs} \le \text{upper}$). In production this is a
+no-op because the stored `decay_weighted_density_14d` and `daily_buckets` are
+written by the same aggregator pass; it only bites in tests or partial replays
+where the two can drift.
+
+Used to suppress alerts where the CI straddles the alert threshold.
 
 ---
 
@@ -481,9 +504,10 @@ Key Vault. Images via ghcr.io.
 
 - Bicep: Redis Basic C0; App Insights workspace (Basic, 5 GB cap); refresh Azure
   Budget alerts
-- Code: `job-acs-scorer` (15-min); `scripts/backtest_narrative.py` + optional
-  `job-backtest`; FastAPI routes under `/api/narrative/*`; Static Web Apps
-  Narrative tab
+- Code: `job-acs-scorer` (20-min cron — bumped from 15 min in Phase 6.0.1 for
+  a safety buffer against classifier/aggregator overlap);
+  `scripts/backtest_narrative.py` + optional `job-backtest`; FastAPI routes
+  under `/api/narrative/*`; Static Web Apps Narrative tab
 - Test:
   - Backtest IC ≥ 0.04 at T+30 on held-out 90 days
   - `GET /api/narrative/tickers/top` p99 < 200ms with Redis warm
@@ -494,6 +518,29 @@ Key Vault. Images via ghcr.io.
 
 ## Change log
 
+- **2026-05-15c** — §5 ACS alignment pass (doc-only, no code changes):
+  - **Doc fix (§5.1)**: Component A formula now shows the explicit $\min(\cdot, 1)$
+    clip and uses $A_{\max}$ (KV-overridable) rather than the hardcoded 25.
+  - **Doc fix (§5.1)**: Component B formula now shows the $\min(\cdot, B_{\max})$
+    cap that the scorer applies (line 91 of `workers/scorer/scorer.py`) — the
+    raw $\text{authors}/\log(\text{mentions})$ ratio can exceed 1 for low
+    mention counts. Also documents the $\text{mentions}_{14d} \le 1$ short-circuit.
+  - **Doc fix (§5.1)**: Component C formula now divides by $\max(\text{stage\_map})$
+    so the component scales correctly if $C_{\max}$ is recalibrated via Key
+    Vault (§5.5). Notes the module-load invariant assertion.
+  - **Doc fix (§5.1)**: Component E row explicitly labelled "not yet
+    implemented" — the scorer hardcodes `comp_e = 0.0`. Matches the §4 stage 4
+    treatment.
+  - **Doc fix (§5.3)**: clarified that the small-cap haircut requires
+    $0 < \text{market\_cap} < \$100\text{M}$ — missing or zero market cap
+    (yfinance lookup failed, non-equity ticker) does **not** trigger the
+    penalty. Avoids punishing scores for absent data.
+  - **Doc fix (§5.6)**: documented the $\pm 15\%$ heuristic fallback (when
+    `daily_buckets` < 5) and the CI-bracketing clamp that guarantees
+    `lower ≤ acs ≤ upper`.
+  - **Doc fix (§8 Phase 6)**: cron updated from 15-min to 20-min to match the
+    Bicep deployment (`infra/modules/containerapps.bicep` line 344) after the
+    Phase 6.0.1 safety-buffer bump.
 - **2026-05-15b** — §4 lifecycle alignment pass (doc + tests, no code changes):
   - **Doc fix (§4)**: added stage 0 ("insufficient data"), documented the
     `1 → 2 → 3 → 5 → 6` override priority (last matching rule wins), the
