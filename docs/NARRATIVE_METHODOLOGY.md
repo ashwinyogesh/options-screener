@@ -412,7 +412,7 @@ already confirmed, and is probably no longer in stages 1–3.
 
 | # | Mode | Signals | Mitigation |
 |---|---|---|---|
-| 1 | Coordinated manipulation | Sudden volume spike, $G > 0.65$, identical phrasing | Gini penalty (0.6×); Postgres `UNIQUE (body_sha256, hour_bucket)` dedup; author-weight floor |
+| 1 | Coordinated manipulation | Sudden volume spike, $G > 0.65$, identical phrasing | Gini penalty (0.6×); pre-flight Cosmos query skips `post_id`s already extracted (eliminates duplicate OpenAI calls from the 6h look-back window); Cosmos `upsert_item` with `id=post_id_ticker` is the final dedup backstop; author-weight floor |
 | 2 | Low-float distortion | High ACS from a small community, tiny float amplifies price | Market-cap < $100M discount (0.85×); float-adjusted mention norm |
 | 3 | Narrative collapse | Catalyst fails, conviction evaporates | 10-day decay half-life; `catalyst_event` tagging in `ticker_timeline` |
 | 4 | False technology narratives | Speculative thesis (quantum, RTSC) with no commercial path | Thesis-quality DD scoring; low financial-term density penalty; full Component D requires product/revenue anchor |
@@ -524,6 +524,9 @@ Key Vault. Images via ghcr.io.
 
 ## Change log
 
+- **2026-05-15e** — §7 dedup correction + pre-flight gate (code + doc):
+  - **Code (extractor)**: added `CosmosWriter.get_extracted_post_ids()` — one cross-partition query per job run that returns which `post_id`s already have signals in Cosmos. `main.py` skips those posts entirely before calling OpenAI. Eliminates duplicate API calls from the ingestor's 6h look-back window re-publishing already-extracted posts. Query failure falls back to an empty set (safe — worst case is one redundant OpenAI call, not data loss). New log field: `skipped_dedup`.
+  - **Doc fix (§7 row 1)**: updated mitigation to reflect the two-layer dedup: pre-flight query (prevents wasted OpenAI calls) + Cosmos upsert backstop (prevents duplicate documents). Removed the stale `Postgres UNIQUE (body_sha256, hour_bucket)` text.
 - **2026-05-15d** — §6 market confirmation alignment pass (doc-only):
   - **Doc fix (§6)**: corrected the "Component E captures (1)–(3) at scoring
     time / (4)–(6) are flagged manually in the Narrative tab" paragraph.

@@ -126,8 +126,21 @@ def main() -> None:
 
     logger.info("Consumed %d events from Event Hubs", events_processed)
 
+    # Pre-flight dedup: query Cosmos for post_ids already extracted in a prior
+    # run. The ingestor's 6h look-back window re-publishes the same posts on
+    # every poll cycle; without this gate every re-published post would burn
+    # one OpenAI call before the upsert silently overwrote the existing signal.
+    all_post_ids = {e.get("post_id", "") for e in collected if e.get("post_id")}
+    already_extracted = writer.get_extracted_post_ids(all_post_ids)
+    if already_extracted:
+        logger.info("Pre-flight dedup: skipping %d already-extracted posts", len(already_extracted))
+
     gated = 0
+    skipped_dedup = 0
     for event_data in collected:
+        if event_data.get("post_id") in already_extracted:
+            skipped_dedup += 1
+            continue
         try:
             signals = extractor.extract(event_data)
             if signals is None or len(signals) == 0:
@@ -142,7 +155,7 @@ def main() -> None:
         except Exception:
             logger.exception("Extraction failed for post %s", event_data.get("post_id"))
 
-    logger.info("Gate stats: gated=%d passed=%d", gated, events_processed - gated)
+    logger.info("Gate stats: gated=%d skipped_dedup=%d passed=%d", gated, skipped_dedup, events_processed - gated - skipped_dedup)
 
     logger.info(
         "Extractor done. events=%d signals_written=%d",

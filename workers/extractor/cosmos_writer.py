@@ -43,6 +43,31 @@ class CosmosWriter:
         }
         self._container.upsert_item(doc)
 
+    def get_extracted_post_ids(self, post_ids: set[str]) -> set[str]:
+        """Return the subset of post_ids that already have at least one signal
+        in Cosmos. Used as a pre-flight gate to skip duplicate OpenAI calls when
+        the ingestor's 6h look-back window re-publishes posts already extracted.
+
+        One cross-partition query per call; cheap at the event cap (~40 posts).
+        Returns an empty set (safe fallback) if the query fails so the caller
+        can still proceed — worst case is a redundant OpenAI call, not data loss.
+        """
+        if not post_ids:
+            return set()
+        try:
+            params = [{"name": f"@p{i}", "value": pid} for i, pid in enumerate(post_ids)]
+            placeholders = ", ".join(p["name"] for p in params)
+            query = f"SELECT DISTINCT VALUE c.postId FROM c WHERE c.postId IN ({placeholders})"
+            items = list(self._container.query_items(
+                query=query,
+                parameters=params,
+                enable_cross_partition_query=True,
+            ))
+            return set(items)
+        except Exception:
+            logger.warning("Pre-flight post_id check failed; proceeding without dedup gate", exc_info=True)
+            return set()
+
     def write_batch(self, signals: list[ExtractedSignal]) -> int:
         written = 0
         for signal in signals:
