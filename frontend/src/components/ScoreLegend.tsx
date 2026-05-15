@@ -6,18 +6,19 @@
  */
 
 const COMPONENTS = [
-  ['A', 'Attention persistence', 'Mentions × distinct days × decay'],
-  ['B', 'Contributor quality', 'Author tier mix (Tier 1/2/3) — methodology §5.4'],
-  ['C', 'Narrative strength', 'Coherence across posts; thesis convergence'],
-  ['D', 'Thesis quality', 'Researched bull/bear ratios; DD intensity'],
-  ['E', 'Market confirmation', 'Price/options confirmation of the narrative'],
+  ['A', 'Daily activity (max 25)', 'Has it been discussed consistently over the past 14 days? A high score means organic, sustained interest — not a one-day spike.'],
+  ['B', 'Post diversity (max 20)', 'Are many different people posting, or just one account? A high score means broad, independent voices — not a coordinated campaign.'],
+  ['C', 'Narrative coherence (max 20)', 'Do the posts share a common theme or thesis? Requires the hourly narrative detector to run — shows 0 until then.'],
+  ['D', 'Analytical depth (max 20)', 'What fraction of posts include real analysis (earnings data, valuations, competitive research) vs. pure hype?'],
+  ['E', 'Market confirmation (max 15)', 'Is the price and options market starting to reflect the narrative? Not yet live — always 0.'],
 ] as const
 
 const FLAGS = [
-  ['gini_high', 'Single-author dominance (Gini > 0.5)'],
-  ['small_cap_haircut', 'Capped by §5.3 small-cap adjustment'],
-  ['decelerating_3d', '3-day mention deceleration — momentum cooling'],
-  ['low_unique_authors', 'Fewer than the §5.6 minimum unique contributors'],
+  ['gini_high',          'Concentrated posts — a small number of accounts are responsible for most of the discussion. Check the source posts before acting.'],
+  ['decelerating_3d',    'Fading momentum — the mention rate has dropped for 3 consecutive days. The narrative may be cooling.'],
+  ['late_stage',         'Late stage — the narrative has passed the ideal entry window (stage > 3).'],
+  ['small_cap',          'Small cap — market cap under $100M. Extra caution on liquidity and manipulation risk.'],
+  ['low_unique_authors', 'Few voices — not enough distinct people posting yet for reliable signals.'],
 ] as const
 
 export function ScoreLegend() {
@@ -25,19 +26,19 @@ export function ScoreLegend() {
     <details className="score-legend">
       <summary>How is this scored?</summary>
       <div className="score-legend-body">
-        <h4>Components (A–E)</h4>
+        <h4>Score breakdown (A–E, total out of 100)</h4>
         <ul>
           {COMPONENTS.map(([key, name, desc]) => (
             <li key={key}>
-              <strong>{key}</strong> — {name}: <span style={{ opacity: 0.8 }}>{desc}</span>
+              <strong>{key} — {name}:</strong> <span style={{ opacity: 0.8 }}>{desc}</span>
             </li>
           ))}
         </ul>
-        <h4>Flags</h4>
+        <h4>Warnings explained</h4>
         <ul>
           {FLAGS.map(([flag, desc]) => (
             <li key={flag}>
-              <code>{flag}</code> — {desc}
+              <strong>{flag.replace(/_/g, ' ')}:</strong> {desc}
             </li>
           ))}
         </ul>

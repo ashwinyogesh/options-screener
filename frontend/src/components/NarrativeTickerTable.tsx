@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { AcsScore } from '../types/narrative'
+import { labelSignal } from '../constants/narrative'
 import { StageBadge } from './StageBadge'
 
 interface NarrativeTickerTableProps {
@@ -21,32 +22,40 @@ interface ColumnDef {
 
 const COLUMNS: ColumnDef[] = [
   { key: 'ticker', label: 'Ticker' },
-  { key: 'acs', label: 'ACS', title: 'Attention Conviction Score with 95% bootstrap CI', align: 'center' },
-  { key: 'decay_acs', label: 'Decay', title: 'Time-decayed ACS (λ=0.07/day, half-life ≈10d)', align: 'right' },
-  { key: 'stage', label: 'Stage', title: 'Lifecycle stage 1–6 (methodology §4)', align: 'center' },
+  { key: 'acs', label: 'Score', title: 'Narrative Score (0\u2013100) with 95% confidence range', align: 'center' },
+  { key: 'stage', label: 'Stage', title: 'How early is this narrative? Stages 2\u20133 are the ideal entry window.', align: 'center' },
   {
     key: null,
-    label: 'Components',
-    title: 'A: attention · B: contributors · C: narrative · D: thesis · E: market (§5.1). E currently 0 (Phase 6.1).',
+    label: 'Breakdown',
+    title: 'A: daily activity \u00b7 B: post diversity \u00b7 C: narrative coherence \u00b7 D: analytical depth \u00b7 E: market confirmation (not yet live)',
     align: 'left',
   },
-  { key: null, label: 'Signal' },
-  { key: 'flags', label: 'Flags' },
+  { key: null, label: 'Community tone', title: 'What kind of posts dominate \u2014 analytical research or emotional hype?' },
+  { key: 'flags', label: 'Warnings' },
 ]
 
 function getSortValue(row: AcsScore, key: SortKey): number | string {
   switch (key) {
-    case 'ticker':
-      return row.ticker
-    case 'acs':
-      return row.acs
-    case 'decay_acs':
-      return row.decay_acs
-    case 'stage':
-      return row.lifecycle_stage
-    case 'flags':
-      return row.flags.length
+    case 'ticker':    return row.ticker
+    case 'acs':       return row.acs
+    case 'decay_acs': return row.decay_acs
+    case 'stage':     return row.lifecycle_stage
+    case 'flags':     return row.flags.length
   }
+}
+
+const FLAG_LABELS: Record<string, string> = {
+  gini_high:         'Concentrated posts',
+  decelerating_3d:   'Fading momentum',
+  late_stage:        'Late stage',
+  small_cap:         'Small cap',
+  small_cap_haircut: 'Small cap',
+  low_unique_authors: 'Few authors',
+}
+
+function humanizeFlags(flags: string[]): string {
+  if (flags.length === 0) return '\u2014'
+  return flags.map((f) => FLAG_LABELS[f] ?? f).join(', ')
 }
 
 /** Compact component pill: "25" colored, "0" muted. */
@@ -126,8 +135,6 @@ export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect }: 
       </thead>
       <tbody>
         {sorted.map((row) => {
-          const decayDelta = row.acs - row.decay_acs
-          const decayMuted = Math.abs(decayDelta) < 0.1
           return (
             <tr
               key={`${row.ticker}-${row.scored_at}`}
@@ -145,27 +152,21 @@ export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect }: 
                   </span>
                 </div>
               </td>
-              <td
-                className={decayMuted ? 'muted' : undefined}
-                style={{ textAlign: 'right' }}
-                title="Time-decayed ACS (λ=0.07/day)"
-              >
-                {row.decay_acs.toFixed(1)}
-              </td>
+
               <td style={{ textAlign: 'center' }}>
                 <StageBadge stage={row.lifecycle_stage} confidence={row.stage_confidence} />
               </td>
               <td>
                 <div className="acs-pills">
-                  <ComponentPill letter="A" value={row.components.a_attention_persistence} title="Attention persistence (§5.1 A, max 25)" />
-                  <ComponentPill letter="B" value={row.components.b_contributor_quality} title="Contributor quality (§5.1 B, max 20)" />
-                  <ComponentPill letter="C" value={row.components.c_narrative_strength} title="Narrative strength (§5.1 C, max 20)" />
-                  <ComponentPill letter="D" value={row.components.d_thesis_quality} title="Thesis quality (§5.1 D, max 20)" />
-                  <ComponentPill letter="E" value={row.components.e_market_confirmation} title="Market confirmation (§5.1 E, max 15) — not yet implemented" />
+                  <ComponentPill letter="A" value={row.components.a_attention_persistence} title="Daily activity score: how consistently it's been discussed over 14 days (max 25)" />
+                  <ComponentPill letter="B" value={row.components.b_contributor_quality} title="Post diversity score: many different people posting, not one account dominating (max 20)" />
+                  <ComponentPill letter="C" value={row.components.c_narrative_strength} title="Narrative coherence: posts share a common thesis (max 20) — needs hourly detector to run" />
+                  <ComponentPill letter="D" value={row.components.d_thesis_quality} title="Analytical depth: fraction of posts that include real research, not just hype (max 20)" />
+                  <ComponentPill letter="E" value={row.components.e_market_confirmation} title="Market confirmation: price and options flow alignment (max 15) — not yet live" />
                 </div>
               </td>
-              <td>{row.dominant_signal}</td>
-              <td className="muted">{row.flags.join(', ') || '—'}</td>
+              <td>{labelSignal(row.dominant_signal)}</td>
+              <td className="muted">{humanizeFlags(row.flags)}</td>
             </tr>
           )
         })}
