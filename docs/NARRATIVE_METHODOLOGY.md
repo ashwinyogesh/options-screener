@@ -228,19 +228,50 @@ the snapshot:
 
 | Stage | Name | Definition (signal-side) | Trade posture |
 |---|---|---|---|
+| 0 | Insufficient data | HDBSCAN produced no clusters in the 72h window | Skip |
 | 1 | Niche technical | `tier1_pct < 0.20` AND `financial_term_density ≥ 0.15` | Watch |
 | 2 | Early conviction | `tier1_pct ∈ [0.20, 0.50]` AND `dd_post_ratio ≥ 0.10` AND `gini_14d < 0.45` | **Target** |
 | 3 | Expanding awareness | `contributor_count_growth_7d ≥ 0.30` (tier2-rising proxy) | **Target** |
-| 4 | Institutional attention | `external_media_citations > 0` OR `analyst_name_count > 0` (Phase 6) | Late — partial |
+| 4 | Institutional attention | `external_media_citations > 0` OR `analyst_name_count > 0` — **not yet implemented** (deferred to Phase 6.1; required fields don't exist on `ticker_timeline` yet) | Late — partial |
 | 5 | Consensus | `conviction_emotional_bull_ratio ≥ 0.50` AND `gini_14d < 0.30` | Avoid |
 | 6 | Saturation | `conviction_emotional_bull_ratio ≥ 0.65` AND `gini_14d ≥ 0.55` | Avoid (bagholder phase) |
+
+**Override priority.** `assign_stage` evaluates rules in the order
+`1 → 2 → 3 → 5 → 6` and the **last matching rule wins**. This is intentional:
+a ticker that simultaneously looks niche (stage 1) and saturated (stage 6) is
+in saturation, and the safer "avoid" label should prevail. Stage 4 is currently
+unreachable.
+
+**Catch-all.** If a ticker has at least one cluster but matches none of the
+stage rules above, it defaults to **stage 1 with confidence `0.4 × dominant_cluster_fraction`**.
+The intent is to surface unclassifiable tickers as low-confidence stage-1
+candidates rather than drop them silently. The doc still treats this as
+"not enough signal to commit a higher stage."
+
+**Stage confidence.** Component C in §5.1 consumes `stage_confidence`. The
+multipliers applied on top of `dominant_cluster_fraction` are:
+
+| Stage | Confidence multiplier |
+|---|---|
+| 1 (rule match) | × 0.7 |
+| 1 (catch-all) | × 0.4 |
+| 2 | × 1.0 |
+| 3 | × 1.0 |
+| 5 | × 0.85 |
+| 6 | × 0.90 |
+
+Lower multipliers on stages 1/5/6 reflect that they are either early/sparse
+(stage 1) or signal-degraded-by-saturation (stages 5/6) so the ACS should
+weight them less even at high cluster dominance.
 
 `tier1_pct` and `tier2_pct` are the share of mentions in Tier 1 (`r/investing`,
 `r/stocks`, `r/SecurityAnalysis`, `r/ValueInvesting`, `r/Bogleheads`) and Tier 2
 (`r/wallstreetbets`, `r/options`, `r/smallstreetbets`, `r/pennystocks`,
 `r/TheRaceTo10Million`, `r/swingtrading`) respectively. Tier 3 is sector-specific
 (`r/artificial`, `r/SemiConductors`, `r/energy`, `r/biotech`, `r/space`,
-`r/geopolitics`).
+`r/geopolitics`). `tier2_pct` and `tier3_pct` are persisted on `ticker_timeline`
+for the drilldown UI but are not currently consumed by stage logic (stage 3
+uses the contributor-growth proxy instead).
 
 Lifecycle classification runs hourly in `job-narrative-detector` after HDBSCAN
 clustering on the 72h embedding window per ticker.
@@ -463,6 +494,23 @@ Key Vault. Images via ghcr.io.
 
 ## Change log
 
+- **2026-05-15b** — §4 lifecycle alignment pass (doc + tests, no code changes):
+  - **Doc fix (§4)**: added stage 0 ("insufficient data"), documented the
+    `1 → 2 → 3 → 5 → 6` override priority (last matching rule wins), the
+    catch-all stage-1 fallback at `0.4 × dominant_fraction`, and the per-stage
+    confidence multipliers consumed by §5 Component C.
+  - **Doc fix (§4)**: marked stage 4 explicitly "not yet implemented" — the
+    `external_media_citations` and `analyst_name_count` fields it requires
+    don't exist on `ticker_timeline` yet, so stage 4 is unreachable. Deferred
+    to Phase 6.1.
+  - **Doc fix (§4)**: clarified that `tier2_pct` / `tier3_pct` are persisted
+    for the drilldown but not consumed by stage logic; stage 3 uses
+    `contributor_count_growth_7d` as the rising-tier-2 proxy.
+  - **Tests (workers/narrative-detector)**: added 8 `assign_stage` unit tests
+    covering stage-0 short-circuit, each of stages 1/2/3/5/6, override
+    priority (stage 3 beats stage 1), saturation overrides consensus, the
+    catch-all path, and confidence scaling with `dominant_fraction`. Previous
+    coverage of `assign_stage` was zero; now 12 detector tests pass.
 - **2026-05-15** — §3 / §5.1 conviction alignment pass:
   - **Code fix (§5.1 Component D)**: scorer now floors `comp_d` at 0
     (`max(0, min(thesis_score, 1)) * D_max`). An `exit_signal`-dominated 14d

@@ -67,3 +67,88 @@ def test_cluster_at_min_cluster_size_runs_hdbscan() -> None:
     result = cluster(embeddings, min_cluster_size=3)
 
     assert len(result.labels) == 3
+
+
+# ---------------------------------------------------------------------------
+# assign_stage — §4 lifecycle stage rules
+# ---------------------------------------------------------------------------
+
+from detector import assign_stage  # noqa: E402
+
+
+def _cluster(dominant_fraction: float = 0.8, n_clusters: int = 1) -> ClusterResult:
+    """Minimal ClusterResult stub for stage-rule tests."""
+    return ClusterResult(
+        labels=[0, 0, 0],
+        n_clusters=n_clusters,
+        dominant_cluster=0,
+        dominant_fraction=dominant_fraction,
+    )
+
+
+class TestAssignStage:
+    def test_no_clusters_returns_stage_zero(self) -> None:
+        """n_clusters == 0 → stage 0 'insufficient data' regardless of timeline."""
+        stage, conf = assign_stage({"tier1_pct": 0.30, "dd_post_ratio": 0.20}, _cluster(n_clusters=0))
+        assert stage == 0
+        assert conf == 0.0
+
+    def test_stage_1_niche_technical(self) -> None:
+        """tier1_pct < 0.20 AND financial_term_density >= 0.15 → stage 1."""
+        timeline = {"tier1_pct": 0.10, "financial_term_density": 0.20}
+        stage, conf = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+        assert stage == 1
+        assert conf == pytest.approx(0.7)  # base × 0.7 multiplier
+
+    def test_stage_2_early_conviction(self) -> None:
+        """tier1_pct ∈ [0.20, 0.50] AND dd_post_ratio >= 0.10 AND gini < 0.45."""
+        timeline = {"tier1_pct": 0.30, "dd_post_ratio": 0.15, "gini_14d": 0.30}
+        stage, conf = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+        assert stage == 2
+        assert conf == pytest.approx(1.0)
+
+    def test_stage_3_expanding_awareness(self) -> None:
+        """contributor_count_growth_7d >= 0.30 → stage 3, overrides any earlier match."""
+        timeline = {
+            "tier1_pct": 0.10,                 # would satisfy stage 1
+            "financial_term_density": 0.20,
+            "contributor_count_growth_7d": 0.35,
+        }
+        stage, conf = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+        assert stage == 3
+
+    def test_stage_5_consensus(self) -> None:
+        """emotional_bull_ratio >= 0.50 AND gini_14d < 0.30 → stage 5 (overrides 1/2/3)."""
+        timeline = {
+            "tier1_pct": 0.30, "dd_post_ratio": 0.15, "gini_14d": 0.20,
+            "conviction_emotional_bull_ratio": 0.55,
+        }
+        stage, conf = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+        assert stage == 5
+        assert conf == pytest.approx(0.85)
+
+    def test_stage_6_saturation_overrides_consensus(self) -> None:
+        """emotional_bull >= 0.65 AND gini >= 0.55 → stage 6 (highest priority)."""
+        timeline = {
+            "conviction_emotional_bull_ratio": 0.70,
+            "gini_14d": 0.60,
+        }
+        stage, conf = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+        assert stage == 6
+        assert conf == pytest.approx(0.90)
+
+    def test_catch_all_assigns_stage_1_low_confidence(self) -> None:
+        """If no rule matches, stage defaults to 1 at 0.4 × dominant_fraction."""
+        # tier1_pct in middle, no DD, no growth, no emotional spike — no rule fires.
+        timeline = {"tier1_pct": 0.10, "financial_term_density": 0.05}
+        stage, conf = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+        assert stage == 1
+        assert conf == pytest.approx(0.4)
+
+    def test_confidence_scales_with_dominant_fraction(self) -> None:
+        """Lower cluster dominance → proportionally lower stage confidence."""
+        timeline = {"tier1_pct": 0.30, "dd_post_ratio": 0.15, "gini_14d": 0.30}
+        _, conf_high = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+        _, conf_low = assign_stage(timeline, _cluster(dominant_fraction=0.5))
+        assert conf_low == pytest.approx(0.5)
+        assert conf_high > conf_low
