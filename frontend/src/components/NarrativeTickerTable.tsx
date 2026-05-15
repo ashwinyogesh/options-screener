@@ -15,19 +15,20 @@ interface ColumnDef {
   key: SortKey | null
   label: string
   title?: string
+  align?: 'left' | 'right' | 'center'
 }
 
 const COLUMNS: ColumnDef[] = [
   { key: 'ticker', label: 'Ticker' },
-  { key: 'acs', label: 'ACS' },
-  { key: 'decay_acs', label: 'Decay', title: 'Time-decayed ACS (λ=0.07/day)' },
-  { key: null, label: 'CI' },
-  { key: 'stage', label: 'Stage', title: 'Lifecycle stage 1–6 (methodology §4)' },
-  { key: null, label: 'A' },
-  { key: null, label: 'B' },
-  { key: null, label: 'C' },
-  { key: null, label: 'D' },
-  { key: null, label: 'E' },
+  { key: 'acs', label: 'ACS', title: 'Attention Conviction Score with 95% bootstrap CI', align: 'right' },
+  { key: 'decay_acs', label: 'Decay', title: 'Time-decayed ACS (λ=0.07/day, half-life ≈10d)', align: 'right' },
+  { key: 'stage', label: 'Stage', title: 'Lifecycle stage 1–6 (methodology §4)', align: 'center' },
+  {
+    key: null,
+    label: 'Components',
+    title: 'A: attention · B: contributors · C: narrative · D: thesis · E: market (§5.1). E currently 0 (Phase 6.1).',
+    align: 'left',
+  },
   { key: null, label: 'Signal' },
   { key: 'flags', label: 'Flags' },
 ]
@@ -45,6 +46,17 @@ function getSortValue(row: AcsScore, key: SortKey): number | string {
     case 'flags':
       return row.flags.length
   }
+}
+
+/** Compact component pill: "25" colored, "0" muted. */
+function ComponentPill({ letter, value, title }: { letter: string; value: number; title: string }) {
+  const zero = value < 0.05
+  return (
+    <span className={`acs-pill${zero ? ' acs-pill-zero' : ''}`} title={title}>
+      <span className="acs-pill-letter">{letter}</span>
+      <span className="acs-pill-value">{value.toFixed(0)}</span>
+    </span>
+  )
 }
 
 export function NarrativeTickerTable({ rows, emptyMessage, onSelect }: NarrativeTickerTableProps) {
@@ -85,12 +97,18 @@ export function NarrativeTickerTable({ rows, emptyMessage, onSelect }: Narrative
             const sortable = col.key != null
             const active = col.key === sortKey
             const arrow = active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
+            const style: React.CSSProperties = {}
+            if (sortable) {
+              style.cursor = 'pointer'
+              style.userSelect = 'none'
+            }
+            if (col.align) style.textAlign = col.align
             return (
               <th
                 key={col.label}
                 title={col.title}
                 onClick={sortable ? () => onHeaderClick(col.key) : undefined}
-                style={sortable ? { cursor: 'pointer', userSelect: 'none' } : undefined}
+                style={style}
                 aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}
               >
                 {col.label}
@@ -101,34 +119,50 @@ export function NarrativeTickerTable({ rows, emptyMessage, onSelect }: Narrative
         </tr>
       </thead>
       <tbody>
-        {sorted.map((row) => (
-          <tr
-            key={`${row.ticker}-${row.scored_at}`}
-            onClick={onSelect ? () => onSelect(row.ticker) : undefined}
-            style={onSelect ? { cursor: 'pointer' } : undefined}
-          >
-            <td>
-              <strong>{row.ticker}</strong>
-            </td>
-            <td>{row.acs.toFixed(1)}</td>
-            <td className="muted" title="Time-decayed ACS (λ=0.07/day)">
-              {row.decay_acs.toFixed(1)}
-            </td>
-            <td className="muted">
-              {row.acs_ci_lower.toFixed(0)}–{row.acs_ci_upper.toFixed(0)}
-            </td>
-            <td>
-              <StageBadge stage={row.lifecycle_stage} confidence={row.stage_confidence} />
-            </td>
-            <td>{row.components.a_attention_persistence.toFixed(1)}</td>
-            <td>{row.components.b_contributor_quality.toFixed(1)}</td>
-            <td>{row.components.c_narrative_strength.toFixed(1)}</td>
-            <td>{row.components.d_thesis_quality.toFixed(1)}</td>
-            <td>{row.components.e_market_confirmation.toFixed(1)}</td>
-            <td>{row.dominant_signal}</td>
-            <td className="muted">{row.flags.join(', ') || '—'}</td>
-          </tr>
-        ))}
+        {sorted.map((row) => {
+          const decayDelta = row.acs - row.decay_acs
+          const decayMuted = Math.abs(decayDelta) < 0.1
+          return (
+            <tr
+              key={`${row.ticker}-${row.scored_at}`}
+              onClick={onSelect ? () => onSelect(row.ticker) : undefined}
+              style={onSelect ? { cursor: 'pointer' } : undefined}
+            >
+              <td>
+                <strong>{row.ticker}</strong>
+              </td>
+              <td style={{ textAlign: 'right' }}>
+                <div className="acs-cell">
+                  <span className="acs-cell-primary">{row.acs.toFixed(1)}</span>
+                  <span className="acs-cell-ci">
+                    {row.acs_ci_lower.toFixed(0)}–{row.acs_ci_upper.toFixed(0)}
+                  </span>
+                </div>
+              </td>
+              <td
+                className={decayMuted ? 'muted' : undefined}
+                style={{ textAlign: 'right' }}
+                title="Time-decayed ACS (λ=0.07/day)"
+              >
+                {row.decay_acs.toFixed(1)}
+              </td>
+              <td style={{ textAlign: 'center' }}>
+                <StageBadge stage={row.lifecycle_stage} confidence={row.stage_confidence} />
+              </td>
+              <td>
+                <div className="acs-pills">
+                  <ComponentPill letter="A" value={row.components.a_attention_persistence} title="Attention persistence (§5.1 A, max 25)" />
+                  <ComponentPill letter="B" value={row.components.b_contributor_quality} title="Contributor quality (§5.1 B, max 20)" />
+                  <ComponentPill letter="C" value={row.components.c_narrative_strength} title="Narrative strength (§5.1 C, max 20)" />
+                  <ComponentPill letter="D" value={row.components.d_thesis_quality} title="Thesis quality (§5.1 D, max 20)" />
+                  <ComponentPill letter="E" value={row.components.e_market_confirmation} title="Market confirmation (§5.1 E, max 15) — not yet implemented" />
+                </div>
+              </td>
+              <td>{row.dominant_signal}</td>
+              <td className="muted">{row.flags.join(', ') || '—'}</td>
+            </tr>
+          )
+        })}
       </tbody>
     </table>
   )
