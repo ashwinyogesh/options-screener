@@ -175,12 +175,12 @@ the snapshot:
 
 | Stage | Name | Definition (signal-side) | Trade posture |
 |---|---|---|---|
-| 1 | Niche technical | `tier1_pct < 0.20` AND `technical_term_density > 0.15` | Watch |
-| 2 | Early conviction | `tier1_pct ∈ [0.20, 0.50]` AND `dd_post_ratio > 0.10` AND `gini < 0.45` | **Target** |
-| 3 | Expanding awareness | `tier2_pct` rising AND `contributor_count_growth_7d > 30%` | **Target** |
-| 4 | Institutional attention | `external_media_citations > 0` OR `analyst_name_count > 0` | Late — partial |
-| 5 | Consensus | broad acceptance, no debate | Avoid |
-| 6 | Saturation | `emotional_bull` dominant, Gini rising | Avoid (bagholder phase) |
+| 1 | Niche technical | `tier1_pct < 0.20` AND `financial_term_density ≥ 0.15` | Watch |
+| 2 | Early conviction | `tier1_pct ∈ [0.20, 0.50]` AND `dd_post_ratio ≥ 0.10` AND `gini_14d < 0.45` | **Target** |
+| 3 | Expanding awareness | `contributor_count_growth_7d ≥ 0.30` (tier2-rising proxy) | **Target** |
+| 4 | Institutional attention | `external_media_citations > 0` OR `analyst_name_count > 0` (Phase 6) | Late — partial |
+| 5 | Consensus | `conviction_emotional_bull_ratio ≥ 0.50` AND `gini_14d < 0.30` | Avoid |
+| 6 | Saturation | `conviction_emotional_bull_ratio ≥ 0.65` AND `gini_14d ≥ 0.55` | Avoid (bagholder phase) |
 
 `tier1_pct` and `tier2_pct` are the share of mentions in Tier 1 (`r/investing`,
 `r/stocks`, `r/SecurityAnalysis`, `r/ValueInvesting`, `r/Bogleheads`) and Tier 2

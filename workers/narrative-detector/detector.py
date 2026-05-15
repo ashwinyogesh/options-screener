@@ -169,12 +169,12 @@ def assign_stage(
         Stage 0 means "insufficient data to classify".
 
     Stage rules from §4 of NARRATIVE_METHODOLOGY.md:
-        1 — Niche technical:     tier1_pct < 0.20  AND financial_term_density > 0.15
-        2 — Early conviction:    tier1_pct ∈ [0.20,0.50]  AND dd_post_ratio > 0.10 AND gini < 0.45
-        3 — Expanding awareness: contributor_count_growth_7d > 0.30  (tier2 rising proxy)
+        1 — Niche technical:     tier1_pct < 0.20  AND financial_term_density ≥ 0.15
+        2 — Early conviction:    tier1_pct ∈ [0.20,0.50]  AND dd_post_ratio ≥ 0.10 AND gini < 0.45
+        3 — Expanding awareness: contributor_count_growth_7d ≥ 0.30  (tier2 rising proxy)
         4 — Institutional attn:  (not computable at Phase 5 — external_media/analyst data absent)
-        5 — Consensus:           conviction_emotional_bull_ratio > 0.50 AND gini < 0.30
-        6 — Saturation:          conviction_emotional_bull_ratio > 0.65 AND gini_14d > 0.55
+        5 — Consensus:           conviction_emotional_bull_ratio ≥ 0.50 AND gini < 0.30
+        6 — Saturation:          conviction_emotional_bull_ratio ≥ 0.65 AND gini_14d ≥ 0.55
     """
     if cluster_result.n_clusters == 0:
         return 0, 0.0
@@ -194,21 +194,26 @@ def assign_stage(
     base_conf = cluster_result.dominant_fraction
 
     # Rules evaluated in reverse priority (later stages override earlier).
+    # Boundary inequalities use ≥ / ≤ rather than strict > / < so that ratios
+    # landing exactly on a methodology threshold (e.g. emotional_bull_ratio
+    # = 0.50 with a small even-count classified pool) still trigger the
+    # intended stage. Strict inequality made stages flicker at exact-tie
+    # ratios in the experimental data; methodology doc was updated to match.
     stage = 0
     conf = 0.0
 
     # Stage 1 — Niche technical
-    if tier1_pct < 0.20 and financial_term_density > 0.15:
+    if tier1_pct < 0.20 and financial_term_density >= 0.15:
         stage = 1
         conf = base_conf * 0.7  # lower confidence — early, sparse signal
 
     # Stage 2 — Early conviction (overrides Stage 1 if broader)
-    if 0.20 <= tier1_pct <= 0.50 and dd_post_ratio > 0.10 and gini_14d < 0.45:
+    if 0.20 <= tier1_pct <= 0.50 and dd_post_ratio >= 0.10 and gini_14d < 0.45:
         stage = 2
         conf = base_conf
 
     # Stage 3 — Expanding awareness
-    if contributor_growth > 0.30:
+    if contributor_growth >= 0.30:
         stage = 3
         conf = base_conf
 
@@ -216,12 +221,12 @@ def assign_stage(
     # Skipped; will be enabled in Phase 6 when scorer provides those fields.
 
     # Stage 5 — Consensus (emotional bull dominant, concentrated)
-    if emotional_bull_ratio > 0.50 and gini_14d < 0.30:
+    if emotional_bull_ratio >= 0.50 and gini_14d < 0.30:
         stage = 5
         conf = base_conf * 0.85
 
     # Stage 6 — Saturation (emotional bull very dominant, Gini rising)
-    if emotional_bull_ratio > 0.65 and gini_14d > 0.55:
+    if emotional_bull_ratio >= 0.65 and gini_14d >= 0.55:
         stage = 6
         conf = base_conf * 0.90
 

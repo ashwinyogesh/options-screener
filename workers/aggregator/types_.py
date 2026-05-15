@@ -90,6 +90,15 @@ class TickerTimelineSnapshot:
     bearish_ratio: float = 0.0         # fraction of signals with sentiment="bearish"
     avg_confidence: float = 0.0        # mean confidence score across all signals in 14d
 
+    # --- Subreddit-tier composition (from extractor signals over 14d) ---
+    # tier1 = researched / long-horizon subs (investing, stocks, Bogleheads, ...)
+    # tier2 = emotional / momentum subs (wallstreetbets, options, swingtrading, ...)
+    # tier3 = sector-specific subs. Source of truth: workers/ingestion/config.py.
+    # Detector lifecycle rules (stages 1–3) consume these.
+    tier1_pct: float = 0.0
+    tier2_pct: float = 0.0
+    tier3_pct: float = 0.0
+
     # --- Phase 4+ fields (None until conviction classifier runs) ---
     # Ratios computed over classified signals in the 14d window only.
     # None = no signals have been classified yet (classifier hasn't run).

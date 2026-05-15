@@ -68,6 +68,21 @@ _CONVICTION_WEIGHTS: dict[str, float] = {
     "exit_signal":       -0.5,
 }
 
+# Subreddit tier map — mirror of workers/ingestion/config.py SUBREDDIT_TIERS.
+# Kept inline here because aggregator and ingestion are independent Docker
+# images and can't share Python imports. If you edit one, edit the other.
+# Comparison is case-insensitive on the subreddit name.
+_TIER1_SUBS: frozenset[str] = frozenset({
+    "investing", "stocks", "securityanalysis", "valueinvesting", "bogleheads",
+})
+_TIER2_SUBS: frozenset[str] = frozenset({
+    "wallstreetbets", "options", "smallstreetbets", "pennystocks",
+    "theraceto10million", "swingtrading",
+})
+_TIER3_SUBS: frozenset[str] = frozenset({
+    "artificial", "semiconductors", "energy", "biotech", "space", "geopolitics",
+})
+
 
 # ---------------------------------------------------------------------------
 # §2.1 — Persistence: decay-weighted density
@@ -221,6 +236,35 @@ def compute_dd_post_ratio(flairs: Sequence[str | None], bodies: Sequence[str]) -
     return dd_count / total
 
 
+def compute_tier_pcts(subreddits: Sequence[str | None]) -> tuple[float, float, float]:
+    """Return (tier1_pct, tier2_pct, tier3_pct) over the given subreddit list.
+
+    Unknown subreddits are excluded from both numerator and denominator, so
+    the three returned values sum to ≤1.0 (and to 1.0 when every signal is in
+    one of the known tiers). Empty input → (0.0, 0.0, 0.0).
+    """
+    if not subreddits:
+        return 0.0, 0.0, 0.0
+    t1 = t2 = t3 = 0
+    known = 0
+    for sub in subreddits:
+        if not sub:
+            continue
+        s = sub.lower()
+        if s in _TIER1_SUBS:
+            t1 += 1
+            known += 1
+        elif s in _TIER2_SUBS:
+            t2 += 1
+            known += 1
+        elif s in _TIER3_SUBS:
+            t3 += 1
+            known += 1
+    if known == 0:
+        return 0.0, 0.0, 0.0
+    return t1 / known, t2 / known, t3 / known
+
+
 # ---------------------------------------------------------------------------
 # §2.5 — Composite attention quality score
 # ---------------------------------------------------------------------------
@@ -318,6 +362,7 @@ def build_snapshot(
     flairs_14d: list[str | None] = []
     sentiments_14d: list[str] = []
     confidences_14d: list[float] = []
+    subreddits_14d: list[str | None] = []
     sigs_14d: list[dict] = []  # collected in the main loop — both bounds enforced there
 
     cutoff_30d = bucket_date - timedelta(days=_WINDOW_30D)
@@ -340,6 +385,7 @@ def build_snapshot(
             flairs_14d.append(sig.get("flair"))
             sentiments_14d.append(sig.get("sentiment", "neutral"))
             confidences_14d.append(float(sig.get("confidence", 0.0)))
+            subreddits_14d.append(sig.get("subreddit"))
             sigs_14d.append(sig)
 
     # --- Build daily_buckets for 30d window ---
@@ -383,6 +429,7 @@ def build_snapshot(
     # --- §2.4 Depth ---
     ft_density = compute_financial_term_density(bodies_14d)
     dd_ratio = compute_dd_post_ratio(flairs_14d, bodies_14d)
+    tier1_pct, tier2_pct, tier3_pct = compute_tier_pcts(subreddits_14d)
 
     # --- Sentiment ratios (Phase 2 extractor output, not conviction states) ---
     total_s = len(sentiments_14d)
@@ -420,6 +467,9 @@ def build_snapshot(
         bullish_ratio=bullish_ratio,
         bearish_ratio=bearish_ratio,
         avg_confidence=avg_confidence,
+        tier1_pct=tier1_pct,
+        tier2_pct=tier2_pct,
+        tier3_pct=tier3_pct,
         conviction_researched_bull_ratio=rb_ratio,
         conviction_researched_bear_ratio=rbr_ratio,
         conviction_emotional_bull_ratio=eb_ratio,
