@@ -378,6 +378,39 @@ class TestBuildSnapshot:
         assert snap.mentions_14d == 1    # only the 7-day-old signal
         assert snap.mentions_7d == 1     # same
 
+    def test_gini_14d_ignores_pre_window_activity(self) -> None:
+        """§2.3 Gini must use 14d-only mention counts, not 30d totals.
+
+        Regression: previously gini_14d used author_total_mentions (30d)
+        restricted to the 14d-active author set, which let pre-window
+        activity skew the diversity metric.
+        """
+        from datetime import datetime, timezone
+
+        anchor = date(2026, 5, 1)
+
+        def ts(days_ago: int) -> int:
+            d = anchor - timedelta(days=days_ago)
+            return int(datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp())
+
+        # Two authors, both active inside the 14d window with 1 mention each.
+        # Author A *also* posted 10 times 20 days ago (pre-14d-window).
+        # 14d-scoped Gini should be ~0 (perfectly equal: 1 vs 1).
+        signals = []
+        for _ in range(10):
+            signals.append({"ticker": "NVDA", "sentiment": "bullish", "confidence": 0.8,
+                             "rationale": "", "author_hash": "A", "created_utc": ts(20), "flair": None})
+        signals.append({"ticker": "NVDA", "sentiment": "bullish", "confidence": 0.8,
+                         "rationale": "", "author_hash": "A", "created_utc": ts(5), "flair": None})
+        signals.append({"ticker": "NVDA", "sentiment": "bullish", "confidence": 0.8,
+                         "rationale": "", "author_hash": "B", "created_utc": ts(3), "flair": None})
+
+        snap = build_snapshot("NVDA", signals, anchor)
+        assert snap.unique_authors_14d == 2
+        # If gini_14d used 30d totals it would be ~0.41 (counts [1, 11]).
+        # Scoped to 14d it should be exactly 0 (counts [1, 1]).
+        assert snap.gini_14d == 0.0
+
     def test_acceleration_7d_positive_when_recent_spike(self) -> None:
         """acceleration_7d > 0 when last 7 days have signals but older days do not."""
         from datetime import datetime, timezone

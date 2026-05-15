@@ -90,20 +90,27 @@ Indicates organic conviction formation, not news reaction.
 
 ### 2.2 Acceleration
 
-Rate of change of mention velocity. Acceleration precedes repricing; deceleration
-after a spike is low-quality.
+Fractional excess of recent attention over the 30-day baseline. Acceleration
+precedes repricing; deceleration after a spike is low-quality.
 
-- Measure: $\Delta V / \Delta t$ where $V$ is decay-weighted daily mention count
-  vs. a 30-day baseline.
-- Quality signal: 3+ days of sustained acceleration > 1.5 × baseline = regime-shift
-  candidate.
+- Measure: $\text{accel} = \dfrac{\text{dwd}_{7d} - \text{dwd}_{30d}}{\text{dwd}_{30d}}$
+  where both densities are the normalized [0,1] persistence values from §2.1.
+  Returns 0 when the 30d baseline is 0. Unbounded above; callers clip for display.
+- Quality signal: $\text{accel} > 0.5$ ⇔ 7d density is at least 1.5× the 30d
+  baseline = regime-shift candidate. This 1.5× threshold is what sets the
+  acceleration saturation point (`_QUALITY_ACCEL_SAT = 0.5`) in §2.5.
+- Negative acceleration is a deceleration signal and (a) contributes 0 to §2.5
+  quality and (b) triggers the §5.3 `decelerating_3d` haircut when sustained
+  for 3 consecutive days.
 
 ### 2.3 Contributor diversity
 
 Unique non-correlated accounts. Concentrated discussion is a coordination flag.
 
 - Measure: unique author count plus the Gini coefficient of the contribution
-  distribution.
+  distribution. **Both are scoped to the 14-day window** — per-author mention
+  counts feeding `gini_14d` only include signals inside that window so that
+  pre-window activity does not skew the diversity metric.
 - Quality signal: $G < 0.35$ healthy; $G > 0.65$ concentration flag.
 
 ### 2.4 Discussion depth
@@ -111,10 +118,23 @@ Unique non-correlated accounts. Concentrated discussion is a coordination flag.
 Quality of engagement beyond simple mentions. Deep threads with thesis content
 precede retail expansion.
 
-- Measure: avg comment depth, avg comment length, DD-flagged ratio, financial-term
-  density.
-- Quality signal: avg depth > 3 AND financial-term density > 12% = early
-  conviction stage.
+- Scoring inputs (each in [0, 1]):
+  - **DD-flagged post ratio** (`dd_post_ratio`) — fraction of 14d posts whose
+    flair text or first 200 chars of body match a DD keyword
+    (`dd`, `due diligence`, `deep dive`, `analysis`, `thesis`, `research`,
+    `writeup`, `bull case`, `bear case`).
+  - **Financial-term density** (`financial_term_density`) — per-post,
+    $\min(\text{distinct financial terms matched} / \text{token count}, 1)$,
+    averaged across the 14d window. Matching is case-insensitive substring
+    against a curated vocabulary in `attention.py::_FINANCIAL_TERMS` (revenue,
+    eps, ebitda, valuation, fcf, guidance, …).
+- Stored-only display field: **`avg_body_len`** — mean rationale length across
+  the 14d window. Surfaced in the per-ticker drilldown; not scored.
+- Quality signal: `financial_term_density > 0.12` AND `dd_post_ratio > 0.10` =
+  early-conviction depth profile.
+- Phase 6+ deferred: avg comment depth / avg comment length would require
+  ingesting full Reddit comment trees, which the Arctic Shift pipeline does not
+  currently retain.
 
 ### 2.5 Composite weighting
 
@@ -420,6 +440,22 @@ Key Vault. Images via ghcr.io.
 
 ## Change log
 
+- **2026-05-14c** — Attention model §2 audit pass:
+  - **Code fix (§2.3)**: `gini_14d` now uses per-author mention counts scoped
+    to the 14-day window (`author_mentions_14d`). Previously it used 30-day
+    totals for the 14d-active author set, which let pre-window activity skew
+    diversity. Affects both `backend/services/narrative/attention.py` and
+    `workers/aggregator/attention.py`. New regression test
+    `test_gini_14d_ignores_pre_window_activity`.
+  - **Doc tightening (§2.2)**: restated acceleration formula as fractional
+    excess over 30d baseline (matches `compute_acceleration` code) and tied
+    the §2.5 `_QUALITY_ACCEL_SAT = 0.5` saturation point back to the 1.5×
+    baseline threshold.
+  - **Doc tightening (§2.4)**: replaced the four-measure list (which included
+    `avg comment depth`, never implemented) with the two metrics actually
+    scored (`dd_post_ratio`, `financial_term_density`) plus `avg_body_len`
+    as a display-only field. Documented the `_FINANCIAL_TERMS` substring
+    matching strategy explicitly.
 - **2026-05-14b** — Scorer brought into full §5 compliance: small-cap haircut
   (`market_cap < $100M × 0.85`) wired with a yfinance lookup in the scorer
   worker; the `acceleration_7d < 0` proxy replaced by a true 3-day decreasing

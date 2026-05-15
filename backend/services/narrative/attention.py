@@ -358,7 +358,11 @@ def build_snapshot(
     # --- Bucket signals by UTC date ---
     counts_by_day: dict[date, int] = defaultdict(int)
     authors_by_day: dict[date, set[str]] = defaultdict(set)
-    author_total_mentions: dict[str, int] = defaultdict(int)
+    # author_mentions_14d: per-author mention counts restricted to the 14d window.
+    # Feeds compute_gini for `gini_14d` so the diversity metric is faithful to
+    # §2.3 ("Gini coefficient over contributor mentions in the 14-day window"),
+    # rather than letting 15–30-day-old activity skew it.
+    author_mentions_14d: dict[str, int] = defaultdict(int)
 
     bodies_14d: list[str] = []
     flairs_14d: list[str | None] = []
@@ -379,7 +383,8 @@ def build_snapshot(
         author = sig.get("author_hash", "")
         if author:
             authors_by_day[sig_date].add(author)
-            author_total_mentions[author] += 1
+            if sig_date >= cutoff_14d:
+                author_mentions_14d[author] += 1
 
         if sig_date >= cutoff_14d:
             bodies_14d.append(sig.get("rationale", "") or "")
@@ -421,7 +426,7 @@ def build_snapshot(
     unique_authors_14d = len(all_14d_authors)
 
     mention_counts_14d = [
-        author_total_mentions[a]
+        author_mentions_14d[a]
         for a in all_14d_authors
     ]
     gini_14d = compute_gini(mention_counts_14d)
