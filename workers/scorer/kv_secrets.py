@@ -18,7 +18,7 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
     "B_max": 20.0,
     "C_max": 20.0,
     "D_max": 20.0,
-    "E_max": 15.0,  # always 0 in Phase 6 (Component E deferred)
+    "E_max": 15.0,  # market confirmation: 6·RS_14d + 5·opt_ratio + 4·13F_change
 }
 
 

@@ -1,7 +1,7 @@
 """Unit tests for the ACS scorer math (workers/scorer/scorer.py).
 
 Covers NARRATIVE_METHODOLOGY.md §5.1–§5.4:
-- Components A, B, C, D math (E deferred = 0)
+- Components A, B, C, D, E math
 - Adjustments: gini_high, decelerating, late_stage
 - Bounds: [0, 100], CI ±15%
 - Time decay: ACS(t) = ACS_raw * e^{-0.07 * t}
@@ -57,6 +57,10 @@ def _doc(**overrides: object) -> dict:
         "conviction_dd_norm": 0.0,
         "acceleration_7d": 0.0,
         "computed_at": datetime.now(tz=timezone.utc).isoformat(),
+        # Component E sub-signals (pre-populated by main.py via get_market_confirmation)
+        "rs_14d_norm": 0.0,
+        "opt_ratio_norm": 0.0,
+        "institutional_13f_norm": 0.0,
     }
     base.update(overrides)
     return base
@@ -187,12 +191,52 @@ class TestComponentD:
 # ---------- Component E ----------
 
 
-def test_component_e_always_zero() -> None:
-    result = compute_acs(
-        _doc(decay_weighted_density_14d=1.0, lifecycle_stage=3, stage_confidence=1.0),
-        DEFAULT_WEIGHTS,
-    )
-    assert result.components["E"] == 0.0
+class TestComponentE:
+    def test_zero_when_all_signals_absent(self) -> None:
+        result = compute_acs(_doc(), DEFAULT_WEIGHTS)
+        assert result.components["E"] == 0.0
+
+    def test_full_rs_only_yields_six(self) -> None:
+        result = compute_acs(_doc(rs_14d_norm=1.0), DEFAULT_WEIGHTS)
+        assert result.components["E"] == pytest.approx(6.0)
+
+    def test_full_opt_only_yields_five(self) -> None:
+        result = compute_acs(_doc(opt_ratio_norm=1.0), DEFAULT_WEIGHTS)
+        assert result.components["E"] == pytest.approx(5.0)
+
+    def test_full_institutional_only_yields_four(self) -> None:
+        result = compute_acs(_doc(institutional_13f_norm=1.0), DEFAULT_WEIGHTS)
+        assert result.components["E"] == pytest.approx(4.0)
+
+    def test_all_full_yields_e_max(self) -> None:
+        result = compute_acs(
+            _doc(rs_14d_norm=1.0, opt_ratio_norm=1.0, institutional_13f_norm=1.0),
+            DEFAULT_WEIGHTS,
+        )
+        # 6 + 5 + 4 = 15 = E_max
+        assert result.components["E"] == pytest.approx(15.0)
+
+    def test_capped_at_e_max(self) -> None:
+        # Overflow inputs — E must not exceed E_max.
+        result = compute_acs(
+            _doc(rs_14d_norm=5.0, opt_ratio_norm=5.0, institutional_13f_norm=5.0),
+            DEFAULT_WEIGHTS,
+        )
+        assert result.components["E"] == pytest.approx(15.0)
+
+    def test_partial_signal_linearity(self) -> None:
+        half = compute_acs(_doc(rs_14d_norm=0.5), DEFAULT_WEIGHTS)
+        full = compute_acs(_doc(rs_14d_norm=1.0), DEFAULT_WEIGHTS)
+        assert half.components["E"] == pytest.approx(full.components["E"] * 0.5, abs=1e-4)
+
+    def test_missing_fields_treated_as_zero(self) -> None:
+        # Simulate a doc that pre-dates Phase 6.1 (no E fields at all).
+        doc = _doc()
+        del doc["rs_14d_norm"]
+        del doc["opt_ratio_norm"]
+        del doc["institutional_13f_norm"]
+        result = compute_acs(doc, DEFAULT_WEIGHTS)
+        assert result.components["E"] == 0.0
 
 
 # ---------- Adjustments ----------

@@ -20,7 +20,8 @@ from uuid import UUID
 #   Phase 3 (aggregator)  — all attention/volume/depth metrics
 #   Phase 4 (classifier)  — conviction_* fields (None until Phase 4)
 #   Phase 5 (detector)    — lifecycle_stage, stage_confidence (None until Phase 5)
-#   Phase 6 (scorer)      — rs_14d, opt_ratio, institutional_13f (None until Phase 6)
+#   Phase 6 (scorer)      — rs_14d_norm, opt_ratio_norm, institutional_13f_norm
+#                            (fetched from yfinance per-run; NOT persisted to Cosmos)
 # ---------------------------------------------------------------------------
 
 @dataclass

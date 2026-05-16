@@ -1,48 +1,198 @@
 /**
- * Score legend — explains the A–E components and common flags.
+ * Score legend — explains the ACS scoring system in full.
  *
- * Keeps the table itself uncluttered. Links to the methodology doc for the
- * full derivation.
+ * Mirrors CspInput / DitmInput SCORE_LEGEND depth for the Narrative tab.
+ * Keeps the table itself uncluttered via a <details> collapse.
  */
 
-const COMPONENTS = [
-  ['A', 'Daily activity (max 25)', 'Has it been discussed consistently over the past 14 days? A high score means organic, sustained interest — not a one-day spike.'],
-  ['B', 'Post diversity (max 20)', 'Are many different people posting, or just one account? A high score means broad, independent voices — not a coordinated campaign.'],
-  ['C', 'Narrative coherence (max 20)', 'Do the posts share a common theme or thesis? Requires the hourly narrative detector to run — shows 0 until then.'],
-  ['D', 'Analytical depth (max 20)', 'What fraction of posts include real analysis (earnings data, valuations, competitive research) vs. pure hype?'],
-  ['E', 'Market confirmation (max 15)', 'Is the price and options market starting to reflect the narrative? Not yet live — always 0.'],
-] as const
+interface ComponentDef {
+  letter: string
+  name: string
+  max: number
+  what: string
+  formula: string
+  normalization: string
+  why: string
+}
+
+const COMPONENTS: ComponentDef[] = [
+  {
+    letter: 'A',
+    name: 'Attention persistence',
+    max: 25,
+    what: 'How consistently has this ticker been discussed over the last 14 days?',
+    formula: 'A = min(decay_weighted_density_14d, 1.0) × 25',
+    normalization:
+      'decay_weighted_density_14d = Σ e^{−0.1·t} × daily_mentions_t / max_possible_weight  (λ=0.1, half-life ≈ 7 days). Capped at 1.0 before multiplying by 25.',
+    why:
+      'A one-day spike is noise. Persistent daily discussion over two weeks signals that a real thesis is circulating — multiple people independently rediscovering the same idea.',
+  },
+  {
+    letter: 'B',
+    name: 'Contributor quality',
+    max: 20,
+    what: 'Are many different people posting, or just a handful of accounts?',
+    formula: 'B = min( (unique_authors_14d / ln(mentions_14d)) × (1 − Gini) × 20,  20 )',
+    normalization:
+      'unique_authors / ln(mentions) scales for volume — 100 unique voices in 200 posts scores higher than 100 unique voices in 10,000 posts (the latter inflates mention count). (1 − Gini) further discounts when a few authors dominate.',
+    why:
+      'A coordinated campaign can spike mentions with a small number of accounts. Breadth of independent voices — adjusted for raw volume and post distribution — is the organic signal.',
+  },
+  {
+    letter: 'C',
+    name: 'Narrative strength',
+    max: 20,
+    what: 'Is there a coherent shared thesis? Requires the narrative detector to have run.',
+    formula: 'C = (stage_map[stage] / 20) × stage_confidence × 20',
+    normalization:
+      'stage_map = {1:10, 2:18, 3:20, 4:10, 5:5, 6:2}. Stages 2–3 are the target window (peak = 20). stage_confidence ∈ [0, 1] from the HDBSCAN cluster quality. Shows 0 until the hourly detector job runs.',
+    why:
+      'Not all mentions form a narrative. The detector clusters the last 72 h of embedded signals into coherent thesis groups and assigns a lifecycle stage. Stage 2–3 = forming + growing narrative — the ideal entry window before institutional consensus.',
+  },
+  {
+    letter: 'D',
+    name: 'Thesis quality',
+    max: 20,
+    what: 'What fraction of posts include real research vs. pure hype?',
+    formula: 'D = max(0, min( 0.6·r_rb + 0.2·r_rB + 0.2·conv_norm,  1)) × 20',
+    normalization:
+      'r_rb = researched_bull ratio · r_rB = researched_bear ratio · conv_norm = weighted conviction mean ∈ [−0.5, 1.0]. Floored at 0 — a wave of exit_signal posts cannot push D negative.',
+    why:
+      'Researched posts (DD, earnings analysis, competitive moat) signal that the bull thesis has been stress-tested. Pure emotional momentum posts (YOLO, rocket emojis) can move price briefly but don\'t sustain a multi-week narrative.',
+  },
+  {
+    letter: 'E',
+    name: 'Market confirmation',
+    max: 15,
+    what: 'Is the price and options market beginning to reflect the narrative?',
+    formula: 'E = min( 6·RS̃₁₄d + 5·ñopt + 4·ĩnst,  15 )',
+    normalization:
+      'RS̃₁₄d = clip((ticker_return_14d − sector_ETF_return_14d) / 0.20, 0, 1) — saturates at +20% outperformance.\n' +
+      'ñopt = min((call_vol / call_OI) / 2.0, 1) for the nearest expiry — saturates at vol = 2× OI.\n' +
+      'ĩnst = clip(net_institutional_buying_pct / 0.05, 0, 1) — saturates at net +5% buying.',
+    why:
+      'Narrative formation precedes financial confirmation. The weights reflect temporal precedence: price momentum (6) appears first, then options positioning (5), then institutional rebalancing (4). Negative excess return floors at 0 — absence of confirmation is neutral, not bearish.',
+  },
+]
+
+interface AdjustmentDef {
+  condition: string
+  multiplier: string
+  why: string
+}
+
+const ADJUSTMENTS: AdjustmentDef[] = [
+  {
+    condition: 'Gini coefficient > 0.65',
+    multiplier: '× 0.6',
+    why: 'Top accounts responsible for most of the discussion — coordination or pump risk.',
+  },
+  {
+    condition: '3 consecutive days of declining mentions',
+    multiplier: '× 0.8',
+    why: 'Narrative momentum is fading — the audience is losing interest.',
+  },
+  {
+    condition: 'Lifecycle stage > 3',
+    multiplier: '× 0.5',
+    why: 'Narrative has already peaked. Stages 4–6 = maturing → fading. Too late for a clean entry.',
+  },
+  {
+    condition: 'Market cap between $0 and $100M',
+    multiplier: '× 0.85',
+    why: 'Small-cap liquidity discount — higher manipulation risk, thinner options chains.',
+  },
+]
+
+const SCORE_TIERS = [
+  { range: '≥ 75', label: 'Strong signal', color: '#2ec27e', detail: 'All five components firing. Rare — take it at normal size.' },
+  { range: '65–74', label: 'Good signal', color: '#1f9d55', detail: 'Solid narrative with at most one weak component.' },
+  { range: '55–64', label: 'Developing', color: '#f59f00', detail: 'Mechanically forming but not yet confirmed — stage 1–2 setups land here.' },
+  { range: '45–54', label: 'Weak', color: '#e8590c', detail: 'Something structural is off — thin contributor base, low quality, or late stage.' },
+  { range: '< 45', label: 'Pass', color: '#c92a2a', detail: 'Multiple red flags. Skip.' },
+]
 
 const FLAGS = [
-  ['gini_high',          'Concentrated posts — a small number of accounts are responsible for most of the discussion. Check the source posts before acting.'],
-  ['decelerating_3d',    'Fading momentum — the mention rate has dropped for 3 consecutive days. The narrative may be cooling.'],
-  ['late_stage',         'Late stage — the narrative has passed the ideal entry window (stage > 3).'],
-  ['small_cap',          'Small cap — market cap under $100M. Extra caution on liquidity and manipulation risk.'],
-  ['low_unique_authors', 'Few voices — not enough distinct people posting yet for reliable signals.'],
-] as const
+  { flag: 'gini_high',        label: 'Concentrated posts',  desc: 'A small number of accounts drive most of the discussion. Check the source posts before acting.' },
+  { flag: 'decelerating_3d',  label: 'Fading momentum',     desc: 'Mention rate has dropped 3 days in a row. The narrative may be cooling.' },
+  { flag: 'late_stage',       label: 'Late stage',           desc: 'Narrative is past the ideal entry window (stage > 3).' },
+  { flag: 'small_cap',        label: 'Small cap',            desc: 'Market cap under $100M. Extra caution on liquidity and manipulation risk.' },
+  { flag: 'low_unique_authors', label: 'Few voices',         desc: 'Not enough distinct people posting yet for reliable signals.' },
+]
 
 export function ScoreLegend() {
   return (
     <details className="score-legend">
       <summary>How is this scored?</summary>
       <div className="score-legend-body">
-        <h4>Score breakdown (A–E, total out of 100)</h4>
-        <ul>
-          {COMPONENTS.map(([key, name, desc]) => (
-            <li key={key}>
-              <strong>{key} — {name}:</strong> <span style={{ opacity: 0.8 }}>{desc}</span>
-            </li>
-          ))}
-        </ul>
+
+        <h4>Score tiers (ACS out of 100)</h4>
+        <table className="legend-table">
+          <thead>
+            <tr><th>Score</th><th>Interpretation</th><th>Notes</th></tr>
+          </thead>
+          <tbody>
+            {SCORE_TIERS.map(t => (
+              <tr key={t.range}>
+                <td><strong style={{ color: t.color }}>{t.range}</strong></td>
+                <td><strong>{t.label}</strong></td>
+                <td style={{ opacity: 0.8 }}>{t.detail}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <h4>Component breakdown (total out of 100)</h4>
+        {COMPONENTS.map(c => (
+          <div key={c.letter} className="legend-component">
+            <div className="legend-component-header">
+              <span className="legend-component-letter">{c.letter}</span>
+              <span className="legend-component-name">{c.name} <span className="legend-component-max">(max {c.max})</span></span>
+            </div>
+            <p className="legend-component-what">{c.what}</p>
+            <dl className="legend-component-detail">
+              <dt>Formula</dt><dd><code>{c.formula}</code></dd>
+              <dt>Normalization</dt><dd style={{ whiteSpace: 'pre-line' }}>{c.normalization}</dd>
+              <dt>Why it matters</dt><dd>{c.why}</dd>
+            </dl>
+          </div>
+        ))}
+
+        <h4>Score adjustments (multiplicative haircuts, applied in order)</h4>
+        <p style={{ opacity: 0.7, fontSize: '0.85em', marginBottom: '0.5em' }}>
+          Multipliers compound when multiple conditions fire. Worst case (all four): 0.6 × 0.8 × 0.5 × 0.85 = 0.204.
+        </p>
+        <table className="legend-table">
+          <thead>
+            <tr><th>Condition</th><th>Multiplier</th><th>Rationale</th></tr>
+          </thead>
+          <tbody>
+            {ADJUSTMENTS.map(a => (
+              <tr key={a.condition}>
+                <td>{a.condition}</td>
+                <td><strong>{a.multiplier}</strong></td>
+                <td style={{ opacity: 0.8 }}>{a.why}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <h4>Time decay</h4>
+        <p style={{ opacity: 0.8, fontSize: '0.9em' }}>
+          Scores decay as <code>ACS(t) = ACS₀ × e^{'{'}-0.07·t{'}'}</code> where <em>t</em> is days since the score was computed.
+          Half-life ≈ 10 days. The <em>decay_acs</em> column reflects this; the raw <em>acs</em> score does not.
+        </p>
+
         <h4>Warnings explained</h4>
         <ul>
-          {FLAGS.map(([flag, desc]) => (
-            <li key={flag}>
-              <strong>{flag.replace(/_/g, ' ')}:</strong> {desc}
+          {FLAGS.map(f => (
+            <li key={f.flag}>
+              <strong>{f.label}:</strong> <span style={{ opacity: 0.8 }}>{f.desc}</span>
             </li>
           ))}
         </ul>
-        <p style={{ opacity: 0.7, fontSize: '0.85em' }}>
+
+        <p style={{ opacity: 0.6, fontSize: '0.82em', marginTop: '1em' }}>
           Full derivation:{' '}
           <a
             href="https://github.com/ashwincha/Options/blob/main/docs/NARRATIVE_METHODOLOGY.md"

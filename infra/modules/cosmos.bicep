@@ -113,7 +113,7 @@ resource signalsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/co
 //   Sentiment:   bullish_ratio, bearish_ratio, avg_confidence
 //   Phase 4+:    conviction_* fields (added by classifier job)
 //   Phase 5+:    lifecycle_stage, stage_confidence
-//   Phase 6+:    rs_14d, opt_ratio, institutional_13f_change
+//   Phase 6+:    rs_14d_norm, opt_ratio_norm, institutional_13f_norm (in-memory only, not stored)
 resource tickerTimelineContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
   parent: database
   name: 'ticker_timeline'

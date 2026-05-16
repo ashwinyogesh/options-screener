@@ -4,8 +4,9 @@ Container Apps Job — runs on a 15-minute cron schedule.
 
 What it does:
 1. Reads today's ticker_timeline documents from Cosmos.
-2. For each doc, computes ACS components A–D (E=0, deferred) per §5 of
-   NARRATIVE_METHODOLOGY.md using component max weights from Key Vault
+2. For each doc, fetches market-confirmation signals (RS_14d, opt_ratio,
+   institutional_13f) from yfinance, then computes ACS components A–E per §5
+   of NARRATIVE_METHODOLOGY.md using component max weights from Key Vault
    secret `acs-component-weights` (falls back to design defaults if absent).
 3. Applies Gini, deceleration, and late-stage haircuts.
 4. Writes acs, acs_ci_lower, acs_ci_upper, decay_acs, acs_components, acs_flags,
@@ -31,6 +32,7 @@ from config import load_from_env
 from cosmos_client import ScorerCosmosClient
 from kv_secrets import fetch_secrets
 from market_cap_lookup import get_market_cap
+from market_confirmation import get_market_confirmation
 from scorer import compute_acs
 
 logger = logging.getLogger(__name__)
@@ -70,6 +72,12 @@ def main() -> None:
             # skipped for tickers where yfinance is unreachable.
             if "market_cap" not in doc:
                 doc["market_cap"] = get_market_cap(ticker)
+            # §5.1 Component E: fetch market-confirmation signals (cached per
+            # run; non-fatal — any sub-signal that fails stays at 0.0).
+            mc = get_market_confirmation(ticker)
+            doc["rs_14d_norm"] = mc.rs_14d_norm
+            doc["opt_ratio_norm"] = mc.opt_ratio_norm
+            doc["institutional_13f_norm"] = mc.institutional_norm
             result = compute_acs(doc, secrets.weights)
             cosmos.write_acs(
                 doc,

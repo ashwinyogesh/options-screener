@@ -119,8 +119,14 @@ def compute_acs(doc: dict, weights: dict[str, float]) -> AcsResult:
     thesis_score = (0.6 * r_rb) + (0.2 * r_rB) + (0.2 * conv_norm)
     comp_d = max(0.0, min(thesis_score, 1.0)) * d_max
 
-    # --- Component E: deferred ---
-    comp_e = 0.0
+    # --- Component E: market confirmation (§5.1, §6) ---
+    # Sub-signals are pre-populated by main.py via get_market_confirmation();
+    # absent = 0.0 so the scorer degrades gracefully when yfinance is down.
+    e_max: float = weights.get("E_max", 15.0)
+    rs_norm: float = doc.get("rs_14d_norm") or 0.0
+    opt_norm: float = doc.get("opt_ratio_norm") or 0.0
+    inst_norm: float = doc.get("institutional_13f_norm") or 0.0
+    comp_e = min(6.0 * rs_norm + 5.0 * opt_norm + 4.0 * inst_norm, e_max)
 
     acs_raw = comp_a + comp_b + comp_c + comp_d + comp_e
 
@@ -178,7 +184,7 @@ def compute_acs(doc: dict, weights: dict[str, float]) -> AcsResult:
             "B": round(comp_b, 4),
             "C": round(comp_c, 4),
             "D": round(comp_d, 4),
-            "E": 0.0,
+            "E": round(comp_e, 4),
         },
         dominant_signal=dominant_signal,
         flags=flags,

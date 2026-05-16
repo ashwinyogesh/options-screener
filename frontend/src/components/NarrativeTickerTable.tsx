@@ -35,7 +35,7 @@ const COLUMNS: ColumnDef[] = [
   {
     key: null,
     label: 'Breakdown',
-    title: 'A: daily activity \u00b7 B: post diversity \u00b7 C: narrative coherence \u00b7 D: analytical depth \u00b7 E: market confirmation (not yet live)',
+    title: 'A: daily activity · B: post diversity · C: narrative coherence · D: analytical depth · E: market confirmation (price strength, call skew, institutional buying)',
     align: 'left',
   },
   { key: null, label: 'Dominant signal', title: 'Most common discussion type: direction (Bullish/Bearish) \u00d7 style (Analytical = data-backed; Hype-driven = momentum/FOMO)' },
@@ -170,7 +170,7 @@ export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect }: 
                   <ComponentPill letter="B" value={row.components.b_contributor_quality} title="Post diversity score: many different people posting, not one account dominating (max 20)" />
                   <ComponentPill letter="C" value={row.components.c_narrative_strength} title="Narrative coherence: posts share a common thesis (max 20) — needs hourly detector to run" />
                   <ComponentPill letter="D" value={row.components.d_thesis_quality} title="Analytical depth: fraction of posts that include real research, not just hype (max 20)" />
-                  <ComponentPill letter="E" value={row.components.e_market_confirmation} title="Market confirmation: price and options flow alignment (max 15) — not yet live" />
+                  <ComponentPill letter="E" value={row.components.e_market_confirmation} title="Market confirmation: sector-relative price strength · call options skew · institutional buying (max 15)" />
                 </div>
               </td>
               <td>{labelSignal(row.dominant_signal)}</td>

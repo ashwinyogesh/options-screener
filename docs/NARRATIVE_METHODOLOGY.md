@@ -292,7 +292,7 @@ narrative lifecycle (§4), and market confirmation (§6) for a single ticker.
 | B | Contributor quality | 20 | $\min\!\left(\dfrac{\text{unique\_authors}_{14d}}{\log(\text{mentions}_{14d})} \cdot (1 - G) \cdot B_{\max},\ B_{\max}\right)$; $0$ when $\text{mentions}_{14d} \le 1$ |
 | C | Narrative strength | 20 | $\dfrac{\text{stage\_map}[\text{stage}]}{\max(\text{stage\_map})} \cdot \text{stage\_confidence} \cdot C_{\max}$ |
 | D | Thesis quality | 20 | $\max(0,\ \min(0.6 \cdot r_{\text{rb}} + 0.2 \cdot r_{\text{rB}} + 0.2 \cdot \text{conv\_norm},\ 1)) \cdot D_{\max}$ |
-| E | Market confirmation | 15 | $6 \cdot \text{RS}_{14d} + 5 \cdot \text{opt\_ratio} + 4 \cdot \text{13F\_change}$ — **not yet implemented** (hardcoded to 0 in the scorer; deferred to Phase 6.1, see [ADR-0019](adr/0019-narrative-phase6-scorer.md)) |
+| E | Market confirmation | 15 | $6 \cdot \tilde{\text{RS}}_{14d} + 5 \cdot \tilde{\text{opt}} + 4 \cdot \tilde{\text{13F}}$; each sub-signal normalized to $[0, 1]$ — see normalization curves below |
 
 Where:
 
@@ -310,9 +310,28 @@ Where:
   that a perfectly-staged, fully-confident narrative scores exactly $C_{\max}$
   regardless of how the KV-overridable $C_{\max}$ is recalibrated (§5.5). An
   assertion in the scorer enforces this invariant at module load.
-- $\text{RS}_{14d}$ is sector-relative strength over 14 days from yfinance.
-- `opt_ratio` is options volume / open interest from yfinance options chain.
-- `13F_change` is the most recent quarterly change from SEC EDGAR 13F filings.
+- $\text{RS}_{14d}$ is sector-relative price strength over 14 days from yfinance.
+  The raw value is the ticker's 14-day return minus its SPDR sector-ETF return
+  (SPY used as fallback for unmapped sectors).
+  **Normalization:** $\tilde{\text{RS}}_{14d} = \text{clip}(\text{RS}_{14d} / 0.20,\ 0.0,\ 1.0)$
+  where the cap $0.20$ means 20\% outperformance saturates the signal. Negative
+  excess return (underperforming sector) is floored at 0 — absent confirmation
+  is neutral, not negative.
+- `opt_ratio` is the total call volume divided by total call open interest across
+  all strikes for the nearest available expiry from yfinance options chain.
+  **Normalization:** $\tilde{\text{opt}} = \min(\text{opt\_ratio} / 2.0,\ 1.0)$
+  where a ratio of 2.0 (call vol = 2× OI) saturates the signal.
+- `13F_change` is the net institutional buying signal from yfinance holder data:
+  $\text{net\_pct} = \sum \text{Change} / \sum \text{Shares}$ over the top
+  institutional holders returned by yfinance.
+  **Normalization:** $\tilde{\text{13F}} = \text{clip}(\text{net\_pct} / 0.05,\ 0.0,\ 1.0)$
+  where net 5\% institutional buying saturates the signal.
+
+All three sub-signals are fetched by `workers/scorer/market_confirmation.py`
+(via `get_market_confirmation()`) and injected into the Cosmos doc dict before
+`compute_acs()` is called. They are **not persisted to Cosmos** — fetched fresh
+each scorer run. Any sub-signal that fails (yfinance unavailable, no options
+chain, no holder data) returns 0.0; the scorer degrades gracefully.
 
 ### 5.2 Composite
 
@@ -395,14 +414,12 @@ Early confirmation signals, ordered by temporal precedence:
 5. **Management language shift** — guidance moves from defensive to expansive.
 6. **Insider buying** — open-market purchases (not option exercises).
 
-ACS Component E is **the intended home for signals (1)–(3)** at scoring time,
-but is currently hardcoded to 0 (see §5.1 Component E row). The fields
-`rs_14d`, `opt_ratio`, and `institutional_13f_change` are reserved as
-commented placeholders in `backend/services/narrative/types.py` and not yet
-populated by the scorer. Signals (4)–(6) have no implementation in either
-the scorer or the Narrative tab — there is no manual-flag UI in
-`TickerDetailPanel.tsx` today. Bringing (1)–(6) online is the Phase 6.1
-scope; see [ADR-0019](adr/0019-narrative-phase6-scorer.md).
+ACS Component E captures signals (1)–(3) at scoring time. Each sub-signal is
+fetched fresh every scorer run by `workers/scorer/market_confirmation.py` and
+normalized to $[0, 1]$ before being combined with the weights in §5.1. See that
+section for the normalization curve for each sub-signal. Signals (4)–(6) have
+no implementation in either the scorer or the Narrative tab — there is no
+manual-flag UI in `TickerDetailPanel.tsx` today.
 
 **Avoid using price action as the primary signal.** A stock that is up 30% has
 already confirmed, and is probably no longer in stages 1–3.
@@ -448,7 +465,7 @@ Key Vault. Images via ghcr.io.
 ### Phase 1 — Foundation (weeks 1–3)
 
 - Bicep: Event Hubs Basic, Blob, Key Vault, Container Apps env, App Insights
-- Code: `ca-ingestion` (always-on, MinReplicas=1, MaxReplicas=2); Arctic Shift
+- Code: `job-ingestor` (always-on, MinReplicas=1, MaxReplicas=2); Arctic Shift
   API polling (original plan was PRAW; shipped with RSS polling, then switched
   to Arctic Shift during Phase 2 — see ADR-0016); Blob-first durability,
   Event Hubs publish second
