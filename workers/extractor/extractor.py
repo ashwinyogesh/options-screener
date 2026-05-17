@@ -1,8 +1,9 @@
 """OpenAI-based ticker and sentiment extraction (Layer 3 per NARRATIVE_METHODOLOGY §3).
 
 Extraction prompt asks GPT-4o-mini to return a JSON array of signals.
-Each signal has: ticker, sentiment (bullish/bearish/neutral), confidence (0-1),
-and a one-sentence rationale.
+Each signal has: ticker, sentiment (bullish/bearish), confidence (0-1), and a
+one-sentence rationale grounded in the post text (specific catalyst/number/
+event — no generic summaries).
 
 Cost gate (Layer 1): posts with body length < 20 chars skip OpenAI and are
 discarded. Score-based filtering is deferred to Phase 3 aggregation — Arctic
@@ -23,26 +24,37 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """\
-You are a financial signal extractor. Given a Reddit post or comment, extract
-every stock ticker mentioned with a clear bullish or bearish opinion expressed
-by the author. Return a JSON object with a single key "signals" whose value is
+You are a financial signal extractor. Given a Reddit post or comment, extract \
+every stock ticker mentioned with a clear bullish or bearish opinion expressed \
+by the author. Return a JSON object with a single key "signals" whose value is \
 an array — no markdown, no prose.
 
 Each element must have exactly these fields:
   "ticker"     : string — uppercase US stock ticker (e.g. "NVDA")
-  "sentiment"  : one of "bullish", "bearish", "neutral"
+  "sentiment"  : one of "bullish", "bearish"
   "confidence" : float 0.0-1.0 (how clearly the opinion is stated)
-  "rationale"  : string — one sentence quoting or paraphrasing the key signal
+  "rationale"  : string — one concise sentence naming the specific catalyst, \
+thesis, or evidence: include exact numbers, product names, or events if \
+mentioned (e.g. "Q2 EPS beat by 18%, data-center revenue +42% YoY driving \
+multiple expansion" or "FDA rejection of lead drug, pipeline now empty"). \
+Do NOT write generic summaries like "author is bullish on X".
 
 Rules:
 - Omit tickers where opinion is absent or ambiguous (confidence < 0.3).
 - Omit crypto, ETFs, and non-US tickers.
-- Return {"signals": []} if no clear signals exist.
-- Never invent tickers not present in the text."""
+- Do NOT extract "neutral" sentiment — only bullish or bearish.
+- Return {"signals": []} if no clear directional signals exist.
+- Never invent tickers not present in the text.
+- The rationale must be grounded in the post text; do not add external facts."""
 
 # Layer 1 cost gate — skip posts too short to contain meaningful signal.
 # RSS posts are often link submissions; body = title only (~30-60 chars).
 _MIN_BODY_LEN = 20
+
+# Sentiment whitelist (ADR-0022): only directional signals reach the
+# classifier. Neutrals are ambiguous, inflate cost without informing
+# Component D, and produce noise in axis ratios.
+_ALLOWED_SENTIMENTS: frozenset[str] = frozenset({"bullish", "bearish"})
 
 
 @dataclass
@@ -73,7 +85,7 @@ class Extractor:
         api_key: str,
         endpoint: str,
         deployment: str,
-        max_tokens: int = 512,
+        max_tokens: int = 800,
         min_call_interval: float = _DEFAULT_MIN_CALL_INTERVAL,
     ) -> None:
         self._client = AzureOpenAI(
@@ -101,9 +113,21 @@ class Extractor:
         signals = []
         for item in raw:
             try:
+                sentiment = str(item["sentiment"]).strip().lower()
+                # Enum gate (ADR-0022): only directional signals are admitted.
+                # The prompt forbids "neutral" but `response_format` is
+                # `json_object` (free-form), so the model occasionally still
+                # emits it. Drop anything outside the whitelist rather than
+                # leak ambiguity into the classifier.
+                if sentiment not in _ALLOWED_SENTIMENTS:
+                    logger.debug(
+                        "Dropped non-directional signal sentiment=%r ticker=%s",
+                        sentiment, item.get("ticker"),
+                    )
+                    continue
                 signals.append(ExtractedSignal(
                     ticker=str(item["ticker"]).upper(),
-                    sentiment=str(item["sentiment"]),
+                    sentiment=sentiment,
                     confidence=float(item["confidence"]),
                     rationale=str(item["rationale"]),
                     post_id=event.get("post_id", ""),
