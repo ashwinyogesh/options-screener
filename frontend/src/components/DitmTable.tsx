@@ -266,7 +266,7 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
       })()}
       {anyHvFallback && (
         <div className="stale-banner">
-          <span>⚠ Market closed — some IV values are stale. Delta is estimated from 30-day historical volatility.</span>
+          <span>⚠ Some delta values are HV-estimated — bid/ask = 0 on those strikes (illiquid or pre-open quotes).</span>
         </div>
       )}
       <table className="screener-table">

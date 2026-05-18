@@ -275,7 +275,7 @@ export function CcTable({ data }: Props) {
     <div className="table-wrapper">
       {anyStale && !staleDismissed && (
         <div className="stale-banner">
-          <span>⚠ Market closed — options quotes are stale (bid/ask = 0). Delta is estimated from 30-day historical volatility instead of implied volatility. Treat delta values as approximate.</span>
+          <span>⚠ Some delta values are HV-estimated — bid/ask = 0 on those strikes (illiquid or pre-open quotes). Treat those delta values as approximate.</span>
           <button className="stale-dismiss" onClick={() => setStaleDismissed(true)}>✕</button>
         </div>
       )}
