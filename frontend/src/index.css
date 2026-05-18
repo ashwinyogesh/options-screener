@@ -1013,6 +1013,13 @@ body {
   border: 1px solid #3b4174;
   color: #cbd5e1;
 }
+/* Amber variant — used for data-quality warnings that don't block usage */
+.info-banner--warn {
+  background: #271f0e;
+  border-color: #7c5a1a;
+  color: #fbbf24;
+}
+.info-banner--warn strong { color: #fde68a; }
 .info-banner small { color: #94a3b8; }
 .info-banner code,
 .flag-chip,

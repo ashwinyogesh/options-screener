@@ -111,20 +111,29 @@ export function NarrativeView() {
         <div className="error-banner">{error.detail}</div>
       )}
 
-      <ScoreLegend />
+      {/* Stage-density diagnostic banner.
+          Fires when <30% of Top-ACS rows carry a stage badge, which means
+          the HDBSCAN clustering threshold (min_cluster_size) is too high
+          for current ingestion volume. Auto-hides once the detector fix
+          propagates and most tickers receive stage assignments. */}
+      {!loading && top.length > 0 && (() => {
+        const withStage = top.filter(r => r.lifecycle_stage > 0).length
+        const pct = withStage / top.length
+        if (pct >= 0.30) return null
+        return (
+          <div className="info-banner info-banner--warn">
+            <strong>Stage badges are sparse ({withStage}/{top.length} tickers scored).</strong>{' '}
+            The narrative detector clusters posts by semantic similarity using HDBSCAN.
+            With <strong>min_cluster_size=3</strong> a ticker needs ≥3 posts sharing the same
+            thesis in 72 hours — too strict at current ingestion volume (~2 posts/ticker/day).
+            Lowering to <strong>min_cluster_size=2</strong> (2 posts = enough to confirm a
+            shared thesis) unblocks most tickers. The fix is being deployed; stage badges will
+            populate on the next detector run.
+          </div>
+        )
+      })()}
 
-      {/* Show when detector isn't assigning stages to most tickers — indicates
-          ingestion density is still below the HDBSCAN clustering threshold.
-          Auto-hides once the majority of tickers carry a stage. */}
-      {top.length > 0 && top.filter(r => r.lifecycle_stage > 0).length / top.length < 0.30 && (
-        <div className="info-banner" style={{ marginBottom: '1rem' }}>
-          <strong>Stage badges are limited right now.</strong>{' '}
-          The narrative detector requires a minimum cluster density to assign stages 1–6.
-          Most tickers currently show stage 0 while discussion volume ramps up —
-          the ACS <em>score</em> is still valid and scored independently.{' '}
-          <small>Tickers with the most active discussion (e.g. NVDA, MSFT) carry full stage badges.</small>
-        </div>
-      )}
+      <ScoreLegend />
 
       <div className="narrative-grid">
         <section>
