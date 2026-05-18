@@ -125,12 +125,16 @@ jobs:
           }
 
           echo "Worker images to inject:"
-          inject "ingestionImage"  "${{ vars.GHCR_IMAGE_INGESTOR }}"
-          inject "extractorImage"  "${{ vars.GHCR_IMAGE_EXTRACTOR }}"
-          inject "aggregatorImage" "${{ vars.GHCR_IMAGE_AGGREGATOR }}"
-          inject "classifierImage" "${{ vars.GHCR_IMAGE_CLASSIFIER }}"
-          inject "detectorImage"   "${{ vars.GHCR_IMAGE_DETECTOR }}"
-          inject "scorerImage"     "${{ vars.GHCR_IMAGE_SCORER }}"
+          inject "ingestionImage"     "${{ vars.GHCR_IMAGE_INGESTOR }}"
+          inject "extractorImage"     "${{ vars.GHCR_IMAGE_EXTRACTOR }}"
+          inject "aggregatorImage"    "${{ vars.GHCR_IMAGE_AGGREGATOR }}"
+          inject "classifierImage"    "${{ vars.GHCR_IMAGE_CLASSIFIER }}"
+          inject "detectorImage"      "${{ vars.GHCR_IMAGE_DETECTOR }}"
+          inject "scorerImage"        "${{ vars.GHCR_IMAGE_SCORER }}"
+          inject "screenerCspImage"   "${{ vars.GHCR_IMAGE_SCREENER }}"
+          inject "screenerCcImage"    "${{ vars.GHCR_IMAGE_SCREENER }}"
+          inject "screenerDitmImage"  "${{ vars.GHCR_IMAGE_SCREENER }}"
+          inject "screenerSwingImage" "${{ vars.GHCR_IMAGE_SCREENER }}"
 
           # GHCR pull credentials — bicep declares the registry block when these are non-empty.
           if [ -n "${{ secrets.GHCR_PAT }}" ]; then

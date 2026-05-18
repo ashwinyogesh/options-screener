@@ -28,8 +28,8 @@ param tags object
 @description('Resource ID of the Log Analytics workspace from the monitoring module.')
 param logAnalyticsWorkspaceId string
 
-@description('Container image for the ingestion worker. Defaults to a public MCR placeholder; CI deploy overrides with the real ghcr.io image.')
-param ingestionImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+@description('Container image for the ingestion worker. Defaults to real ghcr.io image; CI deploy overrides with SHA-pinned tag.')
+param ingestionImage string = 'ghcr.io/ashwinchandlapur/narrative-ingestion:latest'
 
 @description('Minimum replicas for job-ingestor. Defaults to 0 so infra deploy never auto-starts it; the ingestion CI workflow sets this to 1 when deploying the real image.')
 @minValue(0)
@@ -52,16 +52,16 @@ param detectorImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 param scorerImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 
 @description('Container image for job-screener-csp (ADR-0024). Preserved from live deployment by infra workflow.')
-param screenerCspImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+param screenerCspImage string = 'ghcr.io/ashwinchandlapur/options-screener-worker:latest'
 
 @description('Container image for job-screener-cc (ADR-0024). Preserved from live deployment by infra workflow.')
-param screenerCcImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+param screenerCcImage string = 'ghcr.io/ashwinchandlapur/options-screener-worker:latest'
 
 @description('Container image for job-screener-swing (ADR-0025). Preserved from live deployment by infra workflow.')
-param screenerSwingImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+param screenerSwingImage string = 'ghcr.io/ashwinchandlapur/options-screener-worker:latest'
 
 @description('Container image for job-screener-ditm (ADR-0024). Preserved from live deployment by infra workflow.')
-param screenerDitmImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+param screenerDitmImage string = 'ghcr.io/ashwinchandlapur/options-screener-worker:latest'
 
 @description('GHCR username for pulling worker images. Leave empty to skip registry binding (placeholder/public images only).')
 param ghcrUsername string = ''
