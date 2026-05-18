@@ -143,3 +143,50 @@ class TestQueryEmerging:
             result = cosmos_client.query_emerging(limit=10)
         assert len(result) == 1
         assert result[0]["acs"] == 73.0
+
+    def test_dedup_then_filter_excludes_ticker_whose_newest_lacks_stage(self) -> None:
+        """Regression for the Top-ACS vs Emerging inconsistency observed
+        2026-05-18 (see ADR-0021 deploy notes).
+
+        If filters were applied *before* dedup, MSFT would fall back to
+        yesterday's stage=3 snapshot and appear in Emerging, while the
+        Top-ACS list would show today's lower-ACS row — producing two
+        rows for the same ticker with different ACS / stage values.
+
+        With dedup-then-filter, MSFT's newest doc (no stage) is the
+        canonical snapshot, so MSFT is absent from Emerging entirely.
+        """
+        docs = [
+            # Yesterday: stage 3, high acs
+            {"ticker": "MSFT", "bucket_date": "2026-05-17", "acs": 70.0, "lifecycle_stage": 3},
+            # Today: no stage assigned yet, lower acs
+            {"ticker": "MSFT", "bucket_date": "2026-05-18", "acs": 30.0},
+            # Control: NVDA's newest has stage, should appear
+            {"ticker": "NVDA", "bucket_date": "2026-05-18", "acs": 67.0, "lifecycle_stage": 2},
+        ]
+        with patch.object(cosmos_client, "_get_timeline", return_value=_FakeContainer(docs)):
+            emerging = cosmos_client.query_emerging(limit=10)
+            top = cosmos_client.query_top_acs(limit=10)
+
+        emerging_tickers = [d["ticker"] for d in emerging]
+        top_tickers = [d["ticker"] for d in top]
+        # MSFT excluded from Emerging (newest has no stage), present in Top
+        # with today's acs — no cross-panel ACS/stage divergence.
+        assert "MSFT" not in emerging_tickers
+        assert "NVDA" in emerging_tickers
+        msft_top = next(d for d in top if d["ticker"] == "MSFT")
+        assert msft_top["acs"] == 30.0
+        assert msft_top["bucket_date"] == "2026-05-18"
+        assert top_tickers == ["NVDA", "MSFT"]
+
+    def test_excludes_out_of_range_stages(self) -> None:
+        docs = [
+            {"ticker": "A", "bucket_date": "2026-05-18", "acs": 60.0, "lifecycle_stage": 0},
+            {"ticker": "B", "bucket_date": "2026-05-18", "acs": 60.0, "lifecycle_stage": 1},
+            {"ticker": "C", "bucket_date": "2026-05-18", "acs": 60.0, "lifecycle_stage": 3},
+            {"ticker": "D", "bucket_date": "2026-05-18", "acs": 60.0, "lifecycle_stage": 4},
+            {"ticker": "E", "bucket_date": "2026-05-18", "acs": 60.0, "lifecycle_stage": 5},
+        ]
+        with patch.object(cosmos_client, "_get_timeline", return_value=_FakeContainer(docs)):
+            result = cosmos_client.query_emerging(limit=10)
+        assert sorted(d["ticker"] for d in result) == ["B", "C"]

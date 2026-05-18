@@ -43,6 +43,25 @@ def _get_timeline():  # type: ignore[return]
     return _timeline_container
 
 
+def _fetch_all_scored() -> list[dict]:
+    """Fetch all ticker_timeline docs with acs > 0 across all bucket_dates.
+
+    Single Cosmos query shared by query_top_acs and query_emerging so that
+    both endpoints dedup against the same universe. Applying filters like
+    lifecycle_stage *before* dedup would cause the two queries to pick
+    different "newest" docs per ticker — producing the cross-panel
+    inconsistency where the same ticker shows different ACS / stage in
+    Top ACS vs Emerging.
+    """
+    container = _get_timeline()
+    return list(
+        container.query_items(
+            query="SELECT * FROM c WHERE IS_DEFINED(c.acs) AND c.acs > 0",
+            enable_cross_partition_query=True,
+        )
+    )
+
+
 def query_top_acs(limit: int) -> list[dict]:
     """Return up to limit ticker_timeline docs ordered by acs descending.
 
@@ -56,14 +75,7 @@ def query_top_acs(limit: int) -> list[dict]:
     retention window). We keep only the newest snapshot per ticker before
     sorting, otherwise the same ticker can appear N times in the Top-N.
     """
-    container = _get_timeline()
-    results = list(
-        container.query_items(
-            query="SELECT * FROM c WHERE IS_DEFINED(c.acs) AND c.acs > 0",
-            enable_cross_partition_query=True,
-        )
-    )
-    latest = _latest_per_ticker(results)
+    latest = _latest_per_ticker(_fetch_all_scored())
     latest.sort(key=lambda d: d.get("acs", 0.0), reverse=True)
     return latest[:limit]
 
@@ -71,24 +83,21 @@ def query_top_acs(limit: int) -> list[dict]:
 def query_emerging(limit: int) -> list[dict]:
     """Return stage 1–3 tickers with acs > 0, ordered by acs descending.
 
-    ORDER BY omitted for the same reason as query_top_acs; sorted client-side.
-    De-duplicated to the newest snapshot per ticker (see query_top_acs).
+    Dedup-then-filter: we dedup to the newest snapshot per ticker against
+    the *same* universe as query_top_acs, then keep only rows whose newest
+    snapshot is in lifecycle_stage 1–3. This guarantees both endpoints
+    reference the same "current" doc per ticker; a ticker whose newest
+    snapshot has no stage simply does not appear here (no fallback to a
+    stale older day with a stage assigned).
     """
-    container = _get_timeline()
-    results = list(
-        container.query_items(
-            query=(
-                "SELECT * FROM c "
-                "WHERE IS_DEFINED(c.acs) AND c.acs > 0 "
-                "AND IS_DEFINED(c.lifecycle_stage) "
-                "AND c.lifecycle_stage >= 1 AND c.lifecycle_stage <= 3"
-            ),
-            enable_cross_partition_query=True,
-        )
-    )
-    latest = _latest_per_ticker(results)
-    latest.sort(key=lambda d: d.get("acs", 0.0), reverse=True)
-    return latest[:limit]
+    latest = _latest_per_ticker(_fetch_all_scored())
+    emerging = [
+        d for d in latest
+        if isinstance(d.get("lifecycle_stage"), int)
+        and 1 <= d["lifecycle_stage"] <= 3
+    ]
+    emerging.sort(key=lambda d: d.get("acs", 0.0), reverse=True)
+    return emerging[:limit]
 
 
 def _latest_per_ticker(docs: list[dict]) -> list[dict]:
