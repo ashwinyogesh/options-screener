@@ -93,10 +93,13 @@ class TickerDetailOut(BaseModel):
     unique_authors_14d: int = Field(..., ge=0)
     gini_14d: float = Field(..., ge=0, le=1)
     contributor_count_growth_7d: float
-    conviction_researched_bull_ratio: float | None = None
-    conviction_researched_bear_ratio: float | None = None
-    conviction_emotional_bull_ratio: float | None = None
-    conviction_dd_norm: float | None = None
+    conviction_bull_share: float | None = None
+    conviction_researched_share: float | None = None
+    conviction_entering_share: float | None = None
+    conviction_exiting_share: float | None = None
+    conviction_driver_top: str | None = None
+    conviction_bull_researched_share: float | None = None
+    conviction_bear_researched_share: float | None = None
     conviction_classified_14d: int | None = None
 
 
@@ -164,10 +167,13 @@ def _detail_to_out(detail: TickerDetail) -> TickerDetailOut:
         unique_authors_14d=detail.unique_authors_14d,
         gini_14d=detail.gini_14d,
         contributor_count_growth_7d=detail.contributor_count_growth_7d,
-        conviction_researched_bull_ratio=detail.conviction_researched_bull_ratio,
-        conviction_researched_bear_ratio=detail.conviction_researched_bear_ratio,
-        conviction_emotional_bull_ratio=detail.conviction_emotional_bull_ratio,
-        conviction_dd_norm=detail.conviction_dd_norm,
+        conviction_bull_share=detail.conviction_bull_share,
+        conviction_researched_share=detail.conviction_researched_share,
+        conviction_entering_share=detail.conviction_entering_share,
+        conviction_exiting_share=detail.conviction_exiting_share,
+        conviction_driver_top=detail.conviction_driver_top,
+        conviction_bull_researched_share=detail.conviction_bull_researched_share,
+        conviction_bear_researched_share=detail.conviction_bear_researched_share,
         conviction_classified_14d=detail.conviction_classified_14d,
     )
 
