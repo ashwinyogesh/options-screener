@@ -73,6 +73,32 @@ class TestDocToAcs:
         assert score.lifecycle_stage == 0
         assert score.stage_confidence == 0.0
 
+    # ADR-0023 — continuity fields surface through _doc_to_acs.
+    def test_continuity_fields_map_through(self) -> None:
+        doc = _doc(
+            stage_streak_days=11,
+            first_emerged_at="2026-05-04",
+            acs_slope_14d=1.234,
+        )
+        score = read_service._doc_to_acs(doc)
+        assert score.stage_streak_days == 11
+        assert score.first_emerged_at == "2026-05-04"
+        assert score.acs_slope_14d == pytest.approx(1.234)
+
+    def test_continuity_fields_default_when_missing(self) -> None:
+        score = read_service._doc_to_acs(_doc())
+        assert score.stage_streak_days == 0
+        assert score.first_emerged_at is None
+        assert score.acs_slope_14d is None
+
+    def test_continuity_slope_null_passes_through(self) -> None:
+        score = read_service._doc_to_acs(
+            _doc(stage_streak_days=3, first_emerged_at="2026-05-16", acs_slope_14d=None)
+        )
+        assert score.stage_streak_days == 3
+        assert score.first_emerged_at == "2026-05-16"
+        assert score.acs_slope_14d is None
+
     def test_missing_components_default_to_zero(self) -> None:
         score = read_service._doc_to_acs(_doc(acs_components={}))
         assert score.components.a_attention_persistence == 0.0

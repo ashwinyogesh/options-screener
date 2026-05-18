@@ -130,6 +130,7 @@ export function NarrativeView() {
             emptyMessage="No emerging tickers yet."
             loading={loading}
             onSelect={(t) => void loadDetail(t)}
+            showContinuity
           />
         </section>
         <section>

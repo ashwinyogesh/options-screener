@@ -395,6 +395,55 @@ where the two can drift.
 
 Used to suppress alerts where the CI straddles the alert threshold.
 
+### 5.7 Continuity fields (ADR-0023)
+
+Three scalar fields written alongside `acs` on every scorer run let the UI
+distinguish multi-week durable narratives from one-day spikes without
+re-fetching history at read time. See
+[ADR-0023](adr/0023-emerging-continuity-fields.md) for the design.
+
+**`stage_streak_days`** — count of consecutive days ending today where
+`lifecycle_stage ∈ {1, 2, 3}` (the emerging window §4). Computed by walking
+the per-ticker `ticker_timeline` history newest-first and incrementing
+while the stage stays in the set. A leading `lifecycle_stage = null` (today's
+detector pass hasn't completed yet) is treated as a one-step carry-forward
+from the most recent prior non-null stage; nulls deeper in the walk are
+treated as breaks. The 24-h carry-forward window matches the hourly detector's
+worst-case latency budget.
+
+$$
+\text{streak} = \begin{cases}
+0, & \text{if effective\_today} \notin \{1,2,3\} \\
+1 + \sum_{i=1}^{N} \mathbb{1}[s_i \in \{1,2,3\}], & \text{otherwise}
+\end{cases}
+$$
+
+where the sum runs while `s_i` is a confirmed emerging-stage day with no
+break.
+
+**`first_emerged_at`** — the `bucket_date` of the oldest day in the current
+streak (equivalent to `today − stage_streak_days + 1`, stored explicitly so
+the UI can render "Since May 4" without date arithmetic). `null` when
+`stage_streak_days = 0`.
+
+**`acs_slope_14d`** — ordinary least-squares slope of ACS against day index
+over today + up to 13 prior daily snapshots, in *ACS-points-per-day*.
+Positive slope = rising trend. Computed via `numpy.polyfit(deg=1)` over the
+$(x_i, y_i)$ pairs where $x_i = -\text{days\_ago}_i$ (so a positive slope is
+forward-in-time positive) and $y_i = \text{acs}_i$. Days where prior `acs` is
+`null` are skipped (not zero-imputed). `null` when fewer than 5 valid samples
+are available — the same floor used by the §5.6 bootstrap CI.
+
+These fields are surfaced on the existing `/api/narrative/tickers/top` and
+`/api/narrative/emerging` responses; no new endpoint. The frontend renders
+them as two sortable columns (Streak, Trend) on the Emerging panel, with
+three filter chips (New / Sustaining / Fading) over the same rows. The
+default `decay_acs` sort is unchanged.
+
+The 90-day TTL on `ticker_timeline` (per `infra/modules/cosmos.bicep`) is a
+hard ceiling on `stage_streak_days`. Raising it is a follow-up — see
+[ADR-0023](adr/0023-emerging-continuity-fields.md) "Risks".
+
 ---
 
 ## 6. Market confirmation
@@ -541,6 +590,12 @@ Key Vault. Images via ghcr.io.
 ---
 
 ## Change log
+
+- **2026-05-18** — ADR-0023 continuity fields (code + doc):
+  - **Code (scorer)**: added `compute_continuity_fields()` pure function and `ScorerCosmosClient.fetch_history()` single-partition read. The scorer now writes `stage_streak_days`, `first_emerged_at`, and `acs_slope_14d` alongside `acs` on every run.
+  - **Code (backend)**: extended `AcsScore` dataclass, `_doc_to_acs` mapper, and `AcsScoreOut` Pydantic model to surface the new fields on `/api/narrative/tickers/top` and `/api/narrative/emerging` (no new endpoint).
+  - **Code (frontend)**: `NarrativeTickerTable` gains two sortable columns (Streak, Trend) and three filter chips (New / Sustaining / Fading) on the Emerging panel. Default `decay_acs` sort unchanged.
+  - **Doc (§5.7 new)**: defines the three continuity fields, their math, and the 24-h carry-forward rule for `null` lifecycle stages. Notes 90 d TTL as hard ceiling on streak.
 
 - **2026-05-15e** — §7 dedup correction + pre-flight gate (code + doc):
   - **Code (extractor)**: added `CosmosWriter.get_extracted_post_ids()` — one cross-partition query per job run that returns which `post_id`s already have signals in Cosmos. `main.py` skips those posts entirely before calling OpenAI. Eliminates duplicate API calls from the ingestor's 6h look-back window re-publishing already-extracted posts. Query failure falls back to an empty set (safe — worst case is one redundant OpenAI call, not data loss). New log field: `skipped_dedup`.

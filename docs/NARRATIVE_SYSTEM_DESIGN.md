@@ -681,7 +681,7 @@ container it does not own.
 | `job-aggregator` | `signals` | `ticker_timeline` | `dwd_14d`, `gini_14d`, `acceleration_7d`, `dd_post_ratio`, `financial_term_density`, `conviction_*_share`, `conviction_*_researched_share`, `daily_buckets`, `attention_quality` |
 | `job-classifier` | `signals` (unclassified) | `signals` | `conviction_direction`, `conviction_substance`, `conviction_driver`, `conviction_position`, `conviction_confidence`, `embedding`, `embedding_model` |
 | `job-narrative-detector` | `signals` (embeddings), `ticker_timeline` (attention fields) | `ticker_timeline` | `lifecycle_stage`, `stage_confidence`, `dominant_cluster_fraction` |
-| `job-acs-scorer` | `ticker_timeline`, Key Vault `acs-component-weights` | `ticker_timeline` | `acs`, `acs_ci_lower`, `acs_ci_upper`, `decay_acs`, `acs_components`, `acs_flags`, `acs_scored_at` |
+| `job-acs-scorer` | `ticker_timeline`, Key Vault `acs-component-weights` | `ticker_timeline` | `acs`, `acs_ci_lower`, `acs_ci_upper`, `decay_acs`, `acs_components`, `acs_flags`, `acs_scored_at`, `stage_streak_days`, `first_emerged_at`, `acs_slope_14d` |
 | FastAPI `/api/narrative/*` | `ticker_timeline` | — | (read-only) |
 
 **Scheduling dependency** (not enforced by code — purely temporal):
@@ -882,6 +882,9 @@ signal for this ticker in the 14d window.
 | `acs_components` | object | Scorer | Breakdown: `{a, b, c, d, e}` (each rounded to 4 decimal places). Shown in the UI detail panel so contributors can see which dimension is driving or suppressing the score. |
 | `acs_flags` | list[str] | Scorer | Active haircut flags: `"gini_high"` (×0.6), `"decelerating_3d"` (×0.8), `"late_stage"` (×0.5), `"small_cap"` (×0.85). Empty list = no haircuts applied. Displayed in the UI as warning badges. |
 | `acs_scored_at` | str (ISO 8601) | Scorer | UTC timestamp of the last scorer run that wrote this document. The `acs_staleness_seconds` App Insights alert fires when `now − acs_scored_at > 900s`. |
+| `stage_streak_days` | int `≥ 0` | Scorer (ADR-0023) | Consecutive days ending today where `lifecycle_stage ∈ {1, 2, 3}`. Leading-edge `null` carries forward from the most recent prior non-null stage (24 h window). 0 when today's effective stage is outside the emerging set. Bounded above by the 90 d `ticker_timeline` TTL. |
+| `first_emerged_at` | str (ISO date) \| null | Scorer (ADR-0023) | `bucket_date` of the oldest day in the current streak. `null` when `stage_streak_days = 0`. Stored explicitly so the UI can render "Since YYYY-MM-DD" without arithmetic. |
+| `acs_slope_14d` | float \| null | Scorer (ADR-0023) | OLS slope of `acs` against day index over today + up to 13 prior daily snapshots, in ACS points per day forward (positive = rising). `null` when fewer than 5 valid samples — same floor as the §5.6 bootstrap CI. |
 
 ---
 

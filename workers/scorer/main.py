@@ -33,7 +33,7 @@ from cosmos_client import ScorerCosmosClient
 from kv_secrets import fetch_secrets
 from market_cap_lookup import get_market_cap
 from market_confirmation import get_market_confirmation
-from scorer import compute_acs
+from scorer import compute_acs, compute_continuity_fields
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,19 @@ def main() -> None:
             doc["opt_ratio_norm"] = mc.opt_ratio_norm
             doc["institutional_13f_norm"] = mc.institutional_norm
             result = compute_acs(doc, secrets.weights)
+            # ADR-0023: continuity fields are derived from today's freshly
+            # scored ACS + the prior ~30 daily docs (single-partition read).
+            history = cosmos.fetch_history(
+                ticker=ticker,
+                bucket_date=doc.get("bucket_date", today),
+                days=30,
+            )
+            continuity = compute_continuity_fields(
+                today_stage=doc.get("lifecycle_stage"),
+                today_bucket_date=doc.get("bucket_date", today),
+                today_acs=result.acs,
+                history=history,
+            )
             cosmos.write_acs(
                 doc,
                 acs=result.acs,
@@ -87,6 +100,9 @@ def main() -> None:
                 decay_acs=result.decay_acs,
                 components=result.components,
                 flags=result.flags,
+                stage_streak_days=continuity.stage_streak_days,
+                first_emerged_at=continuity.first_emerged_at,
+                acs_slope_14d=continuity.acs_slope_14d,
             )
             scored += 1
             logger.debug(

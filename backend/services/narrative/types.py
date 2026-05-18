@@ -147,6 +147,12 @@ class AcsScore:
     # Default to 0 / 0.0 when the detector hasn't run yet for this ticker.
     lifecycle_stage: int = 0           # 0 = unknown, 1..6 = methodology §4
     stage_confidence: float = 0.0
+    # ADR-0023 — continuity fields. All optional: scorer back-fills over the
+    # first few runs after deploy; pre-ADR-0023 docs return None for slope and
+    # 0 / None for streak so the frontend can render "—" cleanly.
+    stage_streak_days: int = 0
+    first_emerged_at: str | None = None     # ISO date "YYYY-MM-DD"
+    acs_slope_14d: float | None = None      # ACS points / day, +ve = rising
 
 
 @dataclass(frozen=True)

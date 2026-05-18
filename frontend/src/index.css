@@ -1209,6 +1209,32 @@ body {
 }
 .acs-pill-zero .acs-pill-value { color: #64748b; font-weight: 400; }
 
+/* ADR-0023 — continuity filter chips and slope colors. */
+.continuity-filters {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0 0 0.5rem;
+  flex-wrap: wrap;
+}
+.continuity-chip {
+  background: transparent;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  color: #cbd5e1;
+  padding: 0.15rem 0.7rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.continuity-chip:hover { border-color: #64748b; }
+.continuity-chip.active {
+  background: #1e293b;
+  border-color: #94a3b8;
+  color: #f1f5f9;
+}
+.slope-up   { color: #4ade80; }
+.slope-down { color: #f87171; }
+
 /* Stage badge */
 .stage-badge {
   display: inline-block;

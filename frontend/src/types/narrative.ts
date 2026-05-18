@@ -26,6 +26,13 @@ export interface AcsScore {
   /** 0 = unknown (detector hasn't run), 1..6 per methodology §4. */
   lifecycle_stage: number
   stage_confidence: number  // 0..1
+  // ADR-0023 — continuity fields surfaced on Top + Emerging tables.
+  /** Consecutive days ending today where lifecycle_stage ∈ {1,2,3}. */
+  stage_streak_days?: number
+  /** ISO date of the first day in the current streak (null when streak = 0). */
+  first_emerged_at?: string | null
+  /** OLS slope of ACS over the last 14 daily snapshots; null if <5 samples. */
+  acs_slope_14d?: number | null
 }
 
 export interface DailyBucket {

@@ -60,6 +60,13 @@ def _doc_to_acs(doc: dict) -> AcsScore:
         flags=list(doc.get("acs_flags") or []),
         lifecycle_stage=int(doc.get("lifecycle_stage") or 0),
         stage_confidence=float(doc.get("stage_confidence") or 0.0),
+        # ADR-0023 — continuity fields. Missing on pre-ADR-0023 docs; defaults
+        # match the dataclass so the frontend can render "—" for absent slope.
+        stage_streak_days=int(doc.get("stage_streak_days") or 0),
+        first_emerged_at=doc.get("first_emerged_at"),
+        acs_slope_14d=(
+            float(doc["acs_slope_14d"]) if doc.get("acs_slope_14d") is not None else None
+        ),
     )
 
 

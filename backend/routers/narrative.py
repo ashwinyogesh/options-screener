@@ -68,6 +68,11 @@ class AcsScoreOut(BaseModel):
     flags: list[str]
     lifecycle_stage: int = Field(..., ge=0, le=6)
     stage_confidence: float = Field(..., ge=0, le=1)
+    # ADR-0023 — continuity fields surfaced on existing endpoints. All optional
+    # so pre-ADR-0023 docs (no scorer pass yet) still validate.
+    stage_streak_days: int = Field(0, ge=0)
+    first_emerged_at: str | None = None
+    acs_slope_14d: float | None = None
 
 
 class DailyBucketOut(BaseModel):
@@ -137,6 +142,9 @@ def _acs_to_out(score: AcsScore) -> AcsScoreOut:
         flags=list(score.flags),
         lifecycle_stage=score.lifecycle_stage,
         stage_confidence=score.stage_confidence,
+        stage_streak_days=score.stage_streak_days,
+        first_emerged_at=score.first_emerged_at,
+        acs_slope_14d=score.acs_slope_14d,
     )
 
 

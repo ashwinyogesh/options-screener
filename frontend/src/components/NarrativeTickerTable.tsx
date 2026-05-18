@@ -16,9 +16,15 @@ interface NarrativeTickerTableProps {
   emptyMessage: string
   loading?: boolean
   onSelect?: (ticker: string) => void
+  /**
+   * ADR-0023 — when true, renders Streak / Trend columns and the
+   * New / Sustaining / Fading filter chips above the table. Off for the
+   * Top-ACS panel (continuity is most useful for the Emerging view).
+   */
+  showContinuity?: boolean
 }
 
-type SortKey = 'ticker' | 'acs' | 'decay_acs' | 'stage' | 'flags'
+type SortKey = 'ticker' | 'acs' | 'decay_acs' | 'stage' | 'flags' | 'streak' | 'slope'
 type SortDir = 'asc' | 'desc'
 
 interface ColumnDef {
@@ -26,12 +32,15 @@ interface ColumnDef {
   label: string
   title?: string
   align?: 'left' | 'right' | 'center'
+  continuityOnly?: boolean
 }
 
 const COLUMNS: ColumnDef[] = [
   { key: 'ticker', label: 'Ticker' },
   { key: 'acs', label: 'Score', title: 'Narrative Score (0\u2013100) with 95% confidence range', align: 'center' },
   { key: 'stage', label: 'Stage', title: 'How early is this narrative? Stages 2\u20133 are the ideal entry window.', align: 'center' },
+  { key: 'streak', label: 'Streak', title: 'Consecutive days in stages 1\u20133 ending today (ADR-0023).', align: 'center', continuityOnly: true },
+  { key: 'slope', label: 'Trend', title: '14-day ACS slope \u2014 positive means rising, negative means fading (ADR-0023).', align: 'center', continuityOnly: true },
   {
     key: null,
     label: 'Breakdown',
@@ -49,6 +58,9 @@ function getSortValue(row: AcsScore, key: SortKey): number | string {
     case 'decay_acs': return row.decay_acs
     case 'stage':     return row.lifecycle_stage
     case 'flags':     return row.flags.length
+    case 'streak':    return row.stage_streak_days ?? 0
+    // Null slope sorts as -Infinity so "Fading" stays at the bottom of desc sort.
+    case 'slope':     return row.acs_slope_14d ?? Number.NEGATIVE_INFINITY
   }
 }
 
@@ -77,12 +89,33 @@ function ComponentPill({ letter, value, title }: { letter: string; value: number
   )
 }
 
-export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect }: NarrativeTickerTableProps) {
+export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect, showContinuity = false }: NarrativeTickerTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('acs')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+  // ADR-0023 — orthogonal continuity filter. Default 'all' so Emerging still
+  // shows the full stage-1\u20133 set; chips narrow it client-side without a refetch.
+  type ContinuityFilter = 'all' | 'new' | 'sustaining' | 'fading'
+  const [continuityFilter, setContinuityFilter] = useState<ContinuityFilter>('all')
+
+  const visibleColumns = useMemo(
+    () => COLUMNS.filter((c) => showContinuity || !c.continuityOnly),
+    [showContinuity],
+  )
+
+  const filtered = useMemo(() => {
+    if (!showContinuity || continuityFilter === 'all') return rows
+    return rows.filter((r) => {
+      const streak = r.stage_streak_days ?? 0
+      const slope = r.acs_slope_14d
+      if (continuityFilter === 'new')        return streak <= 7
+      if (continuityFilter === 'sustaining') return streak >= 14 && (slope ?? 0) >= 0
+      if (continuityFilter === 'fading')     return slope != null && slope < 0
+      return true
+    })
+  }, [rows, showContinuity, continuityFilter])
 
   const sorted = useMemo(() => {
-    const copy = [...rows]
+    const copy = [...filtered]
     copy.sort((a, b) => {
       const va = getSortValue(a, sortKey)
       const vb = getSortValue(b, sortKey)
@@ -92,7 +125,7 @@ export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect }: 
       return sortDir === 'asc' ? cmp : -cmp
     })
     return copy
-  }, [rows, sortKey, sortDir])
+  }, [filtered, sortKey, sortDir])
 
   if (loading && rows.length === 0) {
     return <p className="muted">Loading…</p>
@@ -113,10 +146,30 @@ export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect }: 
 
   return (
     <div className="table-wrapper">
+      {showContinuity && (
+        <div className="continuity-filters" role="group" aria-label="Continuity filters">
+          {(['all', 'new', 'sustaining', 'fading'] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              className={`continuity-chip${continuityFilter === f ? ' active' : ''}`}
+              onClick={() => setContinuityFilter(f)}
+              title={
+                f === 'new'        ? 'Streak \u2264 7 days \u2014 newly emerging' :
+                f === 'sustaining' ? 'Streak \u2265 14 days and ACS slope \u2265 0 \u2014 durable narratives' :
+                f === 'fading'     ? 'ACS slope < 0 \u2014 momentum cooling' :
+                                     'Show all rows'
+              }
+            >
+              {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+      )}
       <table className="screener-table">
       <thead>
         <tr>
-          {COLUMNS.map((col) => {
+          {visibleColumns.map((col) => {
             const sortable = col.key != null
             const active = col.key === sortKey
             const classes = [sortable ? 'sortable' : ''].filter(Boolean).join(' ') || undefined
@@ -164,6 +217,18 @@ export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect }: 
               <td style={{ textAlign: 'center' }}>
                 <StageBadge stage={row.lifecycle_stage} confidence={row.stage_confidence} />
               </td>
+              {showContinuity && (
+                <>
+                  <td style={{ textAlign: 'center' }} title={row.first_emerged_at ? `Since ${row.first_emerged_at}` : undefined}>
+                    {(row.stage_streak_days ?? 0) > 0 ? `${row.stage_streak_days}d` : '\u2014'}
+                  </td>
+                  <td style={{ textAlign: 'center' }} className={row.acs_slope_14d != null ? (row.acs_slope_14d >= 0 ? 'slope-up' : 'slope-down') : 'muted'}>
+                    {row.acs_slope_14d == null
+                      ? '\u2014'
+                      : `${row.acs_slope_14d >= 0 ? '\u2197' : '\u2198'} ${row.acs_slope_14d.toFixed(2)}`}
+                  </td>
+                </>
+              )}
               <td>
                 <div className="acs-pills">
                   <ComponentPill letter="A" value={row.components.a_attention_persistence} title="Daily activity score: how consistently it's been discussed over 14 days (max 25)" />

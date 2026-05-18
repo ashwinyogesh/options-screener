@@ -62,6 +62,52 @@ class ScorerCosmosClient:
     # Write: ACS fields onto the ticker_timeline doc.
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Read: prior-day history for one ticker. Single-partition query —
+    # cheap. Used by compute_continuity_fields to derive
+    # stage_streak_days, first_emerged_at, and acs_slope_14d
+    # (ADR-0023).
+    # ------------------------------------------------------------------
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        wait=wait_exponential(multiplier=1, min=1, max=15),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
+    def fetch_history(self, ticker: str, bucket_date: str, days: int = 30) -> list[dict]:
+        """Return prior ticker_timeline docs for a ticker, newest first.
+
+        Excludes the document at ``bucket_date`` itself — only history. The
+        scorer pairs the in-memory today doc with this list to compute
+        continuity fields (ADR-0023). Single-partition query keyed by ticker,
+        so RU cost scales linearly with ``days`` and is independent of the
+        universe size.
+        """
+        query = (
+            "SELECT c.bucket_date, c.lifecycle_stage, c.acs "
+            "FROM c "
+            "WHERE c.ticker = @ticker AND c.bucket_date < @bucket_date "
+            "ORDER BY c.bucket_date DESC "
+            "OFFSET 0 LIMIT @limit"
+        )
+        params = [
+            {"name": "@ticker", "value": ticker},
+            {"name": "@bucket_date", "value": bucket_date},
+            {"name": "@limit", "value": days},
+        ]
+        return list(
+            self._timeline.query_items(
+                query=query,
+                parameters=params,
+                partition_key=ticker,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Write: ACS fields onto the ticker_timeline doc.
+    # ------------------------------------------------------------------
+
     @retry(
         retry=retry_if_exception_type(Exception),
         wait=wait_exponential(multiplier=1, min=1, max=15),
@@ -77,8 +123,11 @@ class ScorerCosmosClient:
         decay_acs: float,
         components: dict[str, float],
         flags: list[str],
+        stage_streak_days: int = 0,
+        first_emerged_at: str | None = None,
+        acs_slope_14d: float | None = None,
     ) -> None:
-        """Upsert the ticker_timeline doc with ACS fields."""
+        """Upsert the ticker_timeline doc with ACS + ADR-0023 continuity fields."""
         updated = {
             **doc,
             "acs": round(acs, 4),
@@ -88,5 +137,10 @@ class ScorerCosmosClient:
             "acs_components": components,
             "acs_flags": flags,
             "acs_scored_at": datetime.now(tz=timezone.utc).isoformat(),
+            "stage_streak_days": stage_streak_days,
+            "first_emerged_at": first_emerged_at,
+            "acs_slope_14d": (
+                round(acs_slope_14d, 4) if acs_slope_14d is not None else None
+            ),
         }
         self._timeline.upsert_item(updated)

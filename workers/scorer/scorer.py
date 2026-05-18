@@ -321,3 +321,139 @@ def _bootstrap_ci(
     lower = min(lower, acs)
     upper = max(upper, acs)
     return max(0.0, lower), min(100.0, upper)
+
+
+# ---------------------------------------------------------------------------
+# ADR-0023 — Emerging-tab continuity fields
+# ---------------------------------------------------------------------------
+# Computed once per ticker per scorer run from prior-day ticker_timeline docs
+# fetched via ScorerCosmosClient.fetch_history. Pure function so it is fully
+# unit-testable without Cosmos.
+# ---------------------------------------------------------------------------
+
+# Stage values that count as "emerging" (target entry window §4 / §14).
+_EMERGING_STAGES: frozenset[int] = frozenset({1, 2, 3})
+# Minimum prior-day samples for a stable OLS slope. Matches the bootstrap
+# floor used by _bootstrap_ci; below this we return None rather than show
+# a misleading trend on a brand-new ticker.
+_SLOPE_MIN_SAMPLES: int = 5
+# Slope is computed over today + up to 13 prior days.
+_SLOPE_WINDOW_DAYS: int = 14
+
+
+@dataclass(frozen=True)
+class ContinuityFields:
+    """ADR-0023 continuity scalars written to today's ticker_timeline doc."""
+    stage_streak_days: int
+    first_emerged_at: str | None
+    acs_slope_14d: float | None
+
+
+def compute_continuity_fields(
+    today_stage: int | None,
+    today_bucket_date: str,
+    today_acs: float,
+    history: list[dict],
+) -> ContinuityFields:
+    """Derive ADR-0023 continuity fields from today's values plus prior docs.
+
+    Args:
+        today_stage:       lifecycle_stage on today's doc (may be None when the
+                           detector has not yet run on today's bucket).
+        today_bucket_date: ISO date string of today's bucket.
+        today_acs:         today's freshly-computed ACS (already haircut-applied).
+        history:           prior ticker_timeline docs for this ticker, newest
+                           first. Each dict has ``bucket_date``,
+                           ``lifecycle_stage`` (int | None), and ``acs``
+                           (float | None). See ScorerCosmosClient.fetch_history.
+
+    Returns:
+        ContinuityFields. ``stage_streak_days`` counts consecutive emerging-stage
+        days ending today, treating today's None as carry-forward from the most
+        recent prior non-null stage (24h carry-forward per ADR-0023).
+        ``first_emerged_at`` is the bucket_date of the oldest day in the streak,
+        or None when the streak is zero. ``acs_slope_14d`` is the OLS slope of
+        ACS against day index over up to 14 daily samples (today + prior),
+        skipping any day where ACS is None. Returns None for slope when fewer
+        than 5 valid samples are available.
+    """
+    streak, first_emerged = _streak_and_first_emerged(
+        today_stage=today_stage,
+        today_bucket_date=today_bucket_date,
+        history=history,
+    )
+    slope = _acs_slope(today_acs=today_acs, history=history)
+    return ContinuityFields(
+        stage_streak_days=streak,
+        first_emerged_at=first_emerged,
+        acs_slope_14d=slope,
+    )
+
+
+def _streak_and_first_emerged(
+    *,
+    today_stage: int | None,
+    today_bucket_date: str,
+    history: list[dict],
+) -> tuple[int, str | None]:
+    """Walk backward from today, counting consecutive emerging-stage days.
+
+    Carry-forward rule (ADR-0023): a single None at the most recent end of the
+    window is treated as the prior day's stage, so a render in the morning
+    before the detector has run does not zero a long streak. Multiple consecutive
+    Nones break the streak — we deliberately limit carry-forward to "today only"
+    because the detector runs hourly.
+    """
+    # Effective today's stage with one-step carry-forward from history.
+    effective_today = today_stage
+    if effective_today is None:
+        for prior in history:
+            ps = prior.get("lifecycle_stage")
+            if ps is not None:
+                effective_today = int(ps)
+                break
+
+    if effective_today not in _EMERGING_STAGES:
+        return 0, None
+
+    # Today counts as day 1; walk back through history while the stage stays
+    # in the emerging set. Treat None inside the walk as a break (we only
+    # carry-forward at the leading edge, never mid-streak).
+    streak = 1
+    first_date = today_bucket_date
+    for prior in history:
+        ps = prior.get("lifecycle_stage")
+        if ps is None or int(ps) not in _EMERGING_STAGES:
+            break
+        streak += 1
+        first_date = str(prior.get("bucket_date") or first_date)
+
+    return streak, first_date
+
+
+def _acs_slope(*, today_acs: float, history: list[dict]) -> float | None:
+    """OLS slope of ACS against day index over today + up to 13 prior days.
+
+    Day index is days-ago (today = 0, yesterday = 1, ...). Slope is returned
+    in "ACS points per day moving forward in time" — so a positive slope means
+    ACS is rising. None when fewer than _SLOPE_MIN_SAMPLES valid (non-None ACS)
+    samples are available.
+    """
+    # Build (days_ago, acs) pairs, today first.
+    samples: list[tuple[int, float]] = [(0, float(today_acs))]
+    for i, prior in enumerate(history[: _SLOPE_WINDOW_DAYS - 1], start=1):
+        acs_val = prior.get("acs")
+        if acs_val is None:
+            continue
+        samples.append((i, float(acs_val)))
+
+    if len(samples) < _SLOPE_MIN_SAMPLES:
+        return None
+
+    # Convert "days_ago" to "day_index moving forward" so a positive slope is
+    # a rising trend. day_index = -days_ago is equivalent up to sign.
+    xs = np.asarray([-x for x, _ in samples], dtype=np.float64)
+    ys = np.asarray([y for _, y in samples], dtype=np.float64)
+    # np.polyfit returns [slope, intercept] for deg=1.
+    slope, _intercept = np.polyfit(xs, ys, 1)
+    return float(slope)
