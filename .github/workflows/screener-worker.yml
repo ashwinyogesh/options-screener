@@ -65,11 +65,11 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Update Container Apps Jobs (CSP, CC, DITM)
+      - name: Update Container Apps Jobs (CSP, CC, DITM, Swing)
         run: |
           IMAGE="${{ vars.GHCR_IMAGE_SCREENER }}:${{ github.sha }}"
           RG="${{ secrets.AZURE_RESOURCE_GROUP }}"
-          for JOB in job-screener-csp job-screener-cc job-screener-ditm; do
+          for JOB in job-screener-csp job-screener-cc job-screener-ditm job-screener-swing; do
             echo "→ Updating $JOB to $IMAGE"
             az containerapp job registry set \
               --name "$JOB" \
