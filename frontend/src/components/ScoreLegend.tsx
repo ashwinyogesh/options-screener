@@ -142,6 +142,29 @@ export function ScoreLegend() {
           </tbody>
         </table>
 
+        <h4>Stage vs. Score — two independent dimensions</h4>
+        <p style={{ opacity: 0.8, fontSize: '0.9em', marginBottom: '0.4em' }}>
+          <strong>Stage</strong> describes the <em>shape</em> of the trajectory — is this narrative forming,
+          growing, or peaking? It comes from the narrative detector and fires on structural rules
+          (contributor growth, tier mix, discussion depth), not on volume.
+        </p>
+        <p style={{ opacity: 0.8, fontSize: '0.9em', marginBottom: '0.4em' }}>
+          <strong>Score</strong> describes the <em>magnitude</em> of the signal — how credible and strong
+          is it right now? It depends on absolute mention density (A), author breadth (B),
+          stage confidence (C), thesis quality (D), and price confirmation (E).
+        </p>
+        <p style={{ opacity: 0.8, fontSize: '0.9em', marginBottom: '0.4em' }}>
+          A ticker can be <strong>Stage 3 with a low score</strong>: the discussion is expanding
+          (right shape) but still too thin to act on. As volume builds over the following weeks,
+          Components A and C rise together and the score follows.
+        </p>
+        <p style={{ opacity: 0.8, fontSize: '0.9em', marginBottom: '1em' }}>
+          A ticker can also have a <strong>high score but no stage badge</strong> (stage 0): the scorer
+          ran when data was richer, but the detector's 72-hour clustering window currently has too few
+          posts to form a cluster. The score reflects a prior run; treat it with caution until the
+          badge reappears.
+        </p>
+
         <h4>Component breakdown (total out of 100)</h4>
         {COMPONENTS.map(c => (
           <div key={c.letter} className="legend-component">
