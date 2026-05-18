@@ -127,6 +127,13 @@ export function ScoreLegend() {
       <div className="score-legend-body">
 
         <h4>Score tiers (ACS out of 100)</h4>
+        <p style={{ opacity: 0.8, fontSize: '0.9em', marginBottom: '0.5em' }}>
+          The number measures <em>magnitude</em>. A small directional indicator below the score
+          reflects the dominant conviction signal:{' '}
+          <strong style={{ color: '#4ade80' }}>▲ bull</strong> when the dominant signal is bullish
+          (analytical or hype-driven), <strong style={{ color: '#f87171' }}>▼ bear</strong> when
+          bearish. No indicator when the signal is unknown or mixed.
+        </p>
         <table className="legend-table">
           <thead>
             <tr><th>Score</th><th>Interpretation</th><th>Notes</th></tr>

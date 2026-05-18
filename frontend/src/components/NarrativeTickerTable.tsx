@@ -11,6 +11,13 @@ function acsScoreClass(acs: number): string {
   return 'score-bad'
 }
 
+/** Returns a direction class based on the dominant signal; null when unknown/mixed. */
+function acsDirectionClass(signal: string): 'acs-direction-bull' | 'acs-direction-bear' | null {
+  if (signal.startsWith('bull')) return 'acs-direction-bull'
+  if (signal.startsWith('bear')) return 'acs-direction-bear'
+  return null
+}
+
 interface NarrativeTickerTableProps {
   rows: AcsScore[]
   emptyMessage: string
@@ -37,7 +44,7 @@ interface ColumnDef {
 
 const COLUMNS: ColumnDef[] = [
   { key: 'ticker', label: 'Ticker' },
-  { key: 'acs', label: 'Score', title: 'Narrative Score (0\u2013100) with 95% confidence range', align: 'center' },
+  { key: 'acs', label: 'Score', title: 'Narrative Score (0\u2013100) with 95% confidence range. \u25b2 green = bullish conviction (\u226560%); \u25bc red = bearish conviction (\u226440%).', align: 'center' },
   { key: 'stage', label: 'Stage', title: 'How early is this narrative? Stages 2\u20133 are the ideal entry window.', align: 'center' },
   { key: 'streak', label: 'Streak', title: 'Consecutive days in stages 1\u20133 ending today (ADR-0023).', align: 'center', continuityOnly: true },
   { key: 'slope', label: 'Trend', title: '14-day ACS slope \u2014 positive means rising, negative means fading (ADR-0023).', align: 'center', continuityOnly: true },
@@ -262,6 +269,19 @@ export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect, sh
                   <span className="acs-cell-ci">
                     {row.acs_ci_lower.toFixed(0)}–{row.acs_ci_upper.toFixed(0)}
                   </span>
+                  {(() => {
+                    const dir = acsDirectionClass(row.dominant_signal)
+                    if (!dir) return null
+                    const bull = dir === 'acs-direction-bull'
+                    return (
+                      <span
+                        className={`acs-direction ${dir}`}
+                        title={`Dominant signal: ${labelSignal(row.dominant_signal)}`}
+                      >
+                        {bull ? '▲ bull' : '▼ bear'}
+                      </span>
+                    )
+                  })()}
                 </div>
               </td>
 

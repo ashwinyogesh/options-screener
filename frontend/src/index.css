@@ -1173,6 +1173,16 @@ body {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
 }
+/* Directional sentiment indicator: ▲ bull (green) | ▼ bear (red) */
+.acs-direction {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  user-select: none;
+}
+.acs-direction-bull { color: #4ade80; }
+.acs-direction-bear { color: #f87171; }
 
 /* Component pills: compact A/B/C/D/E inline display */
 .acs-pills {
