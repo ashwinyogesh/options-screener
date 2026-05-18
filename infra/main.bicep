@@ -40,7 +40,7 @@ param cosmosDataContributorPrincipalIds array = []
 param cosmosDataReaderPrincipalIds array = []
 
 @description('Container image for the ingestion worker. Infra deploy preserves the live image; only falls back to placeholder on first deploy.')
-param ingestionImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+param ingestionImage string = 'ghcr.io/ashwinchandlapur/narrative-ingestion:latest'
 
 @description('Minimum replicas for job-ingestor. Set to 0 by default — the ingestion CI workflow sets it to 1 when deploying.')
 @minValue(0)
