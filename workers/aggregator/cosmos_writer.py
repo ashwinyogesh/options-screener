@@ -5,6 +5,7 @@ import dataclasses
 import logging
 
 from azure.cosmos import CosmosClient
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from types_ import TickerTimelineSnapshot
@@ -68,9 +69,19 @@ class CosmosTimelineWriter:
             for field in self._PRESERVE_FIELDS:
                 if field in existing and existing[field] is not None:
                     new_doc[field] = existing[field]
-        except Exception:
-            # Doc doesn't exist yet, or read failed — proceed with fresh upsert.
+        except CosmosResourceNotFoundError:
+            # Genuinely new doc — no existing fields to preserve. Safe to upsert.
             pass
+        except Exception:
+            # Transient Cosmos error (429, 503, network blip). Re-raise so the
+            # @retry decorator retries the full read-then-write rather than
+            # silently upserting a doc that is missing all scorer/detector fields.
+            logger.exception(
+                "Pre-read failed for ticker_timeline/%s — aborting upsert to "
+                "prevent silent field loss; will be retried",
+                doc_id,
+            )
+            raise
 
         self._container.upsert_item(new_doc)
         logger.debug("Upserted ticker_timeline/%s", doc_id)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 
 from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
@@ -59,8 +60,17 @@ def _get_alerts():  # type: ignore[return]
     return _alerts_container
 
 
+# Rolling window for the cross-partition ticker scan. Keeping this at 14 days
+# means each request fetches at most (universe × 14) documents instead of
+# (universe × 90) at the TTL ceiling — roughly 85% fewer RUs and bytes
+# transferred on every /top and /emerging call. _latest_per_ticker still deduplicates
+# to the single newest doc per ticker within the window, so no data is lost:
+# a ticker not updated in 14 days would have near-zero decay_acs anyway.
+_SCORED_LOOKBACK_DAYS: int = 14
+
+
 def _fetch_all_scored() -> list[dict]:
-    """Fetch all ticker_timeline docs with acs > 0 across all bucket_dates.
+    """Fetch ticker_timeline docs with acs > 0 within the last 14 days.
 
     Single Cosmos query shared by query_top_acs and query_emerging so that
     both endpoints dedup against the same universe. Applying filters like
@@ -68,11 +78,24 @@ def _fetch_all_scored() -> list[dict]:
     different "newest" docs per ticker — producing the cross-panel
     inconsistency where the same ticker shows different ACS / stage in
     Top ACS vs Emerging.
+
+    The 14-day window (_SCORED_LOOKBACK_DAYS) reduces the doc set from
+    tickers×90days to tickers×14days at no correctness cost: _latest_per_ticker
+    picks the newest doc within the window, and any ticker inactive for >14 days
+    will have a decay_acs near zero regardless.
     """
+    cutoff = (
+        datetime.now(tz=timezone.utc) - timedelta(days=_SCORED_LOOKBACK_DAYS)
+    ).strftime("%Y-%m-%d")
     container = _get_timeline()
     return list(
         container.query_items(
-            query="SELECT * FROM c WHERE IS_DEFINED(c.acs) AND c.acs > 0",
+            query=(
+                "SELECT * FROM c "
+                "WHERE IS_DEFINED(c.acs) AND c.acs > 0 "
+                "AND c.bucket_date >= @cutoff_date"
+            ),
+            parameters=[{"name": "@cutoff_date", "value": cutoff}],
             enable_cross_partition_query=True,
         )
     )

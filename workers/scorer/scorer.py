@@ -26,6 +26,7 @@ Alerts (Phase 7 — detect_alerts):
 """
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -303,8 +304,13 @@ def _bootstrap_ci(
         )
 
     # Seed off the ticker so a re-score for the same doc is deterministic.
+    # hashlib.md5 is used instead of hash() because Python's hash() is
+    # randomised per-process (PYTHONHASHSEED), making the seed non-reproducible
+    # across Container Apps Job pod restarts. md5 is deterministic everywhere.
     ticker = doc.get("ticker", "")
-    rng = np.random.default_rng(abs(hash(ticker)) % (2**32))
+    rng = np.random.default_rng(
+        int(hashlib.md5(ticker.encode()).hexdigest(), 16) % (2**32)
+    )
     arr = np.asarray(counts_14d, dtype=np.int64)
     n = len(arr)
 

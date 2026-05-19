@@ -256,6 +256,35 @@ resource screenerSwingContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDataba
   }
 }
 
+// alerts: Phase 7 alert records (stage transitions, ACS spikes).
+// TTL 30 days — old alerts expire automatically; no manual cleanup needed.
+resource alertsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'alerts'
+  properties: {
+    resource: {
+      id: 'alerts'
+      partitionKey: {
+        paths: ['/ticker']
+        kind: 'Hash'
+        version: 2
+      }
+      defaultTtl: 2592000  // 30 days in seconds
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          { path: '/ticker/?' }
+          { path: '/alert_type/?' }
+          { path: '/triggered_at/?' }
+          { path: '/bucket_date/?' }
+        ]
+        excludedPaths: [{ path: '/*' }]
+      }
+    }
+  }
+}
+
 // narratives: aggregated narrative clusters (Phase 4+).
 resource narrativesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
   parent: database
