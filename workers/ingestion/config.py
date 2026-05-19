@@ -30,7 +30,7 @@ class WorkerConfig:
     raw_events_hub: str = "reddit-raw-events"
     blob_container: str = "reddit-raw"
     poll_interval_seconds: int = 60
-    reddit_rate_limit_per_min: int = 60  # Arctic Shift soft cap; bumped from 30 to accommodate 28 subreddits
+    reddit_rate_limit_per_min: int = 60  # Arctic Shift soft cap; 29 subreddits well within budget
 
 
 def load_from_env() -> WorkerConfig:
@@ -62,6 +62,8 @@ SUBREDDIT_TIERS: dict[str, list[str]] = {
     "tier1": [
         # Broad investing / analysis
         "investing", "stocks", "SecurityAnalysis", "ValueInvesting", "Bogleheads",
+        # Options premium sellers — CSP/CC/wheel setups with explicit ticker + strike thesis
+        "thetagang",
         # Systematic / quant traders — cite specific tickers and setups
         "algotrading",
         # Macro context that drives sector rotations
