@@ -1287,7 +1287,6 @@ body {
 /* Narrative ticker table — fixed-layout column widths.
    table-layout: fixed keeps columns stable as rows load and prevents the
    auto-sizing algorithm from blowing out any single column.
-   col.col-flags has no explicit width and absorbs the remaining space.
    At narrower viewports the table overflows the .table-wrapper and
    horizontal scrolls; that's intentional — the sticky Ticker column stays. */
 .narrative-table { table-layout: fixed; width: 100%; }
@@ -1297,12 +1296,14 @@ body {
 .narrative-table col.col-streak    { width:  56px; }
 .narrative-table col.col-slope     { width:  74px; }
 .narrative-table col.col-breakdown { width: 202px; }
-.narrative-table col.col-signal    { width: 132px; }
-/* col-flags: no explicit width → takes all remaining table width */
+.narrative-table col.col-signal    { width: 130px; }
+.narrative-table col.col-flags     { width: 110px; }
+/* Clip overflowing text in the two right-most text columns */
+.narrative-table td.col-signal,
 .narrative-table td.col-flags {
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 0;  /* forces ellipsis clip in fixed-layout cells */
+  white-space: nowrap;
 }
 
 /* ACS cell: primary number with CI band underneath, both centered on column. */
@@ -1419,7 +1420,7 @@ body {
 .tier-mix-bar.empty { background: #12151f; }
 
 /* Alerts list */
-.narrative-alert-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.narrative-alert-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
 .narrative-alert-list li {
   background: #12151f;
   border: 1px solid #2d3148;
@@ -1427,6 +1428,40 @@ body {
   padding: 8px 10px;
   font-size: 12px;
   color: #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.alert-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.alert-ticker {
+  font-weight: 700;
+  color: #e2e8f0;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.alert-type-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.alert-type--acs_rising_fast { background: #2a1f00; color: #fbbf24; border: 1px solid #422006; }
+.alert-type--stage_2_entry   { background: #0d2b1a; color: #4ade80; border: 1px solid #14532d; }
+.alert-type--stage_3_entry   { background: #0a2e1a; color: #2ec27e; border: 1px solid #166534; }
+.alert-detail {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-left: auto;
+}
+.alert-time {
+  font-size: 10px;
 }
 
 /* Detail panel */
