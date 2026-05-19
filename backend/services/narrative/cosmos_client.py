@@ -1,7 +1,8 @@
 """Cosmos DB read client for the narrative read_service (Phase 6).
 
 Reads ACS scores and ticker_timeline docs from Cosmos for the FastAPI routes.
-No writes — scorer worker owns all writes to ticker_timeline.
+Reads alert records from the alerts container (Phase 7).
+No writes — scorer worker owns all writes to ticker_timeline and alerts.
 """
 from __future__ import annotations
 
@@ -19,16 +20,13 @@ logger = logging.getLogger(__name__)
 # import order or hot-reload timing.
 _client: CosmosClient | None = None
 _timeline_container = None  # type: ignore[assignment]
+_alerts_container = None    # type: ignore[assignment]
 
 
-def _get_timeline():  # type: ignore[return]
-    global _client, _timeline_container
-    if _timeline_container is None:
-        # Read env vars here (not at module level) so they are always current:
-        #   NARRATIVE_COSMOS_ENDPOINT — backend/App Service convention
-        #   COSMOS_ENDPOINT           — worker/Bicep convention
+def _get_client() -> CosmosClient:
+    global _client
+    if _client is None:
         endpoint = os.getenv("NARRATIVE_COSMOS_ENDPOINT") or os.getenv("COSMOS_ENDPOINT", "")
-        db_name = os.getenv("NARRATIVE_COSMOS_DB") or os.getenv("COSMOS_DB", "narrative")
         if not endpoint:
             raise RuntimeError(
                 "Cosmos endpoint not set: configure NARRATIVE_COSMOS_ENDPOINT "
@@ -36,11 +34,29 @@ def _get_timeline():  # type: ignore[return]
                 "on this process."
             )
         _client = CosmosClient(endpoint, credential=DefaultAzureCredential())
+    return _client
+
+
+def _get_timeline():  # type: ignore[return]
+    global _timeline_container
+    if _timeline_container is None:
+        db_name = os.getenv("NARRATIVE_COSMOS_DB") or os.getenv("COSMOS_DB", "narrative")
         _timeline_container = (
-            _client.get_database_client(db_name)
+            _get_client().get_database_client(db_name)
             .get_container_client("ticker_timeline")
         )
     return _timeline_container
+
+
+def _get_alerts():  # type: ignore[return]
+    global _alerts_container
+    if _alerts_container is None:
+        db_name = os.getenv("NARRATIVE_COSMOS_DB") or os.getenv("COSMOS_DB", "narrative")
+        _alerts_container = (
+            _get_client().get_database_client(db_name)
+            .get_container_client("alerts")
+        )
+    return _alerts_container
 
 
 def _fetch_all_scored() -> list[dict]:
@@ -138,3 +154,37 @@ def query_ticker(ticker: str) -> dict | None:
         )
     )
     return results[0] if results else None
+
+
+def query_alerts(limit: int = 50, lookback_days: int = 3) -> list[dict]:
+    """Return recent alert records from the alerts container, newest first.
+
+    Queries across all tickers for the last ``lookback_days`` days.
+    Cross-partition because alerts are partitioned by ticker.
+    Non-fatal: returns [] on any Cosmos error so the UI degrades gracefully.
+    """
+    from datetime import datetime, timedelta, timezone
+    cutoff = (
+        datetime.now(tz=timezone.utc) - timedelta(days=lookback_days)
+    ).isoformat()
+    container = _get_alerts()
+    query = (
+        "SELECT * FROM c "
+        "WHERE c.triggered_at >= @cutoff "
+        "ORDER BY c.triggered_at DESC "
+        "OFFSET 0 LIMIT @limit"
+    )
+    try:
+        return list(
+            container.query_items(
+                query=query,
+                parameters=[
+                    {"name": "@cutoff", "value": cutoff},
+                    {"name": "@limit", "value": limit},
+                ],
+                enable_cross_partition_query=True,
+            )
+        )
+    except Exception:
+        logger.exception("query_alerts failed — returning empty list")
+        return []

@@ -18,6 +18,11 @@ Adjustments (multipliers, in order — §5.3):
 CI bands: bootstrap percentile (resampling daily_buckets) when ≥5 days are
 available; otherwise fall back to a ±15% heuristic.
 Time decay: ACS(t) = ACS_raw * e^{-0.07 * t} where t = days since acs_scored_at.
+
+Alerts (Phase 7 — detect_alerts):
+    stage_2_entry   — ticker just entered stage 2 (entry window opening)
+    stage_3_entry   — ticker just entered stage 3 (growing, peak score window)
+    acs_rising_fast — ACS jumped ≥ 15 points vs prior day
 """
 from __future__ import annotations
 
@@ -457,3 +462,86 @@ def _acs_slope(*, today_acs: float, history: list[dict]) -> float | None:
     # np.polyfit returns [slope, intercept] for deg=1.
     slope, _intercept = np.polyfit(xs, ys, 1)
     return float(slope)
+
+
+# ---------------------------------------------------------------------------
+# Alert detection (Phase 7)
+# ---------------------------------------------------------------------------
+
+_ACS_SPIKE_THRESHOLD: float = 15.0   # ACS points/day — roughly 15% of max scale
+
+
+def detect_alerts(
+    ticker: str,
+    today_stage: int | None,
+    today_acs: float,
+    bucket_date: str,
+    history: list[dict],
+) -> list[dict]:
+    """Return alert dicts for any threshold conditions fired this scoring run.
+
+    Each dict is ready to upsert into the Cosmos ``alerts`` container.
+    Idempotent: ``id`` is ``{ticker}_{alert_type}_{bucket_date}`` so
+    re-scoring the same day does not duplicate alerts.
+
+    Args:
+        ticker:       Symbol being scored.
+        today_stage:  lifecycle_stage on today's doc (may be None).
+        today_acs:    Freshly-computed ACS value.
+        bucket_date:  ISO date string of today's bucket (e.g. "2026-05-19").
+        history:      Prior ticker_timeline docs, newest first (from fetch_history).
+    """
+    alerts: list[dict] = []
+    now_iso = datetime.now(tz=timezone.utc).isoformat()
+
+    prior = history[0] if history else None
+    prior_stage = int(prior.get("lifecycle_stage") or 0) if prior else None
+    prior_acs = float(prior.get("acs") or 0.0) if prior else None
+
+    # stage_2_entry — just entered the opening of the entry window.
+    if today_stage == 2 and prior_stage != 2:
+        alerts.append({
+            "id": f"{ticker}_stage_2_entry_{bucket_date}",
+            "ticker": ticker,
+            "alert_type": "stage_2_entry",
+            "triggered_at": now_iso,
+            "bucket_date": bucket_date,
+            "payload": {
+                "prev_stage": prior_stage,
+                "curr_stage": 2,
+                "acs": round(today_acs, 1),
+            },
+        })
+
+    # stage_3_entry — thesis growing, peak score window, premium may be elevated.
+    if today_stage == 3 and prior_stage != 3:
+        alerts.append({
+            "id": f"{ticker}_stage_3_entry_{bucket_date}",
+            "ticker": ticker,
+            "alert_type": "stage_3_entry",
+            "triggered_at": now_iso,
+            "bucket_date": bucket_date,
+            "payload": {
+                "prev_stage": prior_stage,
+                "curr_stage": 3,
+                "acs": round(today_acs, 1),
+            },
+        })
+
+    # acs_rising_fast — significant ACS jump vs prior day.
+    if prior_acs is not None and today_acs - prior_acs >= _ACS_SPIKE_THRESHOLD:
+        alerts.append({
+            "id": f"{ticker}_acs_rising_fast_{bucket_date}",
+            "ticker": ticker,
+            "alert_type": "acs_rising_fast",
+            "triggered_at": now_iso,
+            "bucket_date": bucket_date,
+            "payload": {
+                "prev_acs": round(prior_acs, 1),
+                "curr_acs": round(today_acs, 1),
+                "delta": round(today_acs - prior_acs, 1),
+                "stage": today_stage,
+            },
+        })
+
+    return alerts

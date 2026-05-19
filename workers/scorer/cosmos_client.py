@@ -3,6 +3,7 @@
 Reads:  ticker_timeline — today's snapshot docs (aggregated by job-aggregator)
 Writes: ticker_timeline — adds acs, acs_ci_lower, acs_ci_upper, acs_components,
         acs_flags, acs_scored_at, decay_acs to the same doc.
+        alerts — Phase 7 alert records (stage transitions, ACS spikes).
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ class ScorerCosmosClient:
         self._client = CosmosClient(endpoint, credential=credential)
         self._db = self._client.get_database_client(database)
         self._timeline = self._db.get_container_client("ticker_timeline")
+        self._alerts = self._db.get_container_client("alerts")
 
     # ------------------------------------------------------------------
     # Read: today's ticker_timeline docs that have attention data but
@@ -144,3 +146,25 @@ class ScorerCosmosClient:
             ),
         }
         self._timeline.upsert_item(updated)
+
+    # ------------------------------------------------------------------
+    # Write: alert records to the alerts container (Phase 7).
+    # ------------------------------------------------------------------
+
+    def write_alerts(self, alerts: list[dict]) -> None:
+        """Upsert alert dicts into the alerts container.
+
+        Each alert dict must already have ``id`` and ``ticker`` set.
+        Idempotent: upserting the same id twice is a no-op semantically
+        (Cosmos replaces with identical data).
+        Non-fatal per alert — one failed write does not abort the batch.
+        """
+        for alert in alerts:
+            try:
+                self._alerts.upsert_item(alert)
+                logger.debug("Alert written: %s / %s", alert["ticker"], alert["alert_type"])
+            except Exception:
+                logger.exception(
+                    "Failed to write alert %s for %s — skipping",
+                    alert.get("alert_type"), alert.get("ticker"),
+                )

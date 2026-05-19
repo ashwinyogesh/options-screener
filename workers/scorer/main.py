@@ -33,7 +33,7 @@ from cosmos_client import ScorerCosmosClient
 from kv_secrets import fetch_secrets
 from market_cap_lookup import get_market_cap
 from market_confirmation import get_market_confirmation
-from scorer import compute_acs, compute_continuity_fields
+from scorer import compute_acs, compute_continuity_fields, detect_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,18 @@ def main() -> None:
                 first_emerged_at=continuity.first_emerged_at,
                 acs_slope_14d=continuity.acs_slope_14d,
             )
+            # Phase 7: detect threshold alerts and write to alerts container.
+            alerts = detect_alerts(
+                ticker=ticker,
+                today_stage=doc.get("lifecycle_stage"),
+                today_acs=result.acs,
+                bucket_date=doc.get("bucket_date", today),
+                history=history,
+            )
+            if alerts:
+                cosmos.write_alerts(alerts)
+                logger.info("%s → %d alert(s): %s", ticker, len(alerts),
+                            [a["alert_type"] for a in alerts])
             scored += 1
             logger.debug(
                 "%s → acs=%.1f decay=%.1f stage=%s flags=%s",

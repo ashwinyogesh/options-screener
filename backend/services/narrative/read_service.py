@@ -15,7 +15,7 @@ import math
 from datetime import datetime, timezone
 from uuid import UUID
 
-from .cosmos_client import query_emerging, query_ticker, query_top_acs
+from .cosmos_client import query_alerts, query_emerging, query_ticker, query_top_acs
 from .errors import NarrativeUnavailable, NarrativeNotFound, TickerNotTracked
 from .types import (
     AcsComponents,
@@ -167,6 +167,24 @@ async def get_narrative(narrative_id: UUID) -> NarrativeCluster:
 
 
 async def get_alerts(limit: int = 50) -> list[NarrativeAlert]:
-    """Alerts — not yet implemented in Phase 6."""
-    raise NarrativeUnavailable("Alert pipeline not yet provisioned (Phase 7)")
+    """Return recent narrative alerts from the Cosmos alerts container."""
+    try:
+        docs = query_alerts(limit=limit, lookback_days=3)
+    except Exception as exc:
+        raise NarrativeUnavailable(f"Cosmos alerts unavailable: {exc}") from exc
+
+    results: list[NarrativeAlert] = []
+    for doc in docs:
+        try:
+            triggered_str: str = doc.get("triggered_at") or ""
+            triggered_at = datetime.fromisoformat(triggered_str.replace("Z", "+00:00"))
+            results.append(NarrativeAlert(
+                ticker=str(doc.get("ticker", "")),
+                alert_type=str(doc.get("alert_type", "")),
+                triggered_at=triggered_at,
+                payload=dict(doc.get("payload") or {}),
+            ))
+        except Exception:
+            logger.warning("Skipping malformed alert doc: %s", doc.get("id"))
+    return results
 
