@@ -58,7 +58,7 @@ async function fetchSignals(
 
 const DEFAULT_FILTERS: SignalsFilters = {
   since: null,
-  minConfidence: null,
+  minConfidence: 0.5,
   transition: null,
   ticker: null,
 }
