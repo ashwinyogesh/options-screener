@@ -1426,7 +1426,24 @@ body {
 .tier-mix-bar.empty { background: #12151f; }
 
 /* Alerts list */
-.narrative-alert-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.narrative-alert-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px; /* leave room for scrollbar so cards don't shift */
+}
+.narrative-alert-list::-webkit-scrollbar { width: 8px; }
+.narrative-alert-list::-webkit-scrollbar-track { background: transparent; }
+.narrative-alert-list::-webkit-scrollbar-thumb {
+  background: #2d3148;
+  border-radius: 4px;
+}
+.narrative-alert-list::-webkit-scrollbar-thumb:hover { background: #3b4160; }
 .narrative-alert-list li {
   background: #12151f;
   border: 1px solid #2d3148;
