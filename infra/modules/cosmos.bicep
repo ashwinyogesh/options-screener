@@ -140,6 +140,13 @@ resource tickerTimelineContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatab
           // cannot be explicitly indexed when `/*` is excluded).
           { path: '/acs/?' }
           { path: '/lifecycle_stage/?' }
+          // Detector write path (ADR-0030): patched onto the timeline doc
+          // by write_lifecycle().  Without these in includedPaths, ORDER BY
+          // / WHERE on them silently returns 0 rows because the field is not
+          // indexed (the doc has the value, but no index entry exists).
+          { path: '/stage_confidence/?' }
+          { path: '/n_embedded/?' }
+          { path: '/dominant_fraction/?' }
         ]
         excludedPaths: [{ path: '/*' }]  // daily_counts array excluded — not queried directly
       }
