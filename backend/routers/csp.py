@@ -338,29 +338,30 @@ class InsightResultOut(BaseModel):
 
 @router.post("/csp/insight", response_model=InsightResultOut)
 @limiter.limit("10/minute")
-async def get_csp_insight(http_request: Request, request: InsightRequestIn) -> InsightResultOut:
+async def get_csp_insight(request: Request, body: InsightRequestIn) -> InsightResultOut:
     """
     Calls Azure OpenAI with the scored CSP row + recent news to produce
     a plain-English ENTER / WAIT / SKIP verdict with rationale.
     """
+    _ = request  # consumed by @limiter.limit
     svc_req = InsightRequest(
-        symbol=request.symbol.strip().upper(),
-        price=request.price,
-        strike=request.strike,
-        premium=request.premium,
-        dte=request.dte,
-        expiration=request.expiration,
-        earnings_within_dte=request.earnings_within_dte,
-        env_score=request.env_score,
-        strike_score=request.strike_score,
-        final_score=request.final_score,
-        env_detail=request.env_detail,
-        strike_detail=request.strike_detail,
-        roc_annualized=request.roc_annualized,
-        rsi=request.rsi,
-        iv_hv_ratio=request.iv_hv_ratio,
-        iv_percentile=request.iv_percentile,
-        dist_from_52w_high_pct=request.dist_from_52w_high_pct,
+        symbol=body.symbol.strip().upper(),
+        price=body.price,
+        strike=body.strike,
+        premium=body.premium,
+        dte=body.dte,
+        expiration=body.expiration,
+        earnings_within_dte=body.earnings_within_dte,
+        env_score=body.env_score,
+        strike_score=body.strike_score,
+        final_score=body.final_score,
+        env_detail=body.env_detail,
+        strike_detail=body.strike_detail,
+        roc_annualized=body.roc_annualized,
+        rsi=body.rsi,
+        iv_hv_ratio=body.iv_hv_ratio,
+        iv_percentile=body.iv_percentile,
+        dist_from_52w_high_pct=body.dist_from_52w_high_pct,
     )
     try:
         result: InsightResult = await asyncio.to_thread(get_insight, svc_req)
@@ -605,12 +606,13 @@ class EmRankResponse(BaseModel):
 
 @router.post("/csp/em-rank", response_model=EmRankResponse)
 @limiter.limit("10/minute")
-async def run_em_rank(http_request: Request, request: EmRankRequest) -> EmRankResponse:
+async def run_em_rank(request: Request, body: EmRankRequest) -> EmRankResponse:
     """
     EM Rank screener (manual symbols).
     Returns strikes just below the 1σ Expected Move, ranked by ROC.
     """
-    if request.minDTE > request.maxDTE:
+    _ = request  # consumed by @limiter.limit
+    if body.minDTE > body.maxDTE:
         raise HTTPException(status_code=422, detail="minDTE must be <= maxDTE")
 
     rf_rate = await asyncio.to_thread(get_risk_free_rate)
@@ -620,11 +622,11 @@ async def run_em_rank(http_request: Request, request: EmRankRequest) -> EmRankRe
         async with sem:
             return await asyncio.to_thread(
                 process_em_symbol, symbol,
-                min_dte=request.minDTE, max_dte=request.maxDTE,
-                rf_rate=rf_rate, max_capital=request.maxCapital,
+                min_dte=body.minDTE, max_dte=body.maxDTE,
+                rf_rate=rf_rate, max_capital=body.maxCapital,
             )
 
-    pairs = await asyncio.gather(*[process_one(s) for s in request.symbols])
+    pairs = await asyncio.gather(*[process_one(s) for s in body.symbols])
 
     results: list[EmRankResultOut] = []
     errors: list[EmRankErrorOut] = []

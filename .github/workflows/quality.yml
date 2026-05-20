@@ -48,7 +48,13 @@ jobs:
       - name: Pytest
         env:
           PYTHONPATH: backend
-        run: pytest backend/tests -q
+        # --disable-socket + --allow-unix-socket blocks real network I/O in CI
+        # (any test hitting yfinance / SEC / Azure OpenAI without an explicit
+        # @pytest.mark.network + @pytest.mark.enable_socket will fail). The
+        # Windows asyncio socketpair caveat documented in pytest.ini does not
+        # apply on ubuntu-latest. `-m "not network"` keeps live-service tests
+        # out of the default CI run; they must be invoked explicitly.
+        run: pytest backend/tests -q --disable-socket --allow-unix-socket -m "not network"
 
   frontend:
     runs-on: ubuntu-latest
