@@ -25,6 +25,23 @@ function excessClass(v: number | null): string {
   return ''
 }
 
+type FillStage = 'queued' | 't0' | 't5' | 't10' | 'complete'
+
+interface FillState {
+  stage: FillStage
+  label: string
+  /** Progress 0..1 for tinting the pill. */
+  progress: number
+}
+
+function fillState(row: SignalEvent): FillState {
+  if (row.px_t20 != null) return { stage: 'complete', label: 'complete', progress: 1 }
+  if (row.px_t10 != null) return { stage: 't10', label: 'T+10', progress: 0.75 }
+  if (row.px_t5 != null) return { stage: 't5', label: 'T+5', progress: 0.5 }
+  if (row.px_at_signal != null) return { stage: 't0', label: 'T+0', progress: 0.25 }
+  return { stage: 'queued', label: 'queued', progress: 0 }
+}
+
 function StatCard({ stats }: { stats: HorizonStats }) {
   const hit = stats.hit_rate
   // Hit rate colour: green ≥0.55, amber 0.45–0.55, red <0.45.
@@ -121,7 +138,7 @@ function FilterBar({
 }
 
 function SignalsRow({ row }: { row: SignalEvent }) {
-  const hydrated = row.backfilled_at != null
+  const fill = fillState(row)
   return (
     <tr>
       <td className="ticker-cell">{row.ticker}</td>
@@ -133,8 +150,11 @@ function SignalsRow({ row }: { row: SignalEvent }) {
       <td className={`right ${excessClass(row.excess_t10)}`}>{PCT(row.excess_t10, 2)}</td>
       <td className={`right ${excessClass(row.excess_t20)}`}>{PCT(row.excess_t20, 2)}</td>
       <td className="center">
-        <span className={hydrated ? 'pill pill-ok' : 'pill pill-pending'}>
-          {hydrated ? 'filled' : 'pending'}
+        <span
+          className={`pill pill-fill pill-fill-${fill.stage}`}
+          title={`Backfill progress: ${fill.label}`}
+        >
+          {fill.label}
         </span>
       </td>
     </tr>
@@ -148,7 +168,7 @@ export function SignalsTab() {
   const rows = useMemo(
     () =>
       showOnlyHydrated
-        ? data.events.filter((e) => e.backfilled_at != null)
+        ? data.events.filter((e) => e.px_t20 != null)
         : data.events,
     [data.events, showOnlyHydrated],
   )

@@ -1673,6 +1673,15 @@ body {
 .signals-table .pill-ok      { background: #14532d; color: #6ee7b7; }
 .signals-table .pill-pending { background: #422006; color: #fcd34d; }
 
+/* Progressive backfill pill — queued → T+0 → T+5 → T+10 → complete.
+   Colour ramps from dim grey through amber to green as more horizons fill. */
+.signals-table .pill-fill            { border: 1px solid transparent; }
+.signals-table .pill-fill-queued     { background: #1f2330; color: #64748b; border-color: #2d3148; }
+.signals-table .pill-fill-t0         { background: #2a1f00; color: #fcd34d; border-color: #422006; }
+.signals-table .pill-fill-t5         { background: #2a2300; color: #fbbf24; border-color: #4a3a00; }
+.signals-table .pill-fill-t10        { background: #1b3a1f; color: #86efac; border-color: #14532d; }
+.signals-table .pill-fill-complete   { background: #14532d; color: #6ee7b7; border-color: #166534; }
+
 .signals-table .empty-state {
   text-align: center;
   color: #64748b;
