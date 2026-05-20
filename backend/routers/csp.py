@@ -9,13 +9,16 @@ import asyncio
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, field_validator
+
+from limiter import limiter
 
 from services.csp_service import CspResult, process_symbol
 from services.data_service import get_risk_free_rate
+from services.swing.regime import get_vix_context
 from services.em_scan_service import EmRankError, EmRankResult, process_em_symbol
-from services.scan_cache import ScanCache, csp_scan_cache
+from services.scan_cache import ScanCache
 from services.screener.result_store import ScreenerStoreEmpty, get_csp_results
 from services.screener_insight_service import InsightError, InsightRequest, InsightResult, get_insight
 from services.universe import UNIVERSES, get_universe
@@ -136,6 +139,9 @@ class CspResponse(BaseModel):
     results: List[CspResultOut]
     errors: List[CspErrorOut]
     last_updated_at: Optional[str] = None
+    vix_level: Optional[float] = None
+    vix_percentile: Optional[float] = None
+    vol_regime: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -143,20 +149,21 @@ class CspResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post("/csp", response_model=CspResponse)
-async def run_csp_screener(request: CspRequest) -> CspResponse:
+@limiter.limit("10/minute")
+async def run_csp_screener(request: Request, body: CspRequest) -> CspResponse:
     """
     Runs the CSP screener for the provided symbols.
     Symbols that fail are returned in the errors list; others still appear in results.
     """
-    if request.minDTE > request.maxDTE:
+    if body.minDTE > body.maxDTE:
         raise HTTPException(status_code=422, detail="minDTE must be <= maxDTE")
 
     rf_rate = await asyncio.to_thread(get_risk_free_rate)
     logger.info(
         "Starting CSP screener for %d symbols, DTE %d\u2013%d, rf=%.3f",
-        len(request.symbols),
-        request.minDTE,
-        request.maxDTE,
+        len(body.symbols),
+        body.minDTE,
+        body.maxDTE,
         rf_rate,
     )
 
@@ -166,11 +173,12 @@ async def run_csp_screener(request: CspRequest) -> CspResponse:
         async with sem:
             return await asyncio.to_thread(
                 process_symbol, symbol,
-                min_dte=request.minDTE, max_dte=request.maxDTE,
-                rf_rate=rf_rate, max_capital=request.maxCapital,
+                min_dte=body.minDTE, max_dte=body.maxDTE,
+                rf_rate=rf_rate, max_capital=body.maxCapital,
             )
 
-    pairs = await asyncio.gather(*[process_one(s) for s in request.symbols])
+    pairs = await asyncio.gather(*[process_one(s) for s in body.symbols])
+    _ = request  # consumed by @limiter.limit
 
     results: list[CspResultOut] = []
     errors: list[CspErrorOut] = []
@@ -181,11 +189,14 @@ async def run_csp_screener(request: CspRequest) -> CspResponse:
             errors.append(CspErrorOut(symbol=error.symbol, reason=error.reason))
 
     logger.info("Screener complete: %d results, %d errors", len(results), len(errors))
-    return CspResponse(results=results, errors=errors)
+    vix_ctx = await asyncio.to_thread(get_vix_context)
+    return CspResponse(results=results, errors=errors, **vix_ctx)
 
 
 @router.get("/csp/scan", response_model=CspResponse)
+@limiter.limit("30/minute")
 async def run_csp_scan(
+    request: Request,
     top_n: int = Query(default=20, ge=1, le=50),
     min_dte: int = Query(default=30, ge=1, le=90),
     max_dte: int = Query(default=60, ge=1, le=90),
@@ -220,10 +231,12 @@ async def run_csp_scan(
         "CSP scan (precomputed): universe=%s returning %d rows, last_updated=%s",
         universe_key, len(rows), last_updated_at,
     )
+    vix_ctx = await asyncio.to_thread(get_vix_context)
     return CspResponse(
         results=[_to_out(r) for r in rows],
         errors=[],
         last_updated_at=last_updated_at,
+        **vix_ctx,
     )
 
 
@@ -319,7 +332,8 @@ class InsightResultOut(BaseModel):
 
 
 @router.post("/csp/insight", response_model=InsightResultOut)
-async def get_csp_insight(request: InsightRequestIn) -> InsightResultOut:
+@limiter.limit("10/minute")
+async def get_csp_insight(http_request: Request, request: InsightRequestIn) -> InsightResultOut:
     """
     Calls Azure OpenAI with the scored CSP row + recent news to produce
     a plain-English ENTER / WAIT / SKIP verdict with rationale.
@@ -450,7 +464,8 @@ class EmRankResponse(BaseModel):
 
 
 @router.post("/csp/em-rank", response_model=EmRankResponse)
-async def run_em_rank(request: EmRankRequest) -> EmRankResponse:
+@limiter.limit("10/minute")
+async def run_em_rank(http_request: Request, request: EmRankRequest) -> EmRankResponse:
     """
     EM Rank screener (manual symbols).
     Returns strikes just below the 1σ Expected Move, ranked by ROC.
@@ -485,7 +500,9 @@ async def run_em_rank(request: EmRankRequest) -> EmRankResponse:
 
 
 @router.get("/csp/em-scan", response_model=EmRankResponse)
+@limiter.limit("4/minute")
 async def run_em_scan(
+    request: Request,
     top_n: int = Query(default=20, ge=1, le=50),
     min_dte: int = Query(default=30, ge=1, le=90),
     max_dte: int = Query(default=60, ge=1, le=90),

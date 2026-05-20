@@ -96,6 +96,9 @@ export interface CspResponse {
   results: CspResult[]
   errors: CspError[]
   last_updated_at?: string | null
+  vix_level?: number | null
+  vix_percentile?: number | null
+  vol_regime?: string | null
 }
 
 export interface CspFilterState {

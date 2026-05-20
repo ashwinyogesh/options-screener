@@ -878,12 +878,18 @@ body {
 
 .screener-table tbody tr {
   border-bottom: 1px solid #1e2235;
-  transition: background 0.1s;
+  transition: background 0.15s;
 }
-.screener-table tbody tr:hover { background: #1e2235; }
+.screener-table tbody tr:hover { background: #161c32; }
+
+/* Left accent strip — colour-coded by setup type */
+.screener-table tbody tr[data-setup="breakout"]  { box-shadow: inset 3px 0 0 #60a5fa; }
+.screener-table tbody tr[data-setup="momentum"]  { box-shadow: inset 3px 0 0 #4ade80; }
+.screener-table tbody tr[data-setup="reversion"] { box-shadow: inset 3px 0 0 #fbbf24; }
+.screener-table tbody tr[data-setup="retest"]    { box-shadow: inset 3px 0 0 #a78bfa; }
 
 .screener-table td {
-  padding: 9px 12px;
+  padding: 11px 14px;
   white-space: nowrap;
   color: #cbd5e1;
 }

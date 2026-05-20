@@ -228,43 +228,122 @@ the snapshot:
 
 ## 4. Narrative lifecycle
 
-| Stage | Name | Definition (signal-side) | Trade posture |
+The detector classifies each ticker into a lifecycle stage hourly using
+**smoothed inputs + monotone hysteresis** (ADR-0029). Earlier versions
+applied the boolean rules below directly against the raw bucket snapshot;
+that produced day-rollover cliffs and Stage 3 lock-in (the
+`contributor_count_growth_7d ≥ 0.30` rule was unconditional and overrode
+Stages 1/2). The current model preserves the same semantic stages but
+arrives at them through a continuous score with controlled transitions.
+
+### 4.1 Stages
+
+| Stage | Name | Semantic definition | Trade posture |
 |---|---|---|---|
 | 0 | Insufficient data | HDBSCAN produced no clusters in the 72h window | Skip |
-| 1 | Niche technical | `tier1_pct < 0.20` AND `financial_term_density ≥ 0.15` | Watch |
-| 2 | Early conviction | `tier1_pct ∈ [0.20, 0.50]` AND `dd_post_ratio ≥ 0.10` AND `gini_14d < 0.45` | **Target** |
-| 3 | Expanding awareness | `contributor_count_growth_7d ≥ 0.30` (tier2-rising proxy) | **Target** |
-| 4 | Institutional attention | `external_media_citations > 0` OR `analyst_name_count > 0` — **not yet implemented** (deferred to Phase 6.1; required fields don't exist on `ticker_timeline` yet) | Late — partial |
+| 1 | Niche technical | Narrow contributor base, mostly substantive (low breadth score) | Watch |
+| 2 | Early conviction | Some Tier-1 spread, substantive DD, low concentration | **Target** |
+| 3 | Expanding awareness | Wide contributor growth, mainstream Tier-1 spread | **Target** |
+| 4 | Institutional attention | `external_media_citations > 0` OR `analyst_name_count > 0` — **not yet implemented** (deferred to Phase 6.1) | Late — partial |
 | 5 | Consensus | `conviction_bull_share ≥ 0.65` AND `conviction_researched_share < 0.40` AND `gini_14d < 0.30` | Avoid |
 | 6 | Saturation | `conviction_bull_share ≥ 0.75` AND `conviction_researched_share < 0.30` AND `gini_14d ≥ 0.55` | Avoid (bagholder phase) |
 
-**Override priority.** `assign_stage` evaluates rules in the order
-`1 → 2 → 3 → 5 → 6` and the **last matching rule wins**. This is intentional:
-a ticker that simultaneously looks niche (stage 1) and saturated (stage 6) is
-in saturation, and the safer "avoid" label should prevail. Stage 4 is currently
-unreachable.
+Stages 1–3 are now driven by a **continuous breadth score** (§4.3), not
+boolean rules. Stages 5–6 retain their explicit axis-share conditions
+because they describe distinct narrative dimensions (consensus posture)
+rather than positions on the breadth axis.
 
-**Catch-all.** If a ticker has at least one cluster but matches none of the
-stage rules above, it defaults to **stage 1 with confidence `0.4 × dominant_cluster_fraction`**.
-The intent is to surface unclassifiable tickers as low-confidence stage-1
-candidates rather than drop them silently. The doc still treats this as
-"not enough signal to commit a higher stage."
+### 4.2 EMA smoothing
 
-**Stage confidence.** Component C in §5.1 consumes `stage_confidence`. The
-multipliers applied on top of `dominant_cluster_fraction` are:
+Each detector run EMA-smooths the volatile aggregator inputs before any
+classification:
 
-| Stage | Confidence multiplier |
+$$ s_t = \alpha \cdot x_t + (1 - \alpha) \cdot s_{t-1}, \quad \alpha = 0.4 $$
+
+This gives an effective half-life of roughly **3 detector runs** (≈ 3 hours
+with the hourly schedule). Inputs smoothed: `tier1_pct`, `tier2_pct`,
+`gini_14d`, `dd_post_ratio`, `financial_term_density`,
+`contributor_count_growth_7d`, `conviction_bull_share`,
+`conviction_researched_share`. Cold start (no prior smoothed value) takes
+the first reading as-is. The smoothed state is persisted on each timeline
+bucket under `lifecycle_state.smoothed_inputs` and survives
+day-bucket rollovers and aggregator gaps.
+
+### 4.3 Breadth score (continuous)
+
+$$ \text{breadth} = 0.5 \cdot \widetilde{\text{tier1}} + 0.3 \cdot \text{clip}\!\left(\frac{\widetilde{\text{growth}}}{0.5}, 0, 1\right) + 0.2 \cdot \widetilde{\text{dd\_post}} $$
+
+(tildes denote EMA-smoothed values). The weights reflect the relative
+contribution of each dimension to "narrative breadth": Tier-1 mainstream
+spread dominates, week-over-week contributor growth indicates expansion,
+and DD-post ratio adds a substance multiplier.
+
+### 4.4 Score → stage band
+
+| Breadth score | Target stage |
 |---|---|
-| 1 (rule match) | × 0.7 |
-| 1 (catch-all) | × 0.4 |
-| 2 | × 1.0 |
-| 3 | × 1.0 |
-| 5 | × 0.85 |
-| 6 | × 0.90 |
+| `< 0.15` | 1 — Niche |
+| `[0.15, 0.35)` | 2 — Early conviction |
+| `≥ 0.35` | 3 — Expanding |
 
-Lower multipliers on stages 1/5/6 reflect that they are either early/sparse
-(stage 1) or signal-degraded-by-saturation (stages 5/6) so the ACS should
-weight them less even at high cluster dominance.
+Stage 5/6 overlay (§4.1) replaces the breadth-band target whenever its
+axis-share condition holds against the **smoothed** axis shares.
+
+### 4.5 Monotone hysteresis
+
+The detector never jumps more than ±1 stage per commit, and a new target
+must be observed for `confirm_runs = 2` consecutive runs before the move
+is committed. State carried on the bucket (`lifecycle_state.pending_stage`,
+`lifecycle_state.pending_streak`) tracks the candidate move between runs.
+
+Worked examples (assume aggregator metrics stable):
+
+| Run | prev | target | pending → | committed | Notes |
+|---|---|---|---|---|---|
+| 1 (cold start) | 0 | 3 | — | **3** | Cold start accepts target immediately |
+| 1 | 1 | 3 | pending=3, streak=1 | 1 | Held, awaiting confirmation |
+| 2 | 1 | 3 | reset | **2** | Confirmed; +1 step cap → moves 1→2 (not 1→3) |
+| 3 | 2 | 3 | pending=3, streak=1 | 2 | New observation of higher target |
+| 4 | 2 | 3 | reset | **3** | Confirmed second time → 2→3 |
+| · | 1 | 3 (run a), 2 (run b) | pending changes | 1 | Changing target resets `pending_streak` |
+
+A 1 → 3 jump therefore takes **at least 4 detector runs** (≈ 4 hours).
+Stage 0 (insufficient data) is short-circuited: it preserves prior state
+rather than overwriting committed history with a single quiet window.
+
+### 4.6 Confidence
+
+$$ \text{confidence} = \text{dominant\_fraction} \cdot \text{certainty} \cdot \text{proximity} $$
+
+- `dominant_fraction` is the share of non-noise signals in the largest
+  HDBSCAN cluster (§3.1).
+- `certainty = 1.0` when committed stage equals target stage; `0.5` when
+  the detector is mid-transition (committed != target).
+- `proximity ∈ [0, 1]` falls linearly to 0 at the band boundaries — a
+  score sitting exactly on a threshold is reported with low confidence to
+  signal that the next run could flip the band.
+
+### 4.7 State persistence
+
+Each detector run writes the following onto today's timeline bucket:
+
+```jsonc
+{
+  "id": "AAPL_2025-04-13",
+  "lifecycle_stage": 2,
+  "stage_confidence": 0.78,
+  "lifecycle_state": {
+    "smoothed_inputs": { "tier1_pct": 0.34, "...": "..." },
+    "pending_stage": 3,
+    "pending_streak": 1
+  }
+}
+```
+
+State is read in this order at the start of each run: (1) today's bucket
+if a previous same-day run wrote `lifecycle_state`; (2) yesterday's
+bucket; (3) cold start. This keeps hysteresis hour-by-hour, not just
+day-by-day.
 
 `tier1_pct` and `tier2_pct` are the share of mentions in Tier 1 (`r/investing`,
 `r/stocks`, `r/SecurityAnalysis`, `r/ValueInvesting`, `r/Bogleheads`) and Tier 2
@@ -272,8 +351,7 @@ weight them less even at high cluster dominance.
 `r/TheRaceTo10Million`, `r/swingtrading`) respectively. Tier 3 is sector-specific
 (`r/artificial`, `r/SemiConductors`, `r/energy`, `r/biotech`, `r/space`,
 `r/geopolitics`). `tier2_pct` and `tier3_pct` are persisted on `ticker_timeline`
-for the drilldown UI but are not currently consumed by stage logic (stage 3
-uses the contributor-growth proxy instead).
+for the drilldown UI but are not currently consumed by stage logic.
 
 Lifecycle classification runs hourly in `job-narrative-detector` after HDBSCAN
 clustering on the 72h embedding window per ticker.

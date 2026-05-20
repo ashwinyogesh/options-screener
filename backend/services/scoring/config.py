@@ -44,3 +44,32 @@ STRIKE_WEIGHTS: dict[str, float] = {
     'ROC': 35.0,   # Annualized return on capital
 }
 STRIKE_MAX: float = sum(STRIKE_WEIGHTS.values())  # 100.0
+
+# ---------------------------------------------------------------------------
+# DITM factor weights (v3.2 lean model — ADR-0008)
+# Mirror of per-factor caps inside `compute_ditm_env_score` / `compute_ditm_strike_score`.
+# ---------------------------------------------------------------------------
+
+# DITM Environment-score factor weights. Sum = 100.
+DITM_ENV_WEIGHTS: dict[str, float] = {
+    'Tr':   25.0,  # Trend strength: SMA alignment (soft, proportional)
+    'Ret':  15.0,  # 200-day return (compressed v3.2; was 25)
+    '52W':  20.0,  # 52W high distance — tent curve, sweet spot 3–12%
+    'R2':   10.0,  # Trend stability: R² of 50-day OLS regression (v3.2 NEW)
+    'WRSI': 15.0,  # Weekly RSI(14), direction-aware pullback credit
+    'LQ':   15.0,  # Chain median OI in 0.60–0.95 delta band (log scale)
+}
+DITM_ENV_MAX: float = sum(DITM_ENV_WEIGHTS.values())  # 100.0
+
+# Earnings penalty applied on top of the DITM env score (DTE-scaled).
+DITM_EARNINGS_PENALTY: float = -15.0  # full penalty; halved at 8–14 DTE
+
+# DITM Strike-score factor weights. Sum = 100.
+DITM_STRIKE_WEIGHTS: dict[str, float] = {
+    '\u0394':   20.0,  # Delta position — sweet spot 0.82–0.90
+    'Lev': 25.0,  # Leverage = delta × price / mid — flat top 2.5–4×; hard 0 ≥5×
+    'Ext': 25.0,  # Extrinsic % of strike — lower is better (DITM quality signal)
+    'BA':  20.0,  # Bid-Ask spread % of mid
+    'IV':  10.0,  # IV Percentile — lower is cheaper for the buyer
+}
+DITM_STRIKE_MAX: float = sum(DITM_STRIKE_WEIGHTS.values())  # 100.0

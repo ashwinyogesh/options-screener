@@ -114,10 +114,8 @@ def process_symbol(
     max_capital: Optional[float] = None,
 ) -> tuple[list[CspResult], Optional[CspError]]:
     """
-    CSP per-symbol entry point. Now a thin wrapper around the unified
-    `services.screener.runner.run` driven by `CSP_CONFIG`. Behaviour is
-    preserved bit-for-bit relative to the legacy implementation
-    (kept as `_legacy_process_symbol` for one-commit revert).
+    CSP per-symbol entry point. Thin wrapper around the unified
+    `services.screener.runner.run` driven by `CSP_CONFIG`.
     """
     rows, err = _run(
         symbol,
@@ -132,12 +130,9 @@ def process_symbol(
     return rows, None
 
 
-def _legacy_process_symbol(
-    symbol: str,
-    min_dte: int = 30,
-    max_dte: int = 60,
-    rf_rate: float = 0.045,
-) -> tuple[list[CspResult], Optional[CspError]]:
+# ---------------------------------------------------------------------------
+# Phase-3 unified-runner adapters
+# ---------------------------------------------------------------------------
     """
     Processes a single symbol across all valid expirations in [min_dte, max_dte].
     Returns (list_of_results, None) on success or ([], error) on failure.
@@ -386,15 +381,6 @@ def _legacy_process_symbol(
         logger.warning("Failed to process '%s': %s", sym, exc)
         return [], CspError(symbol=sym, reason=str(exc))
 
-
-# ---------------------------------------------------------------------------
-# Phase-3 unified-runner adapters
-# ---------------------------------------------------------------------------
-#
-# `process_symbol` (above) now delegates to `services.screener.runner.run`
-# driven by `CSP_CONFIG`. The legacy body is preserved as
-# `_legacy_process_symbol` for one-commit revert; remove after CC + DITM
-# migrations land in Phase 4.
 
 
 def _csp_symbol_factory(_sym: str, df, current_price: float) -> tuple[Indicators, SymbolMetrics]:

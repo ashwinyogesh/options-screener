@@ -27,7 +27,7 @@ Legacy parameters `vol_support_*` (CSP) / `vol_resistance_*` (CC) and
 the score. They will be removed in a future cleanup once all call sites are
 updated.
 
-DITM strike scoring is intentionally *not* in this module yet.
+DITM strike scoring lives in `services.scoring.ditm`.
 """
 from __future__ import annotations
 

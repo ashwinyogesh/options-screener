@@ -123,12 +123,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'csp' | 'cc' | 'ditm' | 'swing' | 'em-rank' | 'supply' | 'dcf' | 'narrative'>('csp')
 
   // CSP state
-  const { results: cspResults, errors: cspErrors, loading: cspLoading, symbolCount: cspSymbolCount, isScanMode: cspIsScanMode, errorMessage: cspErrorMessage, cachedAt: cspCachedAt, lastUpdatedAt: cspLastUpdatedAt, run: runCsp, scan: scanCsp } = useCsp()
+  const { results: cspResults, errors: cspErrors, loading: cspLoading, symbolCount: cspSymbolCount, isScanMode: cspIsScanMode, errorMessage: cspErrorMessage, cachedAt: cspCachedAt, lastUpdatedAt: cspLastUpdatedAt, vixLevel: cspVixLevel, vixPercentile: cspVixPercentile, volRegime: cspVolRegime, run: runCsp, scan: scanCsp } = useCsp()
   const [cspFilters, setCspFilters] = useState<CspFilterState>(DEFAULT_CSP_FILTERS)
   const filteredCsp = useMemo(() => applyCspFilters(cspResults, cspFilters), [cspResults, cspFilters])
 
   // CC state
-  const { results: ccResults, errors: ccErrors, loading: ccLoading, symbolCount: ccSymbolCount, isScanMode: ccIsScanMode, errorMessage: ccErrorMessage, cachedAt: ccCachedAt, lastUpdatedAt: ccLastUpdatedAt, run: runCc, scan: scanCc } = useCc()
+  const { results: ccResults, errors: ccErrors, loading: ccLoading, symbolCount: ccSymbolCount, isScanMode: ccIsScanMode, errorMessage: ccErrorMessage, cachedAt: ccCachedAt, lastUpdatedAt: ccLastUpdatedAt, vixLevel: ccVixLevel, vixPercentile: ccVixPercentile, volRegime: ccVolRegime, run: runCc, scan: scanCc } = useCc()
   const [ccFilters, setCcFilters] = useState<CcFilterState>(DEFAULT_CC_FILTERS)
   const filteredCc = useMemo(() => applyCcFilters(ccResults, ccFilters), [ccResults, ccFilters])
 
@@ -141,7 +141,7 @@ export default function App() {
   const { results: emResults, errors: emErrors, loading: emLoading, symbolCount: emSymbolCount, isScanMode: emIsScanMode, errorMessage: emErrorMessage, cachedAt: emCachedAt, run: runEm, scan: scanEm } = useEmScan()
 
   // Swing state
-  const { results: swingResults, regime: swingRegime, loading: swingLoading, isScanMode: swingIsScanMode, errorMessage: swingErrorMessage, cachedAt: swingCachedAt, lastUpdatedAt: swingLastUpdatedAt, scan: scanSwing, run: runSwing } = useSwing()
+  const { results: swingResults, regime: swingRegime, loading: swingLoading, isScanMode: swingIsScanMode, gatesBypassed: swingGatesBypassed, errorMessage: swingErrorMessage, cachedAt: swingCachedAt, lastUpdatedAt: swingLastUpdatedAt, scan: scanSwing, run: runSwing } = useSwing()
   const [swingFilters, setSwingFilters] = useState<SwingFilterState>(DEFAULT_SWING_FILTERS)
   const filteredSwing = useMemo(() => applySwingFilters(swingResults, swingFilters), [swingResults, swingFilters])
 
@@ -245,6 +245,11 @@ export default function App() {
                 {!cspIsScanMode && cspCachedAt !== null && (
                   <span className="cache-notice"> · cached {Math.round((Date.now() - cspCachedAt) / 60000) < 1 ? '< 1' : Math.round((Date.now() - cspCachedAt) / 60000)} min ago</span>
                 )}
+                {cspVixLevel != null && (
+                  <span style={{ marginLeft: 8, color: '#64748b', fontSize: 12 }}>
+                    {' '}· <strong>VIX</strong> {cspVixLevel.toFixed(1)} ({cspVixPercentile?.toFixed(0)}p · {cspVolRegime})
+                  </span>
+                )}
               </div>
             )}
             <CspTable data={filteredCsp} />
@@ -294,6 +299,11 @@ export default function App() {
                 )}
                 {!ccIsScanMode && ccCachedAt !== null && (
                   <span className="cache-notice"> · cached {Math.round((Date.now() - ccCachedAt) / 60000) < 1 ? '< 1' : Math.round((Date.now() - ccCachedAt) / 60000)} min ago</span>
+                )}
+                {ccVixLevel != null && (
+                  <span style={{ marginLeft: 8, color: '#64748b', fontSize: 12 }}>
+                    {' '}· <strong>VIX</strong> {ccVixLevel.toFixed(1)} ({ccVixPercentile?.toFixed(0)}p · {ccVolRegime})
+                  </span>
                 )}
               </div>
             )}
@@ -407,7 +417,7 @@ export default function App() {
           <>
             <SwingInput
               onScan={(topN, universe) => scanSwing(topN, universe)}
-              onCustom={(symbols) => runSwing(symbols)}
+              onCustom={(symbols, bypassGates) => runSwing(symbols, bypassGates)}
               loading={swingLoading}
             />
             {swingResults.length > 0 && (
@@ -494,7 +504,7 @@ export default function App() {
                 )}
               </div>
             )}
-            <SwingTable data={filteredSwing} />
+            <SwingTable data={filteredSwing} gatesBypassed={swingGatesBypassed} />
             {!swingLoading && swingResults.length === 0 && !swingErrorMessage && (
               <div className="empty-state">
                 <p>Click <strong>🚀 Run</strong> to scan the swing-eligible universe for Breakout, Momentum, Reversion, and Retest setups. Hard gates: R:R ≥ 2.5, setup score ≥ 40. Top 3 receive AI commentary.</p>

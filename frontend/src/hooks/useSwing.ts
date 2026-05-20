@@ -9,12 +9,13 @@ interface UseSwingReturn {
   regime: RegimeState | null
   loading: boolean
   isScanMode: boolean
+  gatesBypassed: boolean
   errorMessage: string | null
   cachedAt: number | null
   scoringVersion: string | null
   lastUpdatedAt: string | null
   scan: (topN?: number, universe?: string) => Promise<void>
-  run: (symbols: string[]) => Promise<void>
+  run: (symbols: string[], bypassGates?: boolean) => Promise<void>
 }
 
 export function useSwing(): UseSwingReturn {
@@ -22,6 +23,7 @@ export function useSwing(): UseSwingReturn {
   const [regime, setRegime] = useState<RegimeState | null>(null)
   const [loading, setLoading] = useState(false)
   const [isScanMode, setIsScanMode] = useState(false)
+  const [gatesBypassed, setGatesBypassed] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [cachedAt, setCachedAt] = useState<number | null>(null)
   const [scoringVersion, setScoringVersion] = useState<string | null>(null)
@@ -76,9 +78,10 @@ export function useSwing(): UseSwingReturn {
     }
   }
 
-  async function run(symbols: string[]) {
+  async function run(symbols: string[], bypassGates: boolean = true) {
     setLoading(true)
     setIsScanMode(false)
+    setGatesBypassed(bypassGates)
     setErrorMessage(null)
     setCachedAt(null)
     setResults([])
@@ -87,7 +90,7 @@ export function useSwing(): UseSwingReturn {
       const response = await fetch(`${API_BASE}/api/screener/swing`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols }),
+        body: JSON.stringify({ symbols, bypass_gates: bypassGates }),
       })
       await handleResponse(response)
     } catch (err: unknown) {
@@ -98,5 +101,5 @@ export function useSwing(): UseSwingReturn {
     }
   }
 
-  return { results, regime, loading, isScanMode, errorMessage, cachedAt, scoringVersion, lastUpdatedAt, scan, run }
+  return { results, regime, loading, isScanMode, gatesBypassed, errorMessage, cachedAt, scoringVersion, lastUpdatedAt, scan, run }
 }

@@ -1,4 +1,4 @@
-# Scoring Reference (CSP, CC, DITM) — v3.2
+# Scoring Reference (CSP, CC, DITM) — v3.3
 
 > Single source of truth for the screener scoring system. Every weight and threshold listed
 > here is mirrored in code by `ENV_WEIGHTS` / `STRIKE_WEIGHTS` in
@@ -20,7 +20,11 @@
 > hard gates. **DITM v3.2** (May 2026) de-correlates the ENV momentum cluster: 200d Return
 > compressed 25→15 pts, Trend Stability R² added at 10 pts, 52W Distance tent curve
 > (exhaustion penalty at 0%), Delta sweet spot shifted to 0.82–0.90, Leverage hard-capped
-> at 5×. Diagnostic-preserved fields (`em_buffer_pct`, `dist_pct`, `otm_pct` for CSP/CC;
+> at 5×. **v3.3** (May 2026) replaces the IV/HV Ratio factor (35 pts) in the CSP/CC ENV
+> model with IV Percentile (IVP, 35 pts): raw IV/HV was noisy in low-liquidity names and
+> double-counted HV already priced into the options chain. IVP measures where current IV
+> stands in its own trailing distribution — a cleaner seller's-edge signal. The v3.3
+> `SCORING_VERSION = "3.3.0"` constant gates all ENV scoring. Diagnostic-preserved fields (`em_buffer_pct`, `dist_pct`, `otm_pct` for CSP/CC;
 > `theta_annualized_pct`, `capital_efficiency_pct`, `breakeven_pct`, `hv_rank` for DITM) are
 > still computed and returned in the response payload but contribute 0 to the score.
 
@@ -55,7 +59,7 @@ Both `env_score` and `strike_score` cap at 100, so `final_score` ∈ [0, 100].
 
 | Factor             | Weight | CSP / CC differs? |
 |--------------------|-------:|:-----------------:|
-| IV / HV Ratio      |  35    | no                |
+| IV Percentile (IVP)|  35    | no                |
 | Trend: 52W dist    |  15    | **yes**           |
 | Trend: SMA align   |   5    | no (higher = more pts for both) |
 | Trend: SMA slope   |   5    | no                |
@@ -64,27 +68,28 @@ Both `env_score` and `strike_score` cap at 100, so `final_score` ∈ [0, 100].
 | Earnings in DTE    | −15    | no (penalty)      |
 | **Total**          | **100**| (Earnings is a deductible penalty) |
 
-### IV / HV Ratio (35 pts)
+### IV Percentile / IVP (35 pts) — v3.3
 
 ```
-iv_hv_ratio = yfinance_IV / HV_30d
+iv_percentile = percentile_rank(IV_30d, trailing_252d_window)
 ```
 
-Measures whether options are priced rich or cheap relative to actual recent movement.
-IV > HV is the seller's edge. Recalibrated in v3 from 28 → 35 pts: with HV Rank dropped,
-IV/HV becomes the primary volatility signal.
+Measures where today's implied volatility sits in its own trailing one-year distribution.
+A high percentile means options are priced rich — the seller's edge. Replaces IV/HV Ratio
+(v3.2 and earlier) which was noisy in low-liquidity names and partially double-counted HV
+already embedded in the options chain.
 
-| Bucket      | Pts                |
-|-------------|--------------------|
-| < 0.8       | 0                  |
-| 0.8–1.0     | linear → 5         |
-| 1.0–1.1     | linear 5 → 12.5    |
-| 1.1–1.2     | linear 12.5 → 22.5 |
-| 1.2–1.3     | linear 22.5 → 35   |
-| ≥ 1.3       | 35                 |
+| Percentile   | Pts                |
+|--------------|--------------------|
+| < 30         | 0                  |
+| 30–50        | linear 0 → 10      |
+| 50–75        | linear 10 → 25     |
+| 75–90        | linear 25 → 35     |
+| ≥ 90         | 35                 |
 
-**Stale-IV flag:** trigger is `(IV is NaN) or (IV ≤ 0.01)`. When `iv_stale=True`, IV/HV pts
-are forced to 0 and the row is annotated with `iv_stale: true` in the API response.
+`iv_percentile=None` (stale or unavailable) → **0 pts**. The `iv_hv_ratio` and `iv_stale`
+parameters accepted by `compute_env_score()` are ignored in v3.3 and retained only for
+call-site compatibility.
 
 ### Trend: 52W High Distance (15 pts) — direction-aware
 

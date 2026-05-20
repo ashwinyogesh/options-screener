@@ -200,6 +200,26 @@ def _label_regime(score: float) -> str:
     return "neutral"
 
 
+def get_vix_context() -> dict[str, float | str | None]:
+    """Return current VIX level, 1-year percentile rank, and vol regime label.
+
+    All values are None on data failure — callers must handle Optional fields.
+    Safe to call from any router; never raises.
+    """
+    try:
+        vix_df = get_ohlc("^VIX", period="1y")
+        vix_val, vix_pct = _vix_percentile(vix_df["Close"])
+        vol_label, _ = _classify_vix_regime(vix_val, vix_pct)
+        return {
+            "vix_level": round(vix_val, 2),
+            "vix_percentile": round(vix_pct, 1),
+            "vol_regime": vol_label,
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("get_vix_context failed: %s", exc)
+        return {"vix_level": None, "vix_percentile": None, "vol_regime": None}
+
+
 def _disabled_setups(regime_label: str) -> list[str]:
     if regime_label == "risk_off":
         return ["reversion"]

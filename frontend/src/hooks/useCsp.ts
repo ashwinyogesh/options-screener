@@ -13,6 +13,9 @@ interface UseCspReturn {
   errorMessage: string | null
   cachedAt: number | null
   lastUpdatedAt: string | null
+  vixLevel: number | null
+  vixPercentile: number | null
+  volRegime: string | null
   run: (req: CspRequest) => Promise<void>
   scan: (topN?: number, minDTE?: number, maxDTE?: number, universe?: string, maxCapital?: number) => Promise<void>
 }
@@ -26,6 +29,9 @@ export function useCsp(): UseCspReturn {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [cachedAt, setCachedAt] = useState<number | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
+  const [vixLevel, setVixLevel] = useState<number | null>(null)
+  const [vixPercentile, setVixPercentile] = useState<number | null>(null)
+  const [volRegime, setVolRegime] = useState<string | null>(null)
 
   useEffect(() => {
     const entry = loadResultCache<{ results: CspResult[]; errors: CspError[] }>('csp')
@@ -72,6 +78,9 @@ export function useCsp(): UseCspReturn {
       const data: CspResponse = await response.json()
       setResults(data.results)
       setErrors(data.errors)
+      setVixLevel(data.vix_level ?? null)
+      setVixPercentile(data.vix_percentile ?? null)
+      setVolRegime(data.vol_regime ?? null)
       saveResultCache('csp', { results: data.results, errors: data.errors })
       setCachedAt(Date.now())
     } catch (err: unknown) {
@@ -112,6 +121,9 @@ export function useCsp(): UseCspReturn {
       setResults(data.results)
       setErrors(data.errors)
       setLastUpdatedAt(data.last_updated_at ?? null)
+      setVixLevel(data.vix_level ?? null)
+      setVixPercentile(data.vix_percentile ?? null)
+      setVolRegime(data.vol_regime ?? null)
       saveResultCache('csp', { results: data.results, errors: data.errors })
       setCachedAt(Date.now())
     } catch (err: unknown) {
@@ -121,5 +133,5 @@ export function useCsp(): UseCspReturn {
     }
   }
 
-  return { results, errors, loading, symbolCount, isScanMode, errorMessage, cachedAt, lastUpdatedAt, run, scan }
+  return { results, errors, loading, symbolCount, isScanMode, errorMessage, cachedAt, lastUpdatedAt, vixLevel, vixPercentile, volRegime, run, scan }
 }

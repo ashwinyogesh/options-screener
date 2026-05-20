@@ -1,6 +1,6 @@
 # ADR-0007: Lean 8-factor scoring model (v3)
 
-- **Status**: Accepted
+- **Status**: Accepted (ENV §IV/HV Ratio superseded by [ADR-0029](0029-scoring-v33-ivp-factor.md))
 - **Date**: 2026-05-02
 
 ## Context

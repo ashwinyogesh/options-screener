@@ -70,7 +70,10 @@ def main() -> None:
     error_count = 0
     for ticker, result in results.items():
         try:
-            cosmos.upsert_result(ticker=ticker, result=result, error=None)
+            # For DITM, macro context is embedded in result["macro"]; lift it
+            # to top-level doc fields so get_ditm_results() can read it.
+            macro_fields = result.get("macro") or None if config.strategy == "ditm" else None
+            cosmos.upsert_result(ticker=ticker, result=result, error=None, macro_fields=macro_fields)
             scored += 1
         except Exception:
             logger.exception("Failed to write result for ticker %s", ticker)

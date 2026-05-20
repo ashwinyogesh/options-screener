@@ -4,6 +4,7 @@ Fetches OHLC price history, the risk-free rate, and news headlines from Yahoo Fi
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -12,6 +13,8 @@ import yfinance as yf
 logger = logging.getLogger(__name__)
 
 _FALLBACK_RISK_FREE_RATE = 0.045  # 4.5% annual
+_RF_CACHE_TTL = 3600.0  # seconds — rate changes slowly; 1 h is more than adequate
+_rf_cache: tuple[float, float] | None = None  # (rate, monotonic_time)
 
 
 def get_ohlc(symbol: str, period: str = "1y") -> pd.DataFrame:
@@ -32,14 +35,21 @@ def get_ohlc(symbol: str, period: str = "1y") -> pd.DataFrame:
 def get_risk_free_rate() -> float:
     """
     Fetches the 13-week Treasury bill yield (^IRX) as a decimal annual rate.
-    Falls back to FALLBACK_RISK_FREE_RATE on any error.
+    Result is cached for 1 hour — the rate changes slowly and this function
+    is called on every screener request. Falls back to FALLBACK_RISK_FREE_RATE
+    on any error; failures are not cached so the next request retries.
     """
+    global _rf_cache
+    now = time.monotonic()
+    if _rf_cache is not None and now - _rf_cache[1] < _RF_CACHE_TTL:
+        return _rf_cache[0]
     try:
         irx = yf.Ticker("^IRX")
         hist = irx.history(period="5d")
         if hist is not None and not hist.empty:
             rate = float(hist["Close"].iloc[-1]) / 100.0
             if 0 < rate < 1:
+                _rf_cache = (rate, now)
                 return rate
     except Exception as exc:
         logger.warning("Could not fetch risk-free rate: %s — using fallback %.3f", exc, _FALLBACK_RISK_FREE_RATE)

@@ -188,107 +188,91 @@ def cluster(
 
 
 # ---------------------------------------------------------------------------
-# Lifecycle stage assignment — pure signal-side rules per §4.
+# Lifecycle stage assignment — smoothed inputs + monotone hysteresis (ADR-0029).
 # ---------------------------------------------------------------------------
+
+from smoothing import (  # noqa: E402
+    LifecycleState,
+    apply_hysteresis,
+    breadth_score,
+    breadth_to_stage,
+    compute_confidence,
+    ema_smooth,
+    overlay_stage,
+)
+
 
 def assign_stage(
     timeline: dict,
     cluster_result: ClusterResult,
-) -> tuple[int, float]:
-    """Return (lifecycle_stage, stage_confidence) for a ticker.
+    prior_state: LifecycleState | None = None,
+    prev_stage: int = 0,
+) -> tuple[int, float, LifecycleState]:
+    """Return (lifecycle_stage, stage_confidence, new_state) for a ticker.
+
+    Implements ADR-0029 stability rules:
+        1. EMA-smooth volatile aggregator inputs (alpha=0.4, ~3-day half-life).
+        2. Compute a continuous breadth score from smoothed inputs.
+        3. Map score to a breadth stage in {1, 2, 3} (Stage 4 reserved for
+           institutional/analyst data not yet in scope).
+        4. Override with Stage 5/6 when axis overlay condition holds (axis
+           transitions are subject to the same hysteresis but bypass the
+           ±1-step cap because they're conceptually a separate dimension).
+        5. Apply monotone hysteresis: cap movement to ±1 stage per commit
+           (between 1/2/3); require 2 consecutive runs at the new target.
 
     Args:
-        timeline: ticker_timeline Cosmos document (may be a minimal stub if
-                  aggregator hasn't run yet — missing fields default to 0/None).
+        timeline: today's ticker_timeline Cosmos document.
         cluster_result: output of cluster() for the ticker's 72h window.
+        prior_state: hysteresis + smoothing state from the previous detector
+            run (today earlier, or yesterday).  None → cold start.
+        prev_stage: previously committed lifecycle_stage.  0 → cold start.
 
     Returns:
-        (stage, confidence) where stage ∈ {1..6, 0} and confidence ∈ [0,1].
-        Stage 0 means "insufficient data to classify".
-
-    Stage rules from §4 of NARRATIVE_METHODOLOGY.md:
-        1 — Niche technical:     tier1_pct < 0.20  AND financial_term_density ≥ 0.15
-        2 — Early conviction:    tier1_pct ∈ [0.20,0.50]  AND dd_post_ratio ≥ 0.10 AND gini < 0.45
-        3 — Expanding awareness: contributor_count_growth_7d ≥ 0.30  (tier2 rising proxy)
-        4 — Institutional attn:  (not computable at Phase 5 — external_media/analyst data absent)
-        5 — Consensus:           bull_share ≥ 0.65 AND researched_share < 0.40 AND gini < 0.30
-                                 (ADR-0020 / ADR-0021 — axis-only, no legacy fallback)
-        6 — Saturation:          bull_share ≥ 0.75 AND researched_share < 0.30 AND gini_14d ≥ 0.55
-                                 (ADR-0020 / ADR-0021 — axis-only, no legacy fallback)
+        (committed_stage, confidence, new_state).  Caller persists
+        ``new_state`` on today's bucket so the next run continues smoothing
+        and hysteresis correctly.  ``committed_stage == 0`` means insufficient
+        data (no clusters); ``new_state`` carries forward unchanged.
     """
+    if prior_state is None:
+        prior_state = LifecycleState()
+
+    # Stage 0 — insufficient data.  Preserve prior state so it isn't reset
+    # by a single quiet window.
     if cluster_result.n_clusters == 0:
-        return 0, 0.0
+        return 0, 0.0, prior_state
 
-    # Pull fields from timeline doc with safe defaults.
-    tier1_pct: float = timeline.get("tier1_pct") or 0.0
-    tier2_pct: float = timeline.get("tier2_pct") or 0.0  # noqa: F841 — reserved for Stage 3 ext
-    gini_14d: float = timeline.get("gini_14d") or 0.0
-    dd_post_ratio: float = timeline.get("dd_post_ratio") or 0.0
-    financial_term_density: float = timeline.get("financial_term_density") or 0.0
-    # contributor_count_growth_7d: week-over-week change in unique contributors,
-    # written by the aggregator (workers/aggregator/attention.compute_contributor_growth).
-    contributor_growth: float = timeline.get("contributor_count_growth_7d") or 0.0
-    # Axis shares (ADR-0020 / ADR-0021) — None when no signal in the 14d
-    # window has been axis-classified yet. In that case Stages 5/6 do not
-    # fire; the lifecycle stays at whatever Stages 1-3 produce (or catch-all).
-    bull_share: float | None = timeline.get("conviction_bull_share")
-    researched_share: float | None = timeline.get("conviction_researched_share")
+    # Step 1 — EMA smoothing.
+    smoothed = ema_smooth(timeline, prior_state.smoothed_inputs)
 
-    # Confidence base = fraction of non-noise signals in dominant cluster,
-    # weighted by how cleanly the rule matches.
-    base_conf = cluster_result.dominant_fraction
+    # Step 2 — Continuous breadth score.
+    score = breadth_score(smoothed)
 
-    # Rules evaluated in reverse priority (later stages override earlier).
-    # Boundary inequalities use ≥ / ≤ rather than strict > / < so ratios
-    # landing exactly on a methodology threshold still trigger the intended
-    # stage. Strict inequality made stages flicker at exact-tie ratios in the
-    # experimental data; methodology doc was updated to match.
-    stage = 0
-    conf = 0.0
+    # Step 3 — Map to breadth stage 1/2/3.
+    target_breadth = breadth_to_stage(score)
 
-    # Stage 1 — Niche technical
-    if tier1_pct < 0.20 and financial_term_density >= 0.15:
-        stage = 1
-        conf = base_conf * 0.7  # lower confidence — early, sparse signal
+    # Step 4 — Axis overlay can replace breadth stage with 5/6.
+    target_overlay = overlay_stage(smoothed)
+    target_stage = target_overlay if target_overlay is not None else target_breadth
 
-    # Stage 2 — Early conviction (overrides Stage 1 if broader)
-    if 0.20 <= tier1_pct <= 0.50 and dd_post_ratio >= 0.10 and gini_14d < 0.45:
-        stage = 2
-        conf = base_conf
+    # Step 5 — Hysteresis.  The overlay (5/6) and breadth band (1/2/3) are
+    # treated as a single ordered chain: 1 → 2 → 3 → 5 → 6 (4 reserved).  This
+    # means going from breadth=3 to overlay=5 still takes 2 confirmed runs
+    # and a single +1 step.  When overlay disengages, the same logic walks
+    # the stage back down.
+    interim_state = LifecycleState(
+        smoothed_inputs=smoothed,
+        pending_stage=prior_state.pending_stage,
+        pending_streak=prior_state.pending_streak,
+    )
+    committed, new_state = apply_hysteresis(target_stage, prev_stage, interim_state)
 
-    # Stage 3 — Expanding awareness
-    if contributor_growth >= 0.30:
-        stage = 3
-        conf = base_conf
-
-    # Stage 4 — Institutional attention (requires external_media/analyst data — not Phase 5)
-    # Skipped; will be enabled in Phase 6 when scorer provides those fields.
-
-    # Stage 5 — Consensus (lots of bulls, mostly unsubstantive, concentrated)
-    if (
-        bull_share is not None
-        and researched_share is not None
-        and bull_share >= 0.65
-        and researched_share < 0.40
-        and gini_14d < 0.30
-    ):
-        stage = 5
-        conf = base_conf * 0.85
-
-    # Stage 6 — Saturation (very bull-dominant, low substance, Gini rising)
-    if (
-        bull_share is not None
-        and researched_share is not None
-        and bull_share >= 0.75
-        and researched_share < 0.30
-        and gini_14d >= 0.55
-    ):
-        stage = 6
-        conf = base_conf * 0.90
-
-    if stage == 0:
-        # No rule matched — assign stage 1 as catch-all with low confidence.
-        stage = 1
-        conf = base_conf * 0.4
-
-    return stage, round(min(1.0, max(0.0, conf)), 4)
+    # Confidence reflects: cluster dominance × certainty about the band ×
+    # proximity to the band centre.
+    confidence = compute_confidence(
+        score=score,
+        target_stage=target_stage,
+        committed_stage=committed,
+        dominant_fraction=cluster_result.dominant_fraction,
+    )
+    return committed, confidence, new_state

@@ -19,7 +19,7 @@ _WORKER_ROOT = str(Path(__file__).resolve().parent.parent)
 if _WORKER_ROOT in sys.path:
     sys.path.remove(_WORKER_ROOT)
 sys.path.insert(0, _WORKER_ROOT)
-for _name in ("main", "config", "detector", "cosmos_client"):
+for _name in ("main", "config", "detector", "cosmos_client", "smoothing"):
     sys.modules.pop(_name, None)
 
 from detector import ClusterResult, cluster  # noqa: E402
@@ -70,10 +70,11 @@ def test_cluster_at_min_cluster_size_runs_hdbscan() -> None:
 
 
 # ---------------------------------------------------------------------------
-# assign_stage — §4 lifecycle stage rules
+# assign_stage — smoothed inputs + monotone hysteresis (ADR-0029)
 # ---------------------------------------------------------------------------
 
 from detector import assign_stage  # noqa: E402
+from smoothing import LifecycleState  # noqa: E402
 
 
 def _cluster(dominant_fraction: float = 0.8, n_clusters: int = 1) -> ClusterResult:
@@ -87,89 +88,143 @@ def _cluster(dominant_fraction: float = 0.8, n_clusters: int = 1) -> ClusterResu
 
 
 class TestAssignStage:
-    def test_no_clusters_returns_stage_zero(self) -> None:
-        """n_clusters == 0 → stage 0 'insufficient data' regardless of timeline."""
-        stage, conf = assign_stage({"tier1_pct": 0.30, "dd_post_ratio": 0.20}, _cluster(n_clusters=0))
+    """Tests for ADR-0029 stable lifecycle stage assignment.
+
+    Key invariants verified:
+      * n_clusters == 0 → stage 0, prior state preserved.
+      * Cold start (prev_stage=0) accepts target stage immediately.
+      * Adjacent stage transitions require 2 confirmation runs.
+      * Movement is capped to ±1 stage per commit (no skip).
+      * Smoothed inputs are persisted on the returned state.
+    """
+
+    def test_no_clusters_returns_stage_zero_preserves_state(self) -> None:
+        prior = LifecycleState(smoothed_inputs={"tier1_pct": 0.5}, pending_stage=2, pending_streak=1)
+        stage, conf, new_state = assign_stage(
+            {"tier1_pct": 0.30}, _cluster(n_clusters=0),
+            prior_state=prior, prev_stage=2,
+        )
         assert stage == 0
         assert conf == 0.0
+        # Stage 0 means insufficient data — prior state must carry over unchanged.
+        assert new_state is prior
 
-    def test_stage_1_niche_technical(self) -> None:
-        """tier1_pct < 0.20 AND financial_term_density >= 0.15 → stage 1."""
-        timeline = {"tier1_pct": 0.10, "financial_term_density": 0.20}
-        stage, conf = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+    def test_cold_start_accepts_target_immediately(self) -> None:
+        """prev_stage=0 → no hysteresis, target stage is committed at once."""
+        timeline = {"tier1_pct": 0.05, "financial_term_density": 0.20,
+                    "dd_post_ratio": 0.0, "contributor_count_growth_7d": 0.0}
+        stage, _, _ = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+        # Low tier1, low growth, low dd → breadth score < 0.15 → stage 1.
         assert stage == 1
-        assert conf == pytest.approx(0.7)  # base × 0.7 multiplier
 
-    def test_stage_2_early_conviction(self) -> None:
-        """tier1_pct ∈ [0.20, 0.50] AND dd_post_ratio >= 0.10 AND gini < 0.45."""
-        timeline = {"tier1_pct": 0.30, "dd_post_ratio": 0.15, "gini_14d": 0.30}
-        stage, conf = assign_stage(timeline, _cluster(dominant_fraction=1.0))
-        assert stage == 2
-        assert conf == pytest.approx(1.0)
-
-    def test_stage_3_expanding_awareness(self) -> None:
-        """contributor_count_growth_7d >= 0.30 → stage 3, overrides any earlier match."""
+    def test_cold_start_stage_3_when_breadth_high(self) -> None:
+        """Wide-spread narrative (high tier1, growth, dd) → stage 3 on cold start."""
         timeline = {
-            "tier1_pct": 0.10,                 # would satisfy stage 1
-            "financial_term_density": 0.20,
-            "contributor_count_growth_7d": 0.35,
+            "tier1_pct": 0.60,
+            "contributor_count_growth_7d": 0.50,
+            "dd_post_ratio": 0.30,
         }
-        stage, conf = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+        stage, _, _ = assign_stage(timeline, _cluster(dominant_fraction=1.0))
         assert stage == 3
 
-    def test_stage_5_consensus(self) -> None:
-        """ADR-0021: bull_share ≥ 0.65 AND researched_share < 0.40 AND gini < 0.30 → stage 5."""
+    def test_held_stage_resets_pending(self) -> None:
+        """Target == prev_stage → return prev_stage, clear pending counters."""
+        prior = LifecycleState(smoothed_inputs={"tier1_pct": 0.05}, pending_stage=2, pending_streak=1)
+        timeline = {"tier1_pct": 0.05}
+        stage, _, new_state = assign_stage(
+            timeline, _cluster(dominant_fraction=1.0),
+            prior_state=prior, prev_stage=1,
+        )
+        assert stage == 1
+        assert new_state.pending_stage == 0
+        assert new_state.pending_streak == 0
+
+    def test_single_run_at_new_target_does_not_commit(self) -> None:
+        """First observation of a higher target → hold prev, set pending."""
+        prior = LifecycleState(smoothed_inputs={"tier1_pct": 0.05})
+        timeline = {"tier1_pct": 0.60, "contributor_count_growth_7d": 0.50, "dd_post_ratio": 0.30}
+        stage, _, new_state = assign_stage(
+            timeline, _cluster(dominant_fraction=1.0),
+            prior_state=prior, prev_stage=1,
+        )
+        # Hysteresis: prev=1 holds; target=3 is pending after 1 run (< confirm_runs=2).
+        assert stage == 1
+        assert new_state.pending_stage == 3
+        assert new_state.pending_streak == 1
+
+    def test_two_runs_at_same_target_commits_one_step(self) -> None:
+        """Second consecutive observation commits a ±1 stage move toward target."""
+        # First run already saw target=3 once (streak=1); EMA already saturated.
+        prior = LifecycleState(
+            smoothed_inputs={"tier1_pct": 0.60, "contributor_count_growth_7d": 0.50, "dd_post_ratio": 0.30},
+            pending_stage=3,
+            pending_streak=1,
+        )
+        timeline = {"tier1_pct": 0.60, "contributor_count_growth_7d": 0.50, "dd_post_ratio": 0.30}
+        stage, _, new_state = assign_stage(
+            timeline, _cluster(dominant_fraction=1.0),
+            prior_state=prior, prev_stage=1,
+        )
+        # Committed +1 step (1 → 2), NOT a direct jump to 3.
+        assert stage == 2
+        assert new_state.pending_stage == 0
+        assert new_state.pending_streak == 0
+
+    def test_changing_target_resets_pending_streak(self) -> None:
+        """Different target this run than last → pending_streak resets to 1."""
+        prior = LifecycleState(smoothed_inputs={"tier1_pct": 0.60}, pending_stage=3, pending_streak=1)
+        timeline = {"tier1_pct": 0.20, "dd_post_ratio": 0.15}
+        stage, _, new_state = assign_stage(
+            timeline, _cluster(dominant_fraction=1.0),
+            prior_state=prior, prev_stage=1,
+        )
+        # Target is now 2 (not 3), so pending resets to 2 with streak=1, prev=1 held.
+        assert stage == 1
+        assert new_state.pending_stage == 2
+        assert new_state.pending_streak == 1
+
+    def test_overlay_stage_5_consensus(self) -> None:
+        """Axis overlay fires when bull/researched/gini conditions hold (cold start)."""
         timeline = {
-            "tier1_pct": 0.30, "dd_post_ratio": 0.15, "gini_14d": 0.20,
+            "tier1_pct": 0.30,
             "conviction_bull_share": 0.70,
             "conviction_researched_share": 0.30,
+            "gini_14d": 0.20,
         }
-        stage, conf = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+        stage, _, _ = assign_stage(timeline, _cluster(dominant_fraction=1.0))
         assert stage == 5
-        assert conf == pytest.approx(0.85)
 
-    def test_stage_6_saturation_overrides_consensus(self) -> None:
-        """ADR-0021: bull_share ≥ 0.75 AND researched_share < 0.30 AND gini ≥ 0.55 → stage 6."""
+    def test_overlay_stage_6_saturation(self) -> None:
         timeline = {
+            "tier1_pct": 0.30,
             "conviction_bull_share": 0.80,
             "conviction_researched_share": 0.20,
             "gini_14d": 0.60,
         }
-        stage, conf = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+        stage, _, _ = assign_stage(timeline, _cluster(dominant_fraction=1.0))
         assert stage == 6
-        assert conf == pytest.approx(0.90)
 
-    def test_stage_5_and_6_skip_when_axis_data_absent(self) -> None:
-        """No axis data → stages 5/6 never fire (ADR-0021 removed legacy fallback)."""
-        timeline = {
-            "gini_14d": 0.20,
-            # No conviction_bull_share / conviction_researched_share at all.
-        }
-        stage, _ = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+    def test_overlay_skipped_when_axis_data_absent(self) -> None:
+        """No axis data → overlay returns None → stage falls back to breadth band."""
+        timeline = {"tier1_pct": 0.05, "financial_term_density": 0.20, "gini_14d": 0.20}
+        stage, _, _ = assign_stage(timeline, _cluster(dominant_fraction=1.0))
         assert stage not in (5, 6)
 
-    def test_stage_5_axis_path_blocks_when_substance_high(self) -> None:
-        """High researched_share (>=0.40) prevents axis-path stage 5 firing."""
-        timeline = {
-            "gini_14d": 0.20,
-            "conviction_bull_share": 0.70,
-            "conviction_researched_share": 0.50,  # researched majority blocks Consensus
-        }
-        stage, _ = assign_stage(timeline, _cluster(dominant_fraction=1.0))
-        assert stage != 5  # should fall through to catch-all stage 1
-
-    def test_catch_all_assigns_stage_1_low_confidence(self) -> None:
-        """If no rule matches, stage defaults to 1 at 0.4 × dominant_fraction."""
-        # tier1_pct in middle, no DD, no growth, no emotional spike — no rule fires.
-        timeline = {"tier1_pct": 0.10, "financial_term_density": 0.05}
-        stage, conf = assign_stage(timeline, _cluster(dominant_fraction=1.0))
-        assert stage == 1
-        assert conf == pytest.approx(0.4)
+    def test_smoothed_inputs_persisted_on_new_state(self) -> None:
+        """EMA-smoothed inputs flow through to the returned state for next run."""
+        prior = LifecycleState(smoothed_inputs={"tier1_pct": 0.10})
+        timeline = {"tier1_pct": 0.30}
+        _, _, new_state = assign_stage(
+            timeline, _cluster(dominant_fraction=1.0),
+            prior_state=prior, prev_stage=1,
+        )
+        # EMA: 0.4*0.30 + 0.6*0.10 = 0.18
+        assert new_state.smoothed_inputs["tier1_pct"] == pytest.approx(0.18, abs=1e-6)
 
     def test_confidence_scales_with_dominant_fraction(self) -> None:
-        """Lower cluster dominance → proportionally lower stage confidence."""
-        timeline = {"tier1_pct": 0.30, "dd_post_ratio": 0.15, "gini_14d": 0.30}
-        _, conf_high = assign_stage(timeline, _cluster(dominant_fraction=1.0))
-        _, conf_low = assign_stage(timeline, _cluster(dominant_fraction=0.5))
-        assert conf_low == pytest.approx(0.5)
-        assert conf_high > conf_low
+        """Lower cluster dominance → proportionally lower confidence."""
+        timeline = {"tier1_pct": 0.05, "financial_term_density": 0.20}
+        _, conf_high, _ = assign_stage(timeline, _cluster(dominant_fraction=1.0))
+        _, conf_low, _ = assign_stage(timeline, _cluster(dominant_fraction=0.5))
+        assert conf_low < conf_high
+        assert conf_low == pytest.approx(conf_high * 0.5, rel=0.05)

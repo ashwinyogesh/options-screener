@@ -28,6 +28,7 @@ _MAX_SYMBOLS = 20
 
 class SwingRequest(BaseModel):
     symbols: list[str]
+    bypass_gates: bool = True
 
     @field_validator("symbols")
     @classmethod
@@ -235,11 +236,12 @@ async def run_swing_scan(
 
 @router.post("/swing", response_model=SwingResponse)
 async def run_swing(req: SwingRequest) -> SwingResponse:
-    """Run swing pipeline on a custom symbol list. Excluded symbols dropped."""
+    """Run swing pipeline on a custom symbol list. Strategy gates are bypassed
+    so every requested symbol with sufficient price history is returned."""
     if not req.symbols:
         raise HTTPException(status_code=422, detail="symbols list is empty")
 
-    raw = await asyncio.to_thread(run_scan, req.symbols, 4)
+    raw = await asyncio.to_thread(run_scan, req.symbols, 4, req.bypass_gates)
     results = [SwingResultOut(**r) for r in raw]
     regime_state = regime_cache.get("regime:global")
     return SwingResponse(

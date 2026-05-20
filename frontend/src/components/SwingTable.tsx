@@ -31,12 +31,6 @@ const SETUP_COLOR: Record<string, string> = {
   retest: '#a78bfa',
 }
 
-const CONFIDENCE_BADGE: Record<string, { color: string; bg: string; label: string }> = {
-  high: { color: '#022c22', bg: '#4ade80', label: 'HIGH' },
-  medium: { color: '#1e1b00', bg: '#fbbf24', label: 'MED' },
-  speculative: { color: '#1e1b22', bg: '#a78bfa', label: 'SPEC' },
-}
-
 function scoreColor(s: number): string {
   if (s >= 75) return '#4ade80'
   if (s >= 65) return '#86efac'
@@ -92,11 +86,18 @@ function PriceLadder({ stop, entry, target }: { stop: number; entry: number; tar
 
 interface Props {
   data: SwingResult[]
+  gatesBypassed?: boolean
 }
 
-export function SwingTable({ data }: Props) {
+export function SwingTable({ data, gatesBypassed = false }: Props) {
   const [sorting, setSorting] = useState<SortingState>([{ id: 'swing_score', desc: true }])
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
+
+  function readinessRank(row: SwingResult): number {
+    if (row.extended) return 2
+    const nearTrigger = Math.abs((row.price - row.entry) / row.entry) <= 0.01
+    return nearTrigger ? 0 : 1
+  }
 
   const columns = [
     col.accessor('symbol', {
@@ -107,6 +108,26 @@ export function SwingTable({ data }: Props) {
           {info.row.original.earnings_warning && (
             <span title="Earnings within 10 days" style={{ marginLeft: 4, color: '#fbbf24' }}>⚠</span>
           )}
+          {gatesBypassed && (
+            <span
+              title="Custom search — strategy gates bypassed. Results shown regardless of price, ADV, setup score, R:R, or earnings filters."
+              style={{
+                marginLeft: 5,
+                padding: '1px 5px',
+                background: '#1e1b4b',
+                color: '#a5b4fc',
+                border: '1px solid #4338ca',
+                borderRadius: 3,
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: 0.4,
+                cursor: 'help',
+                verticalAlign: 'middle',
+              }}
+            >
+              CUSTOM
+            </span>
+          )}
         </span>
       ),
     }),
@@ -116,8 +137,19 @@ export function SwingTable({ data }: Props) {
       cell: info => {
         const v = info.getValue()
         const color = SETUP_COLOR[v] ?? '#94a3b8'
+        const bg: Record<string, string> = {
+          breakout:  '#0f2744',
+          momentum:  '#0f2d1a',
+          reversion: '#2d2200',
+          retest:    '#1e1040',
+        }
         return (
-          <span style={{ color, fontWeight: 500, textTransform: 'capitalize' }}>
+          <span style={{
+            color, background: bg[v] ?? '#1e2235',
+            padding: '2px 9px', borderRadius: 4,
+            fontSize: 11, fontWeight: 700, letterSpacing: 0.4,
+            textTransform: 'capitalize', border: `1px solid ${color}30`,
+          }}>
             {v || '—'}
           </span>
         )
@@ -151,7 +183,7 @@ export function SwingTable({ data }: Props) {
             </span>
             {/* bucket pills */}
             {bd && (
-              <span style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+              <span style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3 }}>
                 {([
                   { label: 'R:R',   pts: bd.rr,            max: 40, color: '#60a5fa' },
                   { label: 'Setup', pts: bd.setup,          max: 30, color: '#4ade80' },
@@ -194,14 +226,15 @@ export function SwingTable({ data }: Props) {
         return <span style={{ color, fontWeight: 500 }}>{pct.toFixed(1)}%</span>
       },
     }),    col.accessor('entry', {
-      header: () => <span title="The structural price where the trade triggers. Place a limit order here — not at the current price. CHASING badge means price has already moved >3% past this level.">Entry · Status</span>,
+      header: () => <span title="The structural price where the trade triggers. Readiness dot: green = near trigger, yellow = waiting, red = extended/chasing. Click to sort by readiness status.">Entry</span>,
+      sortingFn: (a, b) => readinessRank(a.original) - readinessRank(b.original),
       cell: info => {
         const row = info.row.original
         const entry = info.getValue() as number
         const trig = row.trigger_kind
         const kindLabel: Record<string, string> = {
           break_above: 'break ↑',
-          pullback_to_ema8: 'pull → EMA8',
+          pullback_to_ema8: '↩ EMA8',
           reclaim_confirm: 'confirm',
           retest_of: 'retest',
           market_close: 'at close',
@@ -277,7 +310,7 @@ export function SwingTable({ data }: Props) {
       cell: info => {
         const r = info.row.original
         const dte = r.days_to_earnings
-        if (dte == null || dte < 0) return <span style={{ color: '#475569', fontSize: 11 }}>\u2014</span>
+        if (dte == null || dte < 0) return <span style={{ color: '#475569', fontSize: 11 }}>{'—'}</span>
         const color = dte <= 7 ? '#f97316' : dte <= 14 ? '#fbbf24' : '#64748b'
         return <span style={{ color, fontSize: 11, fontWeight: dte <= 14 ? 600 : 400 }}>{dte}d</span>
       },
@@ -321,6 +354,7 @@ export function SwingTable({ data }: Props) {
             return (
               <Fragment key={r.symbol}>
                 <tr
+                  data-setup={r.setup_type}
                   onClick={() => setExpandedRow(isExpanded ? null : r.symbol)}
                   style={{ cursor: 'pointer' }}
                 >

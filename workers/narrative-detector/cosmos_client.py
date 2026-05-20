@@ -136,8 +136,13 @@ class DetectorCosmosClient:
         bucket_date: str,
         lifecycle_stage: int,
         stage_confidence: float,
+        lifecycle_state: dict | None = None,
     ) -> None:
-        """Patch lifecycle_stage and stage_confidence onto the timeline doc.
+        """Patch lifecycle_stage / confidence / state onto the timeline doc.
+
+        ``lifecycle_state`` carries the hysteresis + smoothing state defined
+        in ``smoothing.LifecycleState`` (ADR-0029).  Stored as an opaque
+        object on the timeline doc; only the detector reads it.
 
         If the doc doesn't exist yet (aggregator hasn't run this bucket),
         creates a minimal stub so the lifecycle data is never lost.
@@ -151,8 +156,52 @@ class DetectorCosmosClient:
             }
         doc["lifecycle_stage"] = lifecycle_stage
         doc["stage_confidence"] = stage_confidence
+        if lifecycle_state is not None:
+            doc["lifecycle_state"] = lifecycle_state
         self._timeline.upsert_item(doc)
         logger.debug(
             "%s [%s] → stage=%d confidence=%.2f",
             ticker, bucket_date, lifecycle_stage, stage_confidence,
         )
+
+    # ------------------------------------------------------------------
+    # Read: prior lifecycle state for hysteresis (ADR-0029).
+    # ------------------------------------------------------------------
+
+    def fetch_prior_lifecycle(
+        self,
+        ticker: str,
+        today_bucket: str,
+    ) -> tuple[int, dict]:
+        """Return (prev_stage, prior_state_dict) for hysteresis carry-over.
+
+        Lookup order:
+            1. Today's bucket — if an earlier same-day run already wrote a
+               ``lifecycle_state``, use it (so smoothing/hysteresis update
+               hourly, not just daily).
+            2. Yesterday's bucket — if today's hasn't been touched yet.
+            3. Cold start — returns (0, {}).
+
+        Returns:
+            (prev_stage, prior_state_dict).  ``prior_state_dict`` is the raw
+            ``lifecycle_state`` dict shape consumed by
+            ``smoothing.LifecycleState.from_doc``.  prev_stage is 0 when no
+            prior assignment exists (cold start).
+        """
+        today_doc = self.fetch_timeline_doc(ticker, today_bucket)
+        if today_doc and today_doc.get("lifecycle_state") is not None:
+            return (
+                int(today_doc.get("lifecycle_stage") or 0),
+                today_doc,
+            )
+        # Fall back to yesterday's bucket.
+        try:
+            yest_date = (
+                datetime.strptime(today_bucket, "%Y-%m-%d").date() - timedelta(days=1)
+            ).isoformat()
+        except ValueError:
+            return 0, {}
+        yest_doc = self.fetch_timeline_doc(ticker, yest_date)
+        if yest_doc is None:
+            return 0, {}
+        return int(yest_doc.get("lifecycle_stage") or 0), yest_doc

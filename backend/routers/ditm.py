@@ -10,8 +10,10 @@ import asyncio
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, field_validator
+
+from limiter import limiter
 
 from services.data_service import get_risk_free_rate
 from services.ditm_service import (
@@ -19,7 +21,6 @@ from services.ditm_service import (
     get_macro_context,
     process_symbol,
 )
-from services.scan_cache import ditm_scan_cache
 from services.screener.result_store import ScreenerStoreEmpty, get_ditm_results
 from services.universe import UNIVERSES, get_universe
 
@@ -131,21 +132,23 @@ class DitmResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post("/ditm", response_model=DitmResponse)
-async def run_ditm_screener(request: DitmRequest) -> DitmResponse:
+@limiter.limit("10/minute")
+async def run_ditm_screener(request: Request, body: DitmRequest) -> DitmResponse:
     """
     Runs the DITM long call screener for the provided symbols.
     Symbols that fail are returned in the errors list; others still appear in results.
     """
-    if request.minDTE > request.maxDTE:
+    _ = request  # consumed by @limiter.limit
+    if body.minDTE > body.maxDTE:
         raise HTTPException(status_code=422, detail="minDTE must be <= maxDTE")
 
     rf_rate = await asyncio.to_thread(get_risk_free_rate)
     macro_ctx = await asyncio.to_thread(get_macro_context)
     logger.info(
         "Starting DITM screener for %d symbols, DTE %d–%d, rf=%.3f, macro_pass=%s",
-        len(request.symbols),
-        request.minDTE,
-        request.maxDTE,
+        len(body.symbols),
+        body.minDTE,
+        body.maxDTE,
         rf_rate,
         macro_ctx["macro_pass"],
     )
@@ -155,10 +158,10 @@ async def run_ditm_screener(request: DitmRequest) -> DitmResponse:
     async def process_one(symbol: str):
         async with sem:
             return await asyncio.to_thread(
-                process_symbol, symbol, request.minDTE, request.maxDTE, rf_rate, macro_ctx
+                process_symbol, symbol, body.minDTE, body.maxDTE, rf_rate, macro_ctx
             )
 
-    pairs = await asyncio.gather(*[process_one(s) for s in request.symbols])
+    pairs = await asyncio.gather(*[process_one(s) for s in body.symbols])
 
     results: list[DitmResultOut] = []
     errors: list[DitmErrorOut] = []
@@ -180,7 +183,9 @@ async def run_ditm_screener(request: DitmRequest) -> DitmResponse:
 
 
 @router.get("/ditm/scan", response_model=DitmResponse)
+@limiter.limit("30/minute")
 async def run_ditm_scan(
+    request: Request,
     top_n: int = Query(default=20, ge=1, le=50),
     min_dte: int = Query(default=180, ge=30, le=730),
     max_dte: int = Query(default=365, ge=30, le=730),
@@ -210,13 +215,15 @@ async def run_ditm_scan(
         "DITM scan (precomputed): universe=%s returning %d rows, last_updated=%s",
         universe_key, len(rows), last_updated_at,
     )
+    # Always fetch fresh macro context — VIX may not be present in precomputed docs.
+    macro_ctx = await asyncio.to_thread(get_macro_context)
     return DitmResponse(
         results=[_to_out(r) for r in rows],
         errors=[],
-        macro_pass=macro_fields["macro_pass"],
-        vix_level=macro_fields.get("vix_level"),
-        vix_5d_change=macro_fields.get("vix_5d_change"),
-        spy_above_sma200=macro_fields.get("spy_above_sma200", True),
+        macro_pass=macro_ctx["macro_pass"],
+        vix_level=macro_ctx.get("vix_level"),
+        vix_5d_change=macro_ctx.get("vix_5d_change"),
+        spy_above_sma200=macro_ctx.get("spy_above_sma200", True),
         last_updated_at=last_updated_at,
     )
 

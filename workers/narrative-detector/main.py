@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 from config import load_from_env
 from cosmos_client import DetectorCosmosClient
 from detector import ClusterResult, assign_stage, cluster
+from smoothing import LifecycleState
 
 logger = logging.getLogger(__name__)
 
@@ -84,17 +85,30 @@ def main() -> None:
             )
 
             timeline = cosmos.fetch_timeline_doc(ticker, today) or {}
-            stage, confidence = assign_stage(timeline, result)
+
+            # Carry hysteresis + smoothing state forward from the previous run
+            # (today's earlier run, falling back to yesterday's bucket).  ADR-0029.
+            prev_stage, prior_doc = cosmos.fetch_prior_lifecycle(ticker, today)
+            prior_state = LifecycleState.from_doc(prior_doc)
+
+            stage, confidence, new_state = assign_stage(
+                timeline, result, prior_state=prior_state, prev_stage=prev_stage,
+            )
 
             if stage == 0:
                 logger.debug("%s: stage=0 (insufficient data) — skipping write", ticker)
                 continue
 
-            cosmos.write_lifecycle(ticker, today, stage, confidence)
+            cosmos.write_lifecycle(
+                ticker, today, stage, confidence,
+                lifecycle_state=new_state.to_dict(),
+            )
             processed += 1
             logger.info(
-                "%s → stage=%d confidence=%.2f (n_signals=%d n_clusters=%d)",
-                ticker, stage, confidence, len(signals), result.n_clusters,
+                "%s → stage=%d (prev=%d pending=%d) confidence=%.2f "
+                "(n_signals=%d n_clusters=%d)",
+                ticker, stage, prev_stage, new_state.pending_stage,
+                confidence, len(signals), result.n_clusters,
             )
 
         except Exception:

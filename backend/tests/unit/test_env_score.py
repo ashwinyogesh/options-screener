@@ -1,13 +1,16 @@
 """
 Unit tests for `services.scoring.env.compute_env_score`.
 
+v3.3 (current): IVP 35 + Tr 15 + SMA 5 + SLP 5 + RSI 20 + OI 20 = 100.
+
 Probes:
-- Each factor's bell-curve elbows (HV Rank, IV/HV ratio, SMA alignment, 52W,
-  RSI, OI, DTE).
-- Direction-aware divergence: 'csp' vs 'cc' produce different 52W and RSI scores
-  for the same indicator inputs.
+- IV Percentile (IVP) curve elbows at the 30th/50th/75th/90th boundaries.
+- SMA alignment (5 pts) and SMA50 slope (5 pts) elbows.
+- 52W high distance and RSI direction-aware divergence (CSP vs CC).
+- Chain median OI log scale and cap.
 - Earnings penalty.
-- Stale-IV gate (iv_stale=True forces the IV/HV factor to 0 regardless of value).
+- Back-compat params iv_rank, iv_hv_ratio, iv_stale, dte are accepted but
+  confirmed to have zero effect on the score (explicitly unused since v3.3).
 
 These tests do NOT pin the exact 0–100 outputs at every input — that's the
 characterization tests' job. They probe the *shape* of each factor at its
@@ -51,36 +54,62 @@ def test_env_iv_rank_is_ignored_in_v3():
     assert score_low == pytest.approx(score_high, abs=0.01)
 
 
-# --- IV/HV ratio factor (28 pts) -------------------------------------------
+# --- IV Percentile factor (35 pts) — v3.3 primary vol signal ---------------
+# Replaces IV/HV Ratio. Curve: <30th=0, 30-50th→0→10, 50-75th→10→25,
+# 75-90th→25→35, ≥90th=35.
+# Baseline (neutral_kwargs has iv_percentile=None): IVP contributes 0 pts.
+# Isolation: subtract the RSI=50 plateau (20 pts) from the total.
 
 @pytest.mark.parametrize(
-    "ratio, expected_min",
+    "pct, expected_pts",
     [
-        (1.7, 28.0),
-        (2.5, 28.0),    # plateau
-        (1.4, 14.0),
-        (1.1, 6.7),
-        (0.9, 2.0),    # small positive value; exact depends on curve
-        (0.5, 0.0),
+        (95.0, 35.0),   # above 90th ceiling → full credit
+        (90.0, 35.0),   # exactly at ceiling
+        (82.5, 30.0),   # midpoint 75–90: 25 + (7.5/15)*10 = 30
+        (75.0, 25.0),   # lower elbow of upper lerp
+        (62.5, 17.5),   # midpoint 50–75: 10 + (12.5/25)*15 = 17.5
+        (50.0, 10.0),   # lower elbow of mid lerp
+        (40.0,  5.0),   # midpoint 30–50: (10/20)*10 = 5
+        (30.0,  0.0),   # lower boundary — no credit below 30th
+        (15.0,  0.0),   # well below 30th
     ],
 )
-def test_env_iv_hv_ratio_factor_at_elbows(ratio: float, expected_min: float):
+def test_env_iv_percentile_factor_at_elbows(pct: float, expected_pts: float):
     kw = _neutral_kwargs()
-    kw["iv_hv_ratio"] = ratio
-    score, _ = compute_env_score(**kw)
-    isolated = score - 20.0  # subtract the RSI=50 plateau (20 pts in v3/v3.1)
-    assert isolated >= expected_min - 0.1
+    kw["iv_percentile"] = pct
+    score, detail = compute_env_score(**kw)
+    isolated = score - 20.0  # subtract the RSI=50 plateau (20 pts)
+    assert isolated == pytest.approx(expected_pts, abs=0.15)
+    assert "IVP:" in detail
 
 
-def test_env_iv_stale_zeros_iv_hv_factor():
-    """When iv_stale=True, a strong IV/HV ratio that would normally award 28 pts
-    must contribute zero."""
+def test_env_iv_percentile_none_awards_zero():
+    """When iv_percentile is None (IV data unavailable), IVP contributes 0 pts."""
     kw = _neutral_kwargs()
-    kw["iv_hv_ratio"] = 2.0
-    kw["iv_stale"] = True
+    # iv_percentile is not set → defaults to None inside compute_env_score
     score, _ = compute_env_score(**kw)
-    # Only the 50-RSI sweet spot contributes (20 pts in v3).
+    # Only the 50-RSI sweet spot contributes (20 pts).
     assert score == pytest.approx(20.0, abs=0.1)
+
+
+# --- Back-compat: iv_hv_ratio and iv_stale are explicitly unused in v3.3 ---
+
+def test_env_iv_hv_ratio_is_ignored_in_v33():
+    """iv_hv_ratio is a back-compat parameter; v3.3 dropped it in favour of
+    iv_percentile. Changing its value must not affect the score."""
+    base = _neutral_kwargs()
+    score_low, _  = compute_env_score(**{**base, "iv_hv_ratio": 0.0})
+    score_high, _ = compute_env_score(**{**base, "iv_hv_ratio": 2.5})
+    assert score_low == pytest.approx(score_high, abs=0.01)
+
+
+def test_env_iv_stale_is_ignored_in_v33():
+    """iv_stale is a back-compat parameter; v3.3 dropped the IV/HV factor so
+    the stale gate has nothing to zero out. Toggling it must not affect score."""
+    base = _neutral_kwargs()
+    score_fresh, _ = compute_env_score(**{**base, "iv_stale": False})
+    score_stale, _ = compute_env_score(**{**base, "iv_stale": True})
+    assert score_fresh == pytest.approx(score_stale, abs=0.01)
 
 
 # --- SMA alignment factor (5 pts) — v3.1 restored signal -------------------
@@ -207,14 +236,20 @@ def test_env_earnings_penalty_applied():
 
 def test_env_full_score_csp_top_environment():
     """Maxed-out inputs in every factor → score should be ≥99 (allowing
-    for small rounding in the rescaled curves)."""
+    for small rounding in the rescaled curves).
+
+    v3.3 weights: IVP 35 + Tr 15 + SMA 5 + SLP 5 + RSI 20 + OI 20 = 100.
+    """
     kw = _neutral_kwargs()
-    kw["iv_hv_ratio"] = 2.0           # 35 pts
-    kw["dist_from_52w_high_pct"] = 0.0 # Tr: 15 pts (CSP flat top)
-    kw["sma_ratio"] = 1.05             # SMA: 5 pts
-    kw["sma50_slope_pct"] = 0.6        # SLP: 5 pts
-    kw["rsi"] = 50.0                   # RSI: 20 pts
-    kw["chain_median_oi"] = 10000.0    # OI: 20 pts
-    score, _ = compute_env_score(**kw)
+    kw["iv_percentile"] = 95.0         # IVP: 35 pts (≥90th percentile)
+    kw["dist_from_52w_high_pct"] = 0.0 # Tr: 15 pts (CSP flat top ≤5%)
+    kw["sma_ratio"] = 1.05             # SMA: 5 pts (>1.02)
+    kw["sma50_slope_pct"] = 0.6        # SLP: 5 pts (≥0.5%)
+    kw["rsi"] = 50.0                   # RSI: 20 pts (42–62 sweet spot)
+    kw["chain_median_oi"] = 10000.0    # OI: 20 pts (log-scale cap)
+    score, detail = compute_env_score(**kw)
     assert score >= 99.0
     assert score <= 100.0
+    # Verify all six factors appear in the detail string
+    for factor in ("IVP:", "Tr:", "SMA:", "SLP:", "RSI:", "OI:"):
+        assert factor in detail

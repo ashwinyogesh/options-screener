@@ -188,8 +188,16 @@ def process_symbol(
     spy_df: pd.DataFrame,
     regime: RegimeState | None = None,
     df: pd.DataFrame | None = None,
+    bypass_gates: bool = False,
 ) -> SwingResult:
-    """Run the full swing pipeline for one symbol. Never raises."""
+    """Run the full swing pipeline for one symbol. Never raises.
+
+    When *bypass_gates* is True, strategy filters (price, ADV, setup score,
+    disabled setups, earnings blocks, R:R gate) are skipped so that the caller
+    always receives a computed result.  Data-quality gates (insufficient
+    history, missing ATR) are still enforced because the pipeline cannot run
+    without them.
+    """
     rr_gate = regime.rr_gate if regime is not None else RR_HARD_GATE
     regime_factor = regime.multiplier if regime is not None else 1.0
     regime_label = regime.regime_label if regime is not None else ""
@@ -201,12 +209,12 @@ def process_symbol(
             return _excluded(symbol, "insufficient history")
 
         price = float(df["Close"].iloc[-1])
-        if price < MIN_PRICE:
+        if not bypass_gates and price < MIN_PRICE:
             return _excluded(symbol, f"price < ${MIN_PRICE:.0f}")
 
         adv = compute_avg_daily_volume(df, period=20)
         adv_usd = adv * price if adv == adv else 0
-        if adv_usd < MIN_ADV_USD:
+        if not bypass_gates and adv_usd < MIN_ADV_USD:
             return _excluded(symbol, f"ADV ${adv_usd / 1e6:.1f}M < ${MIN_ADV_USD / 1e6:.0f}M", price=price)
 
         atr14 = compute_atr(df, period=14)
@@ -249,7 +257,7 @@ def process_symbol(
             "structure_reclaim": reclaim,
         }
         cls = classify_setup(features)
-        if cls["best_score"] < MIN_SETUP_SCORE:
+        if not bypass_gates and cls["best_score"] < MIN_SETUP_SCORE:
             return _excluded(
                 symbol,
                 f"setup score {cls['best_score']:.0f} < {MIN_SETUP_SCORE:.0f}",
@@ -258,7 +266,7 @@ def process_symbol(
                 atr14=atr14,
             )
 
-        if cls["best_setup"] in disabled:
+        if not bypass_gates and cls["best_setup"] in disabled:
             return _excluded(
                 symbol,
                 f"{cls['best_setup']} setup disabled in {regime_label} regime",
@@ -269,7 +277,7 @@ def process_symbol(
 
         # Earnings hard blocks (before risk/scoring) ---------------------------
         dte = _days_to_earnings(earnings)
-        if dte is not None and dte <= EARNINGS_HARD_BLOCK_DAYS:
+        if not bypass_gates and dte is not None and dte <= EARNINGS_HARD_BLOCK_DAYS:
             return _excluded(
                 symbol,
                 f"earnings in {dte}d (≤ {EARNINGS_HARD_BLOCK_DAYS}d hard block)",
@@ -277,7 +285,7 @@ def process_symbol(
                 rsi=rsi_val,
                 atr14=atr14,
             )
-        if cls["best_setup"] == "reversion" and dte is not None and dte <= EARNINGS_REVERSION_BLOCK_DAYS:
+        if not bypass_gates and cls["best_setup"] == "reversion" and dte is not None and dte <= EARNINGS_REVERSION_BLOCK_DAYS:
             return _excluded(
                 symbol,
                 f"reversion + earnings in {dte}d (≤ {EARNINGS_REVERSION_BLOCK_DAYS}d hard block)",
@@ -293,7 +301,7 @@ def process_symbol(
             recent_swing_low=_recent_swing_low(df),
             features=features,
         )
-        if not plan.passes_gate or plan.rr < rr_gate:
+        if not bypass_gates and (not plan.passes_gate or plan.rr < rr_gate):
             return _excluded(
                 symbol,
                 f"R:R {plan.rr:.2f} < {rr_gate:.1f} ({regime_label or 'baseline'} gate)",
@@ -422,7 +430,11 @@ def _fetch_ohlc_safe(symbol: str) -> tuple[str, pd.DataFrame | None]:
         return symbol, None
 
 
-def run_scan(symbols: list[str], max_workers: int = 8) -> list[dict]:
+def run_scan(
+    symbols: list[str],
+    max_workers: int = 8,
+    bypass_gates: bool = False,
+) -> list[dict]:
     """
     Scan a universe of symbols. Returns sorted list of result dicts
     (qualified candidates first, sorted by swing_score desc).
@@ -432,6 +444,9 @@ def run_scan(symbols: list[str], max_workers: int = 8) -> list[dict]:
       2. Compute global regime once (uses pre-fetched OHLC for breadth).
       3. Parallel per-symbol scoring with the regime injected.
 
+    When *bypass_gates* is True, strategy filters are skipped so every
+    symbol that has sufficient data history is returned.  Use for custom
+    symbol requests where the caller explicitly named each ticker.
     Excluded symbols are dropped from the response.
     """
     try:
@@ -462,7 +477,7 @@ def run_scan(symbols: list[str], max_workers: int = 8) -> list[dict]:
     qualified: list[SwingResult] = []
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {
-            ex.submit(process_symbol, sym, spy_df, regime, ohlc.get(sym)): sym
+            ex.submit(process_symbol, sym, spy_df, regime, ohlc.get(sym), bypass_gates): sym
             for sym in symbols
         }
         for fut in as_completed(futures):

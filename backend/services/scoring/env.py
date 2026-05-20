@@ -13,8 +13,7 @@ three independent signals (total still 25 pts, total ENV still 100):
 The legacy parameters `iv_rank`, `price_above_sma50`, `sma50_above_sma200`,
 and `dte` are kept in the signature for back-compat but ignored.
 
-DITM environment scoring is intentionally *not* in this module yet — the
-live implementation lives inline in `services.ditm_service.py`.
+DITM environment scoring lives in `services.scoring.ditm`.
 """
 from __future__ import annotations
 

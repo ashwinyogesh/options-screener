@@ -3,7 +3,7 @@ import type { KeyboardEvent } from 'react'
 
 interface Props {
   onScan: (topN: number, universe: string) => void
-  onCustom: (symbols: string[]) => void
+  onCustom: (symbols: string[], bypassGates: boolean) => void
   loading: boolean
 }
 
@@ -80,7 +80,7 @@ const SCORE_BREAKDOWN: ScoreFactor[] = [
     detail: '2.5 → 0 · 3.0 → 25 · 4.0 → 35 · ≥ 5.0 → 40 (piecewise-linear)',
     definition: ': (target − trigger) / (trigger − stop). Trigger and stop are setup-specific and structural — breakout uses base_high / base_low, momentum uses EMA8 pullback, retest uses the reclaimed level, reversion uses current price with the swing-low stop. R:R reflects the trade you take at the **proper entry**, not at chase prices.',
     why: ': Across thousands of swing trades, R:R is the strongest single predictor of profitability — more than entry quality. A 50% win rate at 3R still doubles equity; a 70% win rate at 1.5R barely breaks even. Computing it off the trigger (not the current close) prevents the screener from over-penalizing extended names that are otherwise well-formed.',
-    formula: 'trigger, stop = build_trigger(setup, features)\nrr = (target - trigger) / (trigger - stop)\nrr_pts(2.5)  = 0\nrr_pts(3.0)  = 25\nrr_pts(4.0)  = 35\nrr_pts(5.0+) = 40\n# CHASING flag if current_price > trigger * 1.03',
+    formula: 'trigger, stop = build_trigger(setup, features)\n\n# Target (v2.3): ATR projection is the credibility ceiling\natr_target = trigger + ATR_MULT[setup] × atr14\n             # breakout=3.0 · momentum=2.5 · reversion=2.0 · retest=3.5\nrr_floor   = trigger + R_MULT[setup] × risk\n             # breakout=3.0 · momentum=2.75 · reversion=2.5 · retest=3.25\ntarget     = min(atr_target, rr_floor)\n# If stop is wide, ATR can\'t support the R:R floor → R:R drops below gate → filtered out\n\nrr = (target - trigger) / (trigger - stop)\nrr_pts(2.5)  = 0\nrr_pts(3.0)  = 25\nrr_pts(4.0)  = 35\nrr_pts(5.0+) = 40\n# CHASING flag if current_price > trigger * 1.03',
   },
 
   // ─── Setup quality bucket (30 pts) ───────────────────────────────────
@@ -192,15 +192,9 @@ const SCORE_BREAKDOWN: ScoreFactor[] = [
   },
 ]
 
-const CONFIDENCE_RULES = [
-  { tier: 'High',        color: '#4ade80', rule: 'score ≥ 75 AND R:R ≥ 3.5 AND setup_score ≥ 70' },
-  { tier: 'Medium',      color: '#fbbf24', rule: 'score ≥ 55' },
-  { tier: 'Speculative', color: '#a78bfa', rule: 'everything else' },
-]
-
 const PLAYBOOK = [
   { n: 1, q: 'What\'s the current regime?',          a: 'Check the banner above the table. risk_on → trade actively; neutral → be selective; risk_off → take only the best, and reversion is auto-blocked.' },
-  { n: 2, q: 'Score ≥ 65 AND confidence ≥ Medium?', a: 'Yes → proceed. No → skip unless you have an off-screener reason. Score is post-multiplier, so a low number could be raw weakness OR an environmental haircut — check the breakdown.' },
+  { n: 2, q: 'Score ≥ 65?', a: 'Yes → proceed. No → skip unless you have an off-screener reason. Score is post-multiplier, so a low number could be raw weakness OR an environmental haircut — check the breakdown.' },
   { n: 3, q: 'Do I agree with the setup_type?',     a: 'Read the drivers in the expanded row. Disagree → skip; the geometry only works if the thesis matches.' },
   { n: 4, q: 'Is the stop tolerable in real $?',    a: '1.5 × ATR or recent swing low. If the dollar risk exceeds your per-trade budget, halve size or skip.' },
   { n: 5, q: 'Earnings nearby? CHASING?',           a: 'Earnings ≤ 14d → expect a haircut multiplier (visible in expanded breakdown). CHASING flag → entry is more than 3% past the structural trigger; either wait for a pullback or size down.' },
@@ -213,6 +207,7 @@ export function SwingInput({ onScan, onCustom, loading }: Props) {
   const [symbolsText, setSymbolsText] = useState<string>('')
   const [showLegend, setShowLegend] = useState<boolean>(false)
   const [expandedFactor, setExpandedFactor] = useState<string | null>(null)
+  const [bypassGates, setBypassGates] = useState<boolean>(true)
 
   function parseSymbols(): string[] {
     return symbolsText
@@ -229,7 +224,7 @@ export function SwingInput({ onScan, onCustom, loading }: Props) {
   function handleCustom() {
     const syms = parseSymbols()
     if (syms.length === 0) return
-    onCustom(syms)
+    onCustom(syms, bypassGates)
   }
 
   function handleKey(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -302,7 +297,10 @@ export function SwingInput({ onScan, onCustom, loading }: Props) {
               Custom symbols — max 20, comma- or space-separated.
             </span>
             <span className="app-subtitle">
-              Each symbol is screened with the same hard gates as the auto-scan.
+              {bypassGates
+                ? 'Strategy gates bypassed — all symbols with sufficient price history are returned.'
+                : 'Hard gates active — same filters as auto-scan (price, ADV, R:R, setup score).'
+              }
             </span>
           </div>
           <div
@@ -334,6 +332,27 @@ export function SwingInput({ onScan, onCustom, loading }: Props) {
               disabled={loading || parseSymbols().length === 0}
             >
               {loading ? 'Scanning…' : `🚀 Run (${parseSymbols().length})`}
+            </button>
+            <button
+              onClick={() => setBypassGates(v => !v)}
+              disabled={loading}
+              title={bypassGates
+                ? 'Gates bypassed: click to enforce hard gates (price, ADV, R:R, setup score)'
+                : 'Gates enforced: click to bypass hard gates and show all symbols'
+              }
+              style={{
+                padding: '4px 10px',
+                borderRadius: 4,
+                border: `1px solid ${bypassGates ? '#4338ca' : '#334155'}`,
+                background: bypassGates ? '#1e1b4b' : '#1e293b',
+                color: bypassGates ? '#a5b4fc' : '#64748b',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 600,
+                transition: 'all 0.15s',
+              }}
+            >
+              {bypassGates ? '🔓 Gates Off' : '🔒 Gates On'}
             </button>
           </div>
         </div>
@@ -454,26 +473,6 @@ export function SwingInput({ onScan, onCustom, loading }: Props) {
                 </div>
               )
             ))}
-            <div
-              style={{
-                marginTop: 6,
-                padding: '5px 8px',
-                background: '#0f172a',
-                borderRadius: 5,
-                fontSize: 11,
-                color: '#64748b',
-                borderLeft: '3px solid #334155',
-              }}
-            >
-              <strong style={{ color: '#94a3b8' }}>Confidence tiers:</strong>{' '}
-              {CONFIDENCE_RULES.map((c, i) => (
-                <span key={c.tier}>
-                  <span style={{ color: c.color, fontWeight: 700 }}>{c.tier}</span>
-                  {' '}({c.rule})
-                  {i < CONFIDENCE_RULES.length - 1 ? ' · ' : ''}
-                </span>
-              ))}
-            </div>
           </div>
 
           <div className="score-legend-factors">
