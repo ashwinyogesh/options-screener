@@ -44,4 +44,5 @@ backend.zip
 
 # Phase 2 audit analysis artefacts (regenerable from scripts/backtest_csp.py et al.)
 csp_backtest_*.csv
+cc_backtest_*.csv
 rank_snapshot_*.csv
