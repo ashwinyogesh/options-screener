@@ -97,6 +97,7 @@ async def _score_one(
                 decay_acs=result.decay_acs,
                 components=result.components,
                 flags=result.flags,
+                dominant_signal=result.dominant_signal,
                 stage_streak_days=continuity.stage_streak_days,
                 first_emerged_at=continuity.first_emerged_at,
                 acs_slope_14d=continuity.acs_slope_14d,
