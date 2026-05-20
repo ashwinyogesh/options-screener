@@ -132,10 +132,11 @@ jobs:
           inject "detectorImage"      "${{ vars.GHCR_IMAGE_DETECTOR }}"
           inject "scorerImage"        "${{ vars.GHCR_IMAGE_SCORER }}"
           inject "backfillImage"      "${{ vars.GHCR_IMAGE_BACKFILL }}"
-          inject "screenerCspImage"   "${{ vars.GHCR_IMAGE_SCREENER }}"
-          inject "screenerCcImage"    "${{ vars.GHCR_IMAGE_SCREENER }}"
-          inject "screenerDitmImage"  "${{ vars.GHCR_IMAGE_SCREENER }}"
-          inject "screenerSwingImage" "${{ vars.GHCR_IMAGE_SCREENER }}"
+          # Screener images (screener-csp / -cc / -ditm / -swing) are not
+          # parameters of main.bicep — those jobs are provisioned and updated
+          # exclusively by .github/workflows/screener-worker.yml. Injecting
+          # them here causes ARM "parameters were supplied but do not
+          # correspond to any parameters defined in the template" errors.
 
           # GHCR pull credentials — bicep declares the registry block when these are non-empty.
           if [ -n "${{ secrets.GHCR_PAT }}" ]; then
