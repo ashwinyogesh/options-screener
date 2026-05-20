@@ -114,12 +114,19 @@ class Trade:
 
 
 def _fetch(symbol: str, years: int) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Fetch symbol, SPY, ^VIX, IWM."""
+    """Fetch symbol, SPY, ^VIX, IWM.
+
+    Note: auto_adjust=True (split/dividend-adjusted) is REQUIRED for any
+    historical backtest. With auto_adjust=False, pre-split bars print at
+    the old nominal price (e.g., pre-2024 NVDA at $1100, post at $110),
+    making every entry/exit/ATR/SMA computation discontinuous across
+    corporate actions. Matches backend/services/data_service.get_ohlc.
+    """
     period = f"{max(years, 1) + 1}y"
-    sym_df = yf.Ticker(symbol).history(period=period, auto_adjust=False)
-    spy = yf.Ticker("SPY").history(period=period, auto_adjust=False)
-    vix = yf.Ticker("^VIX").history(period=period, auto_adjust=False)
-    iwm = yf.Ticker("IWM").history(period=period, auto_adjust=False)
+    sym_df = yf.Ticker(symbol).history(period=period, auto_adjust=True)
+    spy = yf.Ticker("SPY").history(period=period, auto_adjust=True)
+    vix = yf.Ticker("^VIX").history(period=period, auto_adjust=True)
+    iwm = yf.Ticker("IWM").history(period=period, auto_adjust=True)
     if sym_df.empty:
         raise SystemExit(f"No data for {symbol}")
     for d in (sym_df, spy, vix, iwm):

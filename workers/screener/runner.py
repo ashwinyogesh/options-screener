@@ -168,22 +168,18 @@ async def _run_swing_async() -> tuple[dict[str, dict[str, Any]], dict[str, str]]
     logger.info("Swing scan starting — %d tickers", len(tickers))
 
     # run_scan is CPU+IO bound; run in a thread so we don't block the event loop.
-    qualified: list[dict[str, Any]] = await asyncio.to_thread(run_scan, tickers)
+    # It returns (rows, regime) explicitly as of Phase-1 cleanup
+    # (was a process-global cache side-effect prior).
+    qualified, regime = await asyncio.to_thread(run_scan, tickers)
 
-    # run_scan populates regime_cache as a side-effect; retrieve it.
     regime_dict: dict[str, Any] = {}
-    try:
-        from services.scan_cache import regime_cache  # noqa: PLC0415
-        regime = regime_cache.get("regime:global")
-        if regime is not None:
-            regime_dict = dataclasses.asdict(regime)
-            logger.info(
-                "Swing regime: label=%s rr_gate=%.1f",
-                regime_dict.get("regime_label"),
-                regime_dict.get("rr_gate"),
-            )
-    except Exception:
-        logger.warning("Could not extract regime from cache", exc_info=True)
+    if regime is not None:
+        regime_dict = dataclasses.asdict(regime)
+        logger.info(
+            "Swing regime: label=%s rr_gate=%.1f",
+            regime_dict.get("regime_label"),
+            regime_dict.get("rr_gate"),
+        )
 
     results: dict[str, dict[str, Any]] = {}
     for row in qualified:

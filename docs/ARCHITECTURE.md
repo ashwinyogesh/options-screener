@@ -167,7 +167,7 @@ As of [ADR-0024](adr/0024-screener-precomputation.md), **GET `/csp`  `/cc`  `/di
 
 ### Legacy bodies
 
-The pre-refactor per-symbol functions are retained in-file as `_legacy_process_symbol` / `_legacy_process_cc_symbol` for one-commit revert. They are **not wired in** — production calls go through the runner. They will be deleted in a follow-up cleanup phase once the new path has accumulated enough production miles.
+Cleanup complete. The pre-refactor `_legacy_process_symbol` / `_legacy_process_cc_symbol` shims that were retained for one-commit revert have been removed from the codebase; production calls go through the runner exclusively. Git history is the revert path if ever needed.
 
 Reference: [ADR-0002](adr/0002-unified-screener-service.md).
 

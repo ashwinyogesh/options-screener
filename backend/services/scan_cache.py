@@ -55,5 +55,10 @@ csp_scan_cache: ScanCache = ScanCache()
 cc_scan_cache: ScanCache = ScanCache()
 ditm_scan_cache: ScanCache = ScanCache()
 swing_scan_cache: ScanCache = ScanCache()
-# Shared regime cache for the swing screener (small TTL — regime moves slowly).
-regime_cache: ScanCache = ScanCache()
+# NOTE: a shared ``regime_cache`` singleton lived here prior to Phase-1
+# cleanup. It was a single-key, process-global memoization of the swing
+# market regime used as a side-channel between ``swing_service.run_scan``
+# and its callers. It is gone — ``run_scan`` now returns the regime
+# explicitly. Do not reintroduce a global regime cache; if you need
+# per-scan memoization, key it on ``(as_of, universe_hash)`` and scope it
+# to the request, not the process.

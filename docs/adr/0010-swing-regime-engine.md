@@ -45,9 +45,16 @@ quant-trader audit (May 2026) flagged this as the most material structural defec
 
 Add `backend/services/swing/regime.py` exposing `compute_regime(spy_df, universe_ohlc)`
 returning a `RegimeState` dataclass. The regime is computed exactly **once per scan**
-in `swing_service.run_scan` after the OHLC pre-fetch stage and cached in
-`scan_cache.regime_cache["regime:global"]` so the router can echo it in the response
-without recomputing.
+in `swing_service.run_scan` after the OHLC pre-fetch stage and returned alongside
+the result rows as a tuple `(rows, regime)`, which the router echoes in the
+response.
+
+> **Update (Phase-1 cleanup):** an earlier version of this ADR memoized the
+> regime in a process-global `scan_cache.regime_cache["regime:global"]`. That
+> single-key cache leaked one user's regime snapshot into another's request,
+> could not be keyed to `as_of`, and acted as a side-channel between
+> `run_scan` and its callers. It has been removed; `run_scan` now returns the
+> regime explicitly.
 
 ### Outputs that flow downstream
 - **`rr_gate`** — replaces the static gate. `risk_on=2.5`, `neutral=2.75`, `risk_off=3.0`.

@@ -348,6 +348,10 @@ CC_CONFIG = ScreenerConfig(
     delta_fn=black_scholes_call_delta,
     ohlc_fetcher=lambda s, **kw: get_ohlc(s, **kw),
     iv_lookup=lambda chain_df, strike: get_implied_volatility(chain_df, strike),
+    # CC strikes are short CALLS — true OTM is strike > spot. The 0.98 multiplier
+    # admits calls up to 2% in-the-money so the ATM strike is not excluded by
+    # discrete strike-grid spacing. The delta gate (0.10, 0.35) is the real OTM
+    # filter. See csp_service.py for the symmetric note.
     strike_filter=lambda price, strike: strike > price * 0.98,
     delta_range=(0.10, 0.35),
     ideal_delta=0.225,

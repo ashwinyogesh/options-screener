@@ -44,9 +44,8 @@ flowchart LR
     PS -->|features| CL[services/swing/classifier.py]
     PS -->|risk plan| RP[services/swing/risk.py]
     PS -->|composite| SC[services/scoring/swing.py]
-    S -->|regime_cache.put| K[(scan_cache)]
+    S -->|returns (rows, regime)| R
     R -->|response| UI
-    K -.->|GET /swing/regime| R
 ```
 
 Strict layering: routers validate and serialise; services own all math;
@@ -313,8 +312,8 @@ multiplication (conditionality unlocked). See [ADR-0012](adr/0012-swing-hybrid-s
 
 Regime is a property of the market, not the symbol. Computing it n times wastes
 work and introduces inconsistency across the scan as upstream data updates.
-One regime per scan, cached in `scan_cache.regime_cache["regime:global"]`, used
-by all symbols and exposed at `GET /api/screener/swing/regime`.
+One regime per scan, computed once in `run_scan` and returned alongside the
+rows tuple, used by all symbols and exposed at `GET /api/screener/swing/regime`.
 
 ### 9.5 Why these specific VIX bands (25p / 60p / 85p)?
 
@@ -388,7 +387,7 @@ Two reasons:
 | [backend/services/swing/risk.py](../backend/services/swing/risk.py) | Structural triggers, stops, targets, R:R. |
 | [backend/services/swing/indicators.py](../backend/services/swing/indicators.py) | EMA / ATR / ADX / RSI / BB / A/D / RS / volume surge primitives. |
 | [backend/services/scoring/swing.py](../backend/services/scoring/swing.py) | `compute_swing_score` — additive raw + multiplicative composition. |
-| [backend/services/scan_cache.py](../backend/services/scan_cache.py) | TTL cache for results + `regime_cache` singleton. |
+| [backend/services/scan_cache.py](../backend/services/scan_cache.py) | TTL cache for per-strategy scan results. |
 | [frontend/src/hooks/useSwing.ts](../frontend/src/hooks/useSwing.ts) | Fetch + cache + regime state. |
 | [frontend/src/components/SwingInput.tsx](../frontend/src/components/SwingInput.tsx) | Scan / custom controls + Score Guide. |
 | [frontend/src/components/SwingTable.tsx](../frontend/src/components/SwingTable.tsx) | Results table + expanded row + multipliers panel. |

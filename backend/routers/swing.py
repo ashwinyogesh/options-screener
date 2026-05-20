@@ -11,7 +11,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, field_validator
 
-from services.scan_cache import regime_cache, swing_scan_cache
+from services.scan_cache import swing_scan_cache
 from services.scoring.swing import SWING_SCORER_VERSION
 from services.screener.result_store import ScreenerStoreEmpty, get_swing_results
 from services.swing.regime import RegimeState, compute_regime
@@ -163,14 +163,17 @@ def _regime_from_dict(d: dict[str, Any]) -> RegimeOut:
     )
 
 
-def _get_cached_regime(spy_df=None, universe_ohlc=None) -> RegimeState:
-    """Memoize the regime calc per scan (30-min TTL)."""
-    cached = regime_cache.get("regime:global")
-    if cached is not None:
-        return cached
-    state = compute_regime(spy_df=spy_df, universe_ohlc=universe_ohlc)
-    regime_cache.set("regime:global", state)
-    return state
+def _compute_swing_regime(spy_df=None, universe_ohlc=None) -> RegimeState:
+    """Compute the market regime for the swing screener.
+
+    Previously memoized via a process-global ``regime_cache`` singleton.
+    That cache leaked one user's regime snapshot into another's request
+    (one-key cache, no scoping) and could not be keyed to ``as_of``;
+    Phase-1 cleanup removed it. The regime computation is cheap relative
+    to the OHLC fetches already performed, so per-call computation is
+    acceptable.
+    """
+    return compute_regime(spy_df=spy_df, universe_ohlc=universe_ohlc)
 
 
 @router.get("/swing/regime", response_model=RegimeOut)
@@ -185,7 +188,7 @@ async def get_swing_regime() -> RegimeOut:
             logger.warning("regime endpoint: SPY fetch failed: %s", exc)
             spy_df = None
         # No universe OHLC available for the standalone endpoint — breadth degrades to neutral.
-        return _get_cached_regime(spy_df=spy_df, universe_ohlc=None)
+        return _compute_swing_regime(spy_df=spy_df, universe_ohlc=None)
 
     state = await asyncio.to_thread(_build)
     return _regime_to_out(state)
@@ -241,9 +244,8 @@ async def run_swing(req: SwingRequest) -> SwingResponse:
     if not req.symbols:
         raise HTTPException(status_code=422, detail="symbols list is empty")
 
-    raw = await asyncio.to_thread(run_scan, req.symbols, 4, req.bypass_gates)
+    raw, regime_state = await asyncio.to_thread(run_scan, req.symbols, 4, req.bypass_gates)
     results = [SwingResultOut(**r) for r in raw]
-    regime_state = regime_cache.get("regime:global")
     return SwingResponse(
         results=results,
         regime=_regime_to_out(regime_state) if regime_state is not None else None,

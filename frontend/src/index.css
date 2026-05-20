@@ -815,6 +815,12 @@ body {
 .results-meta { font-size: 12px; color: #94a3b8; }
 .cache-notice { opacity: 0.65; font-style: italic; }
 .precomputed-badge { color: #4ade80; font-size: 0.85em; font-style: italic; }
+/* Aging: 30 min – 4 h since worker last wrote. Worker cadence is 15 min RTH,
+   so >30 min suggests the worker has missed at least one tick. */
+.precomputed-badge--warn { color: #facc15; font-style: italic; font-weight: 600; }
+/* Stale: ≥ 4 h. Within striking distance of Cosmos TTL (24 h) — treat as
+   suspect. Operator should not place trades against this snapshot. */
+.precomputed-badge--stale { color: #f87171; font-style: italic; font-weight: 700; }
 
 /* ── Empty state ──────────────────────────────────────────────────────────── */
 .empty-state {

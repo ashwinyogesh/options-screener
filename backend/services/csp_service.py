@@ -601,6 +601,14 @@ CSP_CONFIG = ScreenerConfig(
     delta_fn=black_scholes_put_delta,
     ohlc_fetcher=lambda s, **kw: get_ohlc(s, **kw),
     iv_lookup=lambda chain_df, strike: get_implied_volatility(chain_df, strike),
+    # CSP strikes are short PUTS — true OTM is strike < spot. The 1.02 multiplier
+    # admits puts up to 2% in-the-money so that on discrete strike grids ($1/$2.50/$5
+    # increments) the at-the-money put is never excluded by sub-cent rounding
+    # between spot prints. The delta gate (-0.35, -0.10) is the real OTM-ness
+    # filter; this is a coarse pre-filter. NOTE: this DOES admit genuinely ITM
+    # puts when the spot is within 2% of a higher strike. Audit Phase 2 task is
+    # to verify the delta-gate cleans these up in practice; if not, tighten to
+    # `strike <= price`.
     strike_filter=lambda price, strike: strike < price * 1.02,
     delta_range=(-0.35, -0.10),
     ideal_delta=-0.225,

@@ -106,16 +106,38 @@ function applyDitmFilters(results: DitmResult[], filters: DitmFilterState): Ditm
 // Narrative tab is shown by default (Phase 6). Set VITE_NARRATIVE_ENABLED=0 to hide.
 const NARRATIVE_ENABLED = import.meta.env.VITE_NARRATIVE_ENABLED !== '0'
 
-/** Format a backend ISO timestamp as a relative "Updated X min ago" badge label. */
-function _formatPrecomputedAge(isoTimestamp: string): string {
+/** Format a backend ISO timestamp as a relative "Updated X min ago" badge label
+ *  + a severity class so the user can see when the precomputed scan is stale.
+ *
+ *  Worker cadence (ADR-0024): every 15 min during RTH, every 4 h overnight.
+ *  Thresholds reflect "expected" vs "concerning" vs "broken":
+ *    <  30 min  → fresh         (.precomputed-badge)
+ *    < 240 min  → aging         (.precomputed-badge--warn)
+ *    >= 240 min → stale         (.precomputed-badge--stale)
+ *  A 24h-old badge in muted green misleads operators into trusting data
+ *  that may have already expired the underlying Cosmos TTL.
+ */
+function _formatPrecomputedAge(isoTimestamp: string): { label: string; className: string } {
   try {
     const updated = new Date(isoTimestamp)
     const ageMin = Math.round((Date.now() - updated.getTime()) / 60_000)
-    if (ageMin < 1) return 'Updated just now'
-    if (ageMin === 1) return 'Updated 1 min ago'
-    return `Updated ${ageMin} min ago`
+    let className = 'precomputed-badge'
+    if (ageMin >= 240) className = 'precomputed-badge precomputed-badge--stale'
+    else if (ageMin >= 30) className = 'precomputed-badge precomputed-badge--warn'
+
+    let label: string
+    if (ageMin < 1) label = 'Updated just now'
+    else if (ageMin === 1) label = 'Updated 1 min ago'
+    else if (ageMin < 60) label = `Updated ${ageMin} min ago`
+    else {
+      const h = Math.floor(ageMin / 60)
+      const m = ageMin % 60
+      label = m === 0 ? `Updated ${h}h ago` : `Updated ${h}h ${m}m ago`
+    }
+    if (ageMin >= 240) label = `⚠ ${label} (stale)`
+    return { label, className }
   } catch {
-    return 'Updated recently'
+    return { label: 'Updated recently', className: 'precomputed-badge' }
   }
 }
 
@@ -239,9 +261,10 @@ export default function App() {
               <div className="results-meta">
                 Showing <strong>{filteredCsp.length}</strong> of <strong>{cspResults.length}</strong> results
                 {filteredCsp.length < cspResults.length && ' (filters active)'}
-                {cspIsScanMode && cspLastUpdatedAt && (
-                  <span className="precomputed-badge"> · {_formatPrecomputedAge(cspLastUpdatedAt)}</span>
-                )}
+                {cspIsScanMode && cspLastUpdatedAt && (() => {
+                  const { label, className } = _formatPrecomputedAge(cspLastUpdatedAt)
+                  return <span className={className}> · {label}</span>
+                })()}
                 {!cspIsScanMode && cspCachedAt !== null && (
                   <span className="cache-notice"> · cached {Math.round((Date.now() - cspCachedAt) / 60000) < 1 ? '< 1' : Math.round((Date.now() - cspCachedAt) / 60000)} min ago</span>
                 )}
@@ -294,9 +317,10 @@ export default function App() {
               <div className="results-meta">
                 Showing <strong>{filteredCc.length}</strong> of <strong>{ccResults.length}</strong> results
                 {filteredCc.length < ccResults.length && ' (filters active)'}
-                {ccIsScanMode && ccLastUpdatedAt && (
-                  <span className="precomputed-badge"> · {_formatPrecomputedAge(ccLastUpdatedAt)}</span>
-                )}
+                {ccIsScanMode && ccLastUpdatedAt && (() => {
+                  const { label, className } = _formatPrecomputedAge(ccLastUpdatedAt)
+                  return <span className={className}> · {label}</span>
+                })()}
                 {!ccIsScanMode && ccCachedAt !== null && (
                   <span className="cache-notice"> · cached {Math.round((Date.now() - ccCachedAt) / 60000) < 1 ? '< 1' : Math.round((Date.now() - ccCachedAt) / 60000)} min ago</span>
                 )}
@@ -349,9 +373,10 @@ export default function App() {
               <div className="results-meta">
                 Showing <strong>{filteredDitm.length}</strong> of <strong>{ditmResults.length}</strong> results
                 {filteredDitm.length < ditmResults.length && ' (filters active)'}
-                {ditmIsScanMode && ditmLastUpdatedAt && (
-                  <span className="precomputed-badge"> · {_formatPrecomputedAge(ditmLastUpdatedAt)}</span>
-                )}
+                {ditmIsScanMode && ditmLastUpdatedAt && (() => {
+                  const { label, className } = _formatPrecomputedAge(ditmLastUpdatedAt)
+                  return <span className={className}> · {label}</span>
+                })()}
                 {!ditmIsScanMode && ditmCachedAt !== null && (
                   <span className="cache-notice"> · cached {Math.round((Date.now() - ditmCachedAt) / 60000) < 1 ? '< 1' : Math.round((Date.now() - ditmCachedAt) / 60000)} min ago</span>
                 )}
@@ -442,9 +467,10 @@ export default function App() {
                 {swingCachedAt !== null && (
                   <span className="cache-notice"> · cached {Math.round((Date.now() - swingCachedAt) / 60000) < 1 ? '< 1' : Math.round((Date.now() - swingCachedAt) / 60000)} min ago</span>
                 )}
-                {swingIsScanMode && swingLastUpdatedAt && (
-                  <span className="precomputed-badge"> · {_formatPrecomputedAge(swingLastUpdatedAt)}</span>
-                )}
+                {swingIsScanMode && swingLastUpdatedAt && (() => {
+                  const { label, className } = _formatPrecomputedAge(swingLastUpdatedAt)
+                  return <span className={className}> · {label}</span>
+                })()}
               </div>
             )}
             {!swingLoading && swingRegime && (

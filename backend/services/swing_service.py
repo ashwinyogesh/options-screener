@@ -434,20 +434,28 @@ def run_scan(
     symbols: list[str],
     max_workers: int = 8,
     bypass_gates: bool = False,
-) -> list[dict]:
+) -> tuple[list[dict], RegimeState | None]:
     """
-    Scan a universe of symbols. Returns sorted list of result dicts
-    (qualified candidates first, sorted by swing_score desc).
+    Scan a universe of symbols. Returns ``(rows, regime)`` where ``rows`` is
+    the sorted list of result dicts (qualified candidates first, sorted by
+    swing_score desc) and ``regime`` is the RegimeState used for gating
+    (or None when SPY fetch fully fails).
 
     Two-stage pipeline:
       1. Pre-fetch all OHLC in parallel (one yfinance call per symbol).
-      2. Compute global regime once (uses pre-fetched OHLC for breadth).
+      2. Compute regime once (uses pre-fetched OHLC for breadth).
       3. Parallel per-symbol scoring with the regime injected.
 
     When *bypass_gates* is True, strategy filters are skipped so every
     symbol that has sufficient data history is returned.  Use for custom
     symbol requests where the caller explicitly named each ticker.
     Excluded symbols are dropped from the response.
+
+    NOTE: prior to Phase-1 cleanup the regime was written to a module-global
+    ``scan_cache.regime_cache`` as a side-effect so the caller could fish it
+    out. That singleton leaked one user's regime snapshot into another's
+    request and could not be keyed to ``as_of``. It has been removed; the
+    regime is returned explicitly.
     """
     try:
         spy_df = get_ohlc("SPY", period="1y")
@@ -462,12 +470,8 @@ def run_scan(
             if df is not None:
                 ohlc[sym] = df
 
-    # Stage 2: regime (cached)
-    from services.scan_cache import regime_cache  # local to avoid cycle
-    regime = regime_cache.get("regime:global")
-    if regime is None:
-        regime = compute_regime(spy_df=spy_df, universe_ohlc=ohlc)
-        regime_cache.set("regime:global", regime)
+    # Stage 2: regime (computed fresh per scan; no shared cache)
+    regime = compute_regime(spy_df=spy_df, universe_ohlc=ohlc)
     logger.info(
         "swing scan regime=%s rr_gate=%.1f multiplier=%.2f breadth=%.0f%%",
         regime.regime_label, regime.rr_gate, regime.multiplier, regime.breadth_pct,
@@ -485,7 +489,7 @@ def run_scan(
             if not res.excluded:
                 qualified.append(res)
     qualified.sort(key=lambda r: r.swing_score, reverse=True)
-    return [asdict(r) for r in qualified]
+    return [asdict(r) for r in qualified], regime
 
 
 def get_version() -> str:
