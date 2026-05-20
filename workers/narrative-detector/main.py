@@ -102,13 +102,16 @@ def main() -> None:
             cosmos.write_lifecycle(
                 ticker, today, stage, confidence,
                 lifecycle_state=new_state.to_dict(),
+                n_embedded=result.n_embedded,
+                dominant_fraction=result.dominant_fraction,
             )
             processed += 1
             logger.info(
                 "%s → stage=%d (prev=%d pending=%d) confidence=%.2f "
-                "(n_signals=%d n_clusters=%d)",
+                "(n_signals=%d n_embedded=%d n_clusters=%d dom_frac=%.2f)",
                 ticker, stage, prev_stage, new_state.pending_stage,
-                confidence, len(signals), result.n_clusters,
+                confidence, len(signals), result.n_embedded,
+                result.n_clusters, result.dominant_fraction,
             )
 
         except Exception:

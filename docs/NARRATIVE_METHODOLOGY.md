@@ -313,15 +313,28 @@ rather than overwriting committed history with a single quiet window.
 
 ### 4.6 Confidence
 
-$$ \text{confidence} = \text{dominant\_fraction} \cdot \text{certainty} \cdot \text{proximity} $$
+The classification gate uses **`n_embedded`** (count of embedded signals
+in the 72h window), not `n_clusters`. Tickers below `N_MIN_EMBEDDED = 5`
+return stage 0. Above that floor we always assign a stage, even when
+HDBSCAN finds no coherent cluster — polysemic megacaps (GOOGL, AMZN,
+META with posts spanning multiple sub-themes) are still in *some*
+lifecycle stage based on tier1/growth/dd_post; cluster coherence shifts
+to a confidence input rather than a hard gate.
+
+$$ \text{confidence} = \underbrace{\max(\text{dominant\_fraction}, 0.3)}_{\text{coherence}} \cdot \text{certainty} \cdot \text{proximity} \cdot \underbrace{\min\!\left(\frac{n_{\text{embedded}}}{10}, 1\right)}_{\text{volume factor}} $$
 
 - `dominant_fraction` is the share of non-noise signals in the largest
-  HDBSCAN cluster (§3.1).
+  HDBSCAN cluster (§3.1).  Floored at `0.3` so polysemic narratives still
+  receive a usable confidence rather than disappearing at `0.0`.
 - `certainty = 1.0` when committed stage equals target stage; `0.5` when
   the detector is mid-transition (committed != target).
 - `proximity ∈ [0, 1]` falls linearly to 0 at the band boundaries — a
   score sitting exactly on a threshold is reported with low confidence to
   signal that the next run could flip the band.
+- `volume_factor` ramps linearly from 0 to 1 as `n_embedded` rises from 0
+  to 10, then saturates.  A 3-post cluster gets 0.3× of the confidence a
+  10-post cluster gets at otherwise-identical metrics — preventing thin
+  clusters from driving high-confidence callouts.
 
 ### 4.7 State persistence
 

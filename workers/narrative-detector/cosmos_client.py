@@ -137,12 +137,15 @@ class DetectorCosmosClient:
         lifecycle_stage: int,
         stage_confidence: float,
         lifecycle_state: dict | None = None,
+        n_embedded: int | None = None,
+        dominant_fraction: float | None = None,
     ) -> None:
         """Patch lifecycle_stage / confidence / state onto the timeline doc.
 
         ``lifecycle_state`` carries the hysteresis + smoothing state defined
-        in ``smoothing.LifecycleState`` (ADR-0029).  Stored as an opaque
-        object on the timeline doc; only the detector reads it.
+        in ``smoothing.LifecycleState`` (ADR-0030).  ``n_embedded`` and
+        ``dominant_fraction`` are diagnostic fields surfaced in the drilldown
+        UI so users can see why a stage came in at a given confidence.
 
         If the doc doesn't exist yet (aggregator hasn't run this bucket),
         creates a minimal stub so the lifecycle data is never lost.
@@ -158,6 +161,10 @@ class DetectorCosmosClient:
         doc["stage_confidence"] = stage_confidence
         if lifecycle_state is not None:
             doc["lifecycle_state"] = lifecycle_state
+        if n_embedded is not None:
+            doc["n_embedded"] = n_embedded
+        if dominant_fraction is not None:
+            doc["dominant_fraction"] = round(dominant_fraction, 4)
         self._timeline.upsert_item(doc)
         logger.debug(
             "%s [%s] → stage=%d confidence=%.2f",

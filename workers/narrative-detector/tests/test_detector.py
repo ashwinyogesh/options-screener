@@ -77,13 +77,18 @@ from detector import assign_stage  # noqa: E402
 from smoothing import LifecycleState  # noqa: E402
 
 
-def _cluster(dominant_fraction: float = 0.8, n_clusters: int = 1) -> ClusterResult:
+def _cluster(
+    dominant_fraction: float = 0.8,
+    n_clusters: int = 1,
+    n_embedded: int = 10,
+) -> ClusterResult:
     """Minimal ClusterResult stub for stage-rule tests."""
     return ClusterResult(
         labels=[0, 0, 0],
         n_clusters=n_clusters,
         dominant_cluster=0,
         dominant_fraction=dominant_fraction,
+        n_embedded=n_embedded,
     )
 
 
@@ -98,16 +103,42 @@ class TestAssignStage:
       * Smoothed inputs are persisted on the returned state.
     """
 
-    def test_no_clusters_returns_stage_zero_preserves_state(self) -> None:
+    def test_below_n_min_embedded_returns_stage_zero_preserves_state(self) -> None:
+        """n_embedded below the floor → stage 0 (genuine insufficient data)."""
         prior = LifecycleState(smoothed_inputs={"tier1_pct": 0.5}, pending_stage=2, pending_streak=1)
         stage, conf, new_state = assign_stage(
-            {"tier1_pct": 0.30}, _cluster(n_clusters=0),
+            {"tier1_pct": 0.30},
+            _cluster(n_clusters=0, n_embedded=2),  # well below N_MIN_EMBEDDED=5
             prior_state=prior, prev_stage=2,
         )
         assert stage == 0
         assert conf == 0.0
-        # Stage 0 means insufficient data — prior state must carry over unchanged.
+        # Prior state must carry over unchanged.
         assert new_state is prior
+
+    def test_polysemic_ticker_still_classifies(self) -> None:
+        """n_clusters == 0 but n_embedded >= floor → GOOGL fix: still assign a stage.
+
+        This is the headline behaviour added by the ADR-0030 amendment.  A
+        megacap with 18 embedded posts spanning multiple sub-themes (cloud /
+        AI / antitrust) produces ``n_clusters == 0`` after the intra-cluster
+        similarity floor demotes its low-coherence clusters to noise.  The
+        old gate sent it to stage 0; the new gate honours the underlying
+        breadth metrics and classifies normally — at lower confidence.
+        """
+        timeline = {
+            "tier1_pct": 0.30,
+            "contributor_count_growth_7d": 0.50,
+            "dd_post_ratio": 0.20,
+        }
+        stage, conf, _ = assign_stage(
+            timeline,
+            _cluster(dominant_fraction=0.0, n_clusters=0, n_embedded=15),
+        )
+        # Cold start + high breadth → stage 3 committed immediately.
+        assert stage == 3
+        # Coherence floored at 0.3, volume saturated at n=15 → confidence > 0.
+        assert conf > 0.0
 
     def test_cold_start_accepts_target_immediately(self) -> None:
         """prev_stage=0 → no hysteresis, target stage is committed at once."""
@@ -222,9 +253,49 @@ class TestAssignStage:
         assert new_state.smoothed_inputs["tier1_pct"] == pytest.approx(0.18, abs=1e-6)
 
     def test_confidence_scales_with_dominant_fraction(self) -> None:
-        """Lower cluster dominance → proportionally lower confidence."""
+        """Higher cluster dominance → higher confidence (above the floor)."""
         timeline = {"tier1_pct": 0.05, "financial_term_density": 0.20}
         _, conf_high, _ = assign_stage(timeline, _cluster(dominant_fraction=1.0))
-        _, conf_low, _ = assign_stage(timeline, _cluster(dominant_fraction=0.5))
-        assert conf_low < conf_high
-        assert conf_low == pytest.approx(conf_high * 0.5, rel=0.05)
+        _, conf_mid, _ = assign_stage(timeline, _cluster(dominant_fraction=0.5))
+        # 0.5 and 1.0 are both above the 0.3 coherence floor, so they pass
+        # through proportionally.
+        assert conf_mid < conf_high
+        assert conf_mid == pytest.approx(conf_high * 0.5, rel=0.05)
+
+    def test_coherence_floor_lifts_polysemic_confidence(self) -> None:
+        """dominant_fraction below COHERENCE_FLOOR (0.3) is clamped up.
+
+        Without the floor, a polysemic cluster (dom_frac=0.0) would land at
+        zero confidence and effectively disappear from the screener.  The
+        floor ensures it's still ranked, just at lower confidence than a
+        coherent cluster.
+        """
+        timeline = {"tier1_pct": 0.05, "financial_term_density": 0.20}
+        _, conf_zero, _ = assign_stage(timeline, _cluster(dominant_fraction=0.0))
+        _, conf_floor, _ = assign_stage(timeline, _cluster(dominant_fraction=0.3))
+        # Both are clamped to the same 0.3 floor → equal confidence.
+        assert conf_zero == pytest.approx(conf_floor, rel=1e-3)
+        assert conf_zero > 0.0
+
+    def test_volume_factor_dampens_thin_clusters(self) -> None:
+        """Confidence at n_embedded=5 should be exactly half of n_embedded=10."""
+        timeline = {"tier1_pct": 0.05, "financial_term_density": 0.20}
+        _, conf_full, _ = assign_stage(
+            timeline, _cluster(dominant_fraction=1.0, n_embedded=10),
+        )
+        _, conf_thin, _ = assign_stage(
+            timeline, _cluster(dominant_fraction=1.0, n_embedded=5),
+        )
+        # Linear ramp: 5/10 = 0.5x.  Above 10 the factor saturates.
+        assert conf_thin == pytest.approx(conf_full * 0.5, rel=1e-3)
+
+    def test_volume_factor_saturates_above_threshold(self) -> None:
+        """Confidence does not keep rising past n_embedded == N_VOLUME_FULL."""
+        timeline = {"tier1_pct": 0.05, "financial_term_density": 0.20}
+        _, conf_10, _ = assign_stage(
+            timeline, _cluster(dominant_fraction=1.0, n_embedded=10),
+        )
+        _, conf_100, _ = assign_stage(
+            timeline, _cluster(dominant_fraction=1.0, n_embedded=100),
+        )
+        assert conf_10 == pytest.approx(conf_100, rel=1e-3)

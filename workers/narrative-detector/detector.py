@@ -37,6 +37,7 @@ class ClusterResult:
     n_clusters: int            # number of clusters after merging
     dominant_cluster: int      # label of the largest non-noise cluster (-1 if all noise)
     dominant_fraction: float   # fraction of non-noise signals in the dominant cluster
+    n_embedded: int = 0        # total signals fed to HDBSCAN (== len(labels))
 
 
 def cluster(
@@ -64,7 +65,10 @@ def cluster(
     """
     n = len(embeddings)
     if n == 0:
-        return ClusterResult(labels=[], n_clusters=0, dominant_cluster=-1, dominant_fraction=0.0)
+        return ClusterResult(
+            labels=[], n_clusters=0, dominant_cluster=-1,
+            dominant_fraction=0.0, n_embedded=0,
+        )
 
     # HDBSCAN needs >=2 samples to fit, and >= min_cluster_size to form any
     # cluster. Below that threshold everything is noise by definition — return
@@ -76,6 +80,7 @@ def cluster(
             n_clusters=0,
             dominant_cluster=-1,
             dominant_fraction=0.0,
+            n_embedded=n,
         )
 
     mat = np.array(embeddings, dtype=np.float32)
@@ -184,11 +189,12 @@ def cluster(
         n_clusters=n_clusters,
         dominant_cluster=dominant_cluster,
         dominant_fraction=dominant_fraction,
+        n_embedded=n,
     )
 
 
 # ---------------------------------------------------------------------------
-# Lifecycle stage assignment — smoothed inputs + monotone hysteresis (ADR-0029).
+# Lifecycle stage assignment — smoothed inputs + monotone hysteresis (ADR-0030).
 # ---------------------------------------------------------------------------
 
 from smoothing import (  # noqa: E402
@@ -201,6 +207,22 @@ from smoothing import (  # noqa: E402
     overlay_stage,
 )
 
+# Minimum embedded signals required to attempt classification.  Below this we
+# return stage 0 ("insufficient data") — there genuinely isn't enough volume
+# to assert a narrative.  Set to match HDBSCAN's min_cluster_size floor.
+N_MIN_EMBEDDED: int = 5
+
+# Volume of embedded signals at which confidence reaches its full value.  Below
+# this the volume_factor scales linearly down toward zero so thin clusters
+# don't drive high-confidence callouts.  Above this we saturate.
+N_VOLUME_FULL: int = 10
+
+# Floor applied to dominant_fraction inside the confidence calculation so that
+# polysemic narratives (multiple low-coherence sub-themes — common for
+# megacaps like GOOGL where posts span cloud / AI / antitrust / Waymo) still
+# receive a non-zero confidence rather than silently disappearing.
+COHERENCE_FLOOR: float = 0.3
+
 
 def assign_stage(
     timeline: dict,
@@ -210,16 +232,24 @@ def assign_stage(
 ) -> tuple[int, float, LifecycleState]:
     """Return (lifecycle_stage, stage_confidence, new_state) for a ticker.
 
-    Implements ADR-0029 stability rules:
-        1. EMA-smooth volatile aggregator inputs (alpha=0.4, ~3-day half-life).
-        2. Compute a continuous breadth score from smoothed inputs.
-        3. Map score to a breadth stage in {1, 2, 3} (Stage 4 reserved for
-           institutional/analyst data not yet in scope).
-        4. Override with Stage 5/6 when axis overlay condition holds (axis
-           transitions are subject to the same hysteresis but bypass the
-           ±1-step cap because they're conceptually a separate dimension).
-        5. Apply monotone hysteresis: cap movement to ±1 stage per commit
-           (between 1/2/3); require 2 consecutive runs at the new target.
+    Implements ADR-0030 stability rules and the GOOGL fix amendment:
+
+      1. EMA-smooth volatile aggregator inputs (alpha=0.4, ~3-run half-life).
+      2. **Gate** on ``n_embedded`` (count of usable signals), NOT on
+         ``n_clusters``.  Below ``N_MIN_EMBEDDED`` → stage 0.  At or above,
+         we always assign a stage even if HDBSCAN found no coherent cluster
+         (a polysemic ticker is still in *some* lifecycle stage based on
+         tier1/growth/dd_post).
+      3. Compute a continuous breadth score from smoothed inputs; map to a
+         breadth stage in {1, 2, 3}.
+      4. Override with Stage 5/6 when axis overlay condition holds against
+         smoothed axis shares.
+      5. Apply monotone hysteresis: cap movement to ±1 stage per commit,
+         require 2 consecutive runs at the new target.
+      6. Confidence absorbs cluster coherence (``dominant_fraction``, floored
+         at ``COHERENCE_FLOOR``) and volume (``min(n_embedded/N_VOLUME_FULL, 1)``)
+         as multiplicative factors — a polysemic 18-post cluster lands the
+         same stage but at lower confidence than a coherent 18-post cluster.
 
     Args:
         timeline: today's ticker_timeline Cosmos document.
@@ -229,17 +259,16 @@ def assign_stage(
         prev_stage: previously committed lifecycle_stage.  0 → cold start.
 
     Returns:
-        (committed_stage, confidence, new_state).  Caller persists
-        ``new_state`` on today's bucket so the next run continues smoothing
-        and hysteresis correctly.  ``committed_stage == 0`` means insufficient
-        data (no clusters); ``new_state`` carries forward unchanged.
+        (committed_stage, confidence, new_state).  ``committed_stage == 0``
+        means insufficient data (n_embedded below floor); ``new_state``
+        carries forward unchanged in that case.
     """
     if prior_state is None:
         prior_state = LifecycleState()
 
-    # Stage 0 — insufficient data.  Preserve prior state so it isn't reset
-    # by a single quiet window.
-    if cluster_result.n_clusters == 0:
+    # Stage 0 — insufficient data.  Genuine "not enough signal to classify".
+    # Polysemic tickers (n_embedded high but n_clusters == 0) fall through.
+    if cluster_result.n_embedded < N_MIN_EMBEDDED:
         return 0, 0.0, prior_state
 
     # Step 1 — EMA smoothing.
@@ -256,10 +285,7 @@ def assign_stage(
     target_stage = target_overlay if target_overlay is not None else target_breadth
 
     # Step 5 — Hysteresis.  The overlay (5/6) and breadth band (1/2/3) are
-    # treated as a single ordered chain: 1 → 2 → 3 → 5 → 6 (4 reserved).  This
-    # means going from breadth=3 to overlay=5 still takes 2 confirmed runs
-    # and a single +1 step.  When overlay disengages, the same logic walks
-    # the stage back down.
+    # treated as a single ordered chain: 1 → 2 → 3 → 5 → 6 (4 reserved).
     interim_state = LifecycleState(
         smoothed_inputs=smoothed,
         pending_stage=prior_state.pending_stage,
@@ -267,12 +293,15 @@ def assign_stage(
     )
     committed, new_state = apply_hysteresis(target_stage, prev_stage, interim_state)
 
-    # Confidence reflects: cluster dominance × certainty about the band ×
-    # proximity to the band centre.
-    confidence = compute_confidence(
+    # Step 6 — Confidence.  Coherence floored so polysemic clusters still
+    # produce a usable signal; volume factor dampens thin clusters.
+    coherence = max(cluster_result.dominant_fraction, COHERENCE_FLOOR)
+    volume_factor = min(cluster_result.n_embedded / N_VOLUME_FULL, 1.0)
+    base_confidence = compute_confidence(
         score=score,
         target_stage=target_stage,
         committed_stage=committed,
-        dominant_fraction=cluster_result.dominant_fraction,
+        dominant_fraction=coherence,
     )
+    confidence = round(base_confidence * volume_factor, 4)
     return committed, confidence, new_state
