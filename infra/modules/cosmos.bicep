@@ -335,6 +335,44 @@ resource narrativesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases
   }
 }
 
+// signal_events: append-only log of lifecycle stage transitions (ADR-0030 forward-log).
+// One doc per (ticker, hour, transition) emitted by narrative-detector when a
+// ticker's committed stage changes. Price fields (px_at_signal, px_t5/10/20,
+// SPY counterparts) are populated by a separate backfill job (next commit).
+//
+// Partition key /ticker — point-readable for "all transitions for X", and the
+// "all recent transitions across universe" view filters by event_date range
+// which scans a bounded slice of partitions.
+//
+// No TTL — this is validation data and must accumulate indefinitely so we
+// build a real backtest sample size over time.
+resource signalEventsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'signal_events'
+  properties: {
+    resource: {
+      id: 'signal_events'
+      partitionKey: {
+        paths: ['/ticker']
+        kind: 'Hash'
+        version: 2
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          { path: '/ticker/?' }
+          { path: '/event_date/?' }
+          { path: '/new_stage/?' }
+          { path: '/prev_stage/?' }
+          { path: '/confidence/?' }
+        ]
+        excludedPaths: [{ path: '/*' }]
+      }
+    }
+  }
+}
+
 // Grant Cosmos DB Built-in Data Contributor to provided principal IDs.
 // Built-in role definition ID is fixed across all accounts.
 var cosmosDataContributorRoleId = '00000000-0000-0000-0000-000000000002'

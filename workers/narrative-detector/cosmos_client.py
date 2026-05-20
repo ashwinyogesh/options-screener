@@ -6,6 +6,7 @@ Reads:
 
 Writes:
   - ticker_timeline: lifecycle_stage + stage_confidence on the today bucket doc
+  - signal_events: append-only forward log on every stage transition
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ class DetectorCosmosClient:
         self._db = self._client.get_database_client(database)
         self._signals = self._db.get_container_client("signals")
         self._timeline = self._db.get_container_client("ticker_timeline")
+        self._signal_events = self._db.get_container_client("signal_events")
 
     # ------------------------------------------------------------------
     # Read: tickers that have at least one embedded + classified signal
@@ -212,3 +214,34 @@ class DetectorCosmosClient:
         if yest_doc is None:
             return 0, {}
         return int(yest_doc.get("lifecycle_stage") or 0), yest_doc
+
+    # ------------------------------------------------------------------
+    # Write: append a stage-transition event to the forward signal log.
+    # ------------------------------------------------------------------
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        wait=wait_exponential(multiplier=1, min=1, max=15),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
+    def write_signal_event(self, event: dict) -> None:
+        """Upsert a signal-transition event into ``signal_events``.
+
+        Caller is responsible for shaping the doc; this method only does
+        the I/O.  Document id should be deterministic in (ticker, event_date,
+        run_hour, transition) so re-runs of the same detector hour upsert
+        the existing event rather than duplicate it.
+
+        Required fields (validated minimally):
+            id, ticker, event_date, prev_stage, new_stage
+        """
+        for field in ("id", "ticker", "event_date", "prev_stage", "new_stage"):
+            if field not in event:
+                raise ValueError(f"signal_event missing required field: {field}")
+        self._signal_events.upsert_item(event)
+        logger.debug(
+            "signal_event %s ticker=%s %d→%d",
+            event["id"], event["ticker"],
+            event["prev_stage"], event["new_stage"],
+        )
