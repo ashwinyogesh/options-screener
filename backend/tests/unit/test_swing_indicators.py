@@ -210,8 +210,11 @@ class TestSwingScoring:
 
 class TestRiskPlan:
     def test_passes_gate_with_strong_atr(self):
-        plan = build_risk_plan("breakout", current_price=100.0, atr14=1.0, recent_swing_low=98.0)
-        # stop = max(100 - 1.5, 98) = 98.5; risk = 1.5; target = 100 + 3*1.5 = 104.5; RR=3.0
+        plan = build_risk_plan("breakout", current_price=100.0, atr14=2.0, recent_swing_low=98.0)
+        # stop = max(100 - 1.5*2, 98) = max(97, 98) = 98; risk = 2.0
+        # atr_target = 100 + 3.0*2.0 = 106.0 > rr_floor = 100 + 3.0*2.0 = 106.0 → equal, min picks floor
+        # rr_floor = 106.0; RR = 6/2 = 3.0 → passes gate
+        # (atr14 >= risk → ATR projection >= R:R floor → floor is binding constraint)
         assert plan.passes_gate
         assert plan.rr >= 2.5
 

@@ -171,8 +171,8 @@ const SCORE_BREAKDOWN: ScoreFactor[] = [
     weight: 0,
     detail: 'risk_on → 1.0 · neutral → ~0.76–0.86 · risk_off → 0.6–0.76',
     definition: ': One global RegimeState computed per scan from SPY trend (35 wt), VIX 1y percentile (25 wt), universe breadth (25 wt), and IWM/SPY 20d RS (15 wt). Multiplier = 0.6 + 0.4 × risk_on_score / 100, clamped [0.6, 1.0].',
-    why: ': A 2.5 R:R breakout in a VIX-12 calm-bull tape is a different bet from the same setup in a VIX-30 risk-off tape. Multiplying instead of adding lets the environment override an otherwise-clean setup, but never erase it. In risk_off the dynamic gate also rises to 3.5 and reversion is mechanically excluded.',
-    formula: 'index_score   = bull→100, neutral→65 or 35, bear→0\nvol_score     = calm→100, normal→70, elevated→30, shock→0\nbreadth_score = pct_above_ema50 (0–100)\nra_score      = IWM/SPY 20d RS, mapped 0.95–1.05 → 0–100\nrisk_on_score = (35*idx + 25*vol + 25*brd + 15*ra) / 100\nmultiplier    = clamp(0.6 + 0.4 * risk_on_score / 100, 0.6, 1.0)\nrr_gate       = 2.5 if risk_on else 2.75 if neutral else 3.0',
+    why: ': A 2.5 R:R breakout in a VIX-12 calm-bull tape is a different bet from the same setup in a VIX-30 risk-off tape. Multiplying instead of adding lets the environment override an otherwise-clean setup, but never erase it. In risk_off the dynamic gate rises to 3.0 and reversion is mechanically excluded.',
+    formula: 'index_score   = bull→100, neutral→65 or 35, bear→0\nvol_score     = calm→100, normal→70, elevated→30, shock→0\nbreadth_score = pct_above_ema50 (0–100)\nra_score      = IWM/SPY 20d return diff (arithmetic), mapped -5pp→0, 0pp→50, +5pp→100\nrisk_on_score = (35*idx + 25*vol + 25*brd + 15*ra) / 100\nmultiplier    = clamp(0.6 + 0.4 * risk_on_score / 100, 0.6, 1.0)\nrr_gate       = 2.5 if risk_on else 2.75 if neutral else 3.0',
   },
   {
     factor: 'Earnings multiplier',

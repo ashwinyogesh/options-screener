@@ -1,12 +1,12 @@
 """
-Swing-trade composite scoring (v2.0.0).
+Swing-trade composite scoring (v2.3.0).
 
 Composite (raw) = R:R (40) + setup_score (30) + context (20) + institutional (10)
 
   R:R 40            : piecewise — 2.5→0, 3.0→25, 4.0→35, 5.0+→40
   setup 30          : best_setup score scaled to 0–30
-  context 20        : RS vs SPY (10) + EMA alignment (10)
-  institutional 10  : A/D line slope (5) + institutional ownership snapshot (5)
+  context 20        : ADX trend strength (10) + A/D line slope (10)
+  institutional 10  : consecutive higher lows (5) + institutional ownership snapshot (5)
 
 Cross-bucket multipliers (v2):
 
@@ -29,7 +29,7 @@ Hard gates handled by the runner BEFORE scoring:
 """
 from __future__ import annotations
 
-SWING_SCORER_VERSION: str = "2.2.0"
+SWING_SCORER_VERSION: str = "2.3.0"
 
 SWING_WEIGHTS: dict[str, float] = {
     "RR": 40.0,

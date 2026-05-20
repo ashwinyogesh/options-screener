@@ -41,9 +41,12 @@ SETUP_HOLD_DAYS: dict[str, tuple[int, int]] = {
     "retest": (10, 21),
 }
 
-# ATR-projection multipliers for technical target computation (v2.2.0).
-# target = entry + ATR_TARGET_MULT[setup] × atr14, floored at r_mult × risk.
-# Tighter stop relative to ATR → higher R:R, correctly rewarding well-formed setups.
+# ATR-projection multipliers for technical target computation (v2.3.0).
+# target = min(entry + ATR_TARGET_MULT[setup] × atr14, entry + r_mult × risk).
+# ATR projection is the credibility ceiling: if the stop is so wide that the
+# R-multiple floor would require a move beyond ATR capacity, the ATR target wins
+# and R:R is accepted as-is (likely below gate → setup filtered). This prevents
+# phantom targets on wide-stop setups like large-cap names with base-low stops.
 ATR_TARGET_MULT: dict[str, float] = {
     "breakout": 3.0,
     "momentum": 2.5,
@@ -204,17 +207,21 @@ def build_risk_plan(
             extended=trig.extended,
         )
 
-    # Technical target: ATR projection, floored at the setup's minimum R-multiple.
-    # This makes R:R vary per symbol (tight stop → high ATR → better R:R) rather
-    # than being a per-setup constant.
+    # Technical target: lower of (ATR projection) and (R:R floor).
+    # ATR projection sets the credibility ceiling — how far the stock can
+    # realistically move in the hold window given its daily range.
+    # R:R floor is the conservative minimum for the setup type.
+    # Taking min() means wide-stop setups where ATR can't support the
+    # required R-multiple will produce a sub-gate R:R and be filtered out,
+    # rather than showing a phantom target that the stock won't reach.
     atr_target = entry + ATR_TARGET_MULT.get(setup, r_mult) * atr14
     rr_floor_target = entry + r_mult * risk
-    if atr_target >= rr_floor_target:
+    if atr_target <= rr_floor_target:
         target = atr_target
-        target_method = "atr_projection"
+        target_method = "atr_projection"  # ATR caps target — stop too wide for r_mult at this ATR
     else:
         target = rr_floor_target
-        target_method = "rr_floor"
+        target_method = "rr_floor"  # R:R floor is tighter — tight stop, conservative target
     rr = (target - entry) / risk
     return RiskPlan(
         entry=round(entry, 2),
