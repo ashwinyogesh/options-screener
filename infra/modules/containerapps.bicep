@@ -51,6 +51,9 @@ param detectorImage string = 'ghcr.io/ashwinchandlapur/narrative-detector:latest
 @description('Container image for job-acs-scorer. Preserved from live deployment by infra workflow.')
 param scorerImage string = 'ghcr.io/ashwinchandlapur/narrative-scorer:latest'
 
+@description('Container image for job-narrative-backfill. Preserved from live deployment by infra workflow.')
+param backfillImage string = 'ghcr.io/ashwinchandlapur/narrative-backfill:latest'
+
 @description('Container image for job-screener-csp (ADR-0024). Preserved from live deployment by infra workflow.')
 param screenerCspImage string = 'ghcr.io/ashwinchandlapur/options-screener-worker:latest'
 
@@ -380,6 +383,49 @@ resource scorerJob 'Microsoft.App/jobs@2024-03-01' = {
   }
 }
 
+// ADR-0030 forward-log: nightly forward-price backfill on signal_events.
+// Cron: 0 22 * * * — 22:00 UTC = 18:00 ET, ~2h after the US 16:00 ET close
+// so yfinance has the day's bars published.  One run/day is sufficient
+// (closes are immutable; partial fills retry on the next run idempotently).
+resource backfillJob 'Microsoft.App/jobs@2024-03-01' = {
+  name: 'job-narrative-backfill'
+  location: location
+  tags: tags
+  identity: { type: 'SystemAssigned' }
+  properties: {
+    environmentId: env.id
+    configuration: {
+      triggerType: 'Schedule'
+      replicaTimeout: 1800  // 30 min — generous; backfill is yfinance-bound and bursty
+      scheduleTriggerConfig: {
+        cronExpression: '0 22 * * *'
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      secrets: ghcrSecrets
+      registries: ghcrRegistries
+    }
+    template: {
+      containers: [
+        {
+          name: 'narrative-backfill'
+          image: backfillImage
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          env: [
+            { name: 'KEYVAULT_URI',    value: keyVaultUri }
+            { name: 'COSMOS_ENDPOINT', value: cosmosEndpoint }
+            { name: 'LOG_LEVEL',       value: 'INFO' }
+            { name: 'BENCHMARK_TICKER', value: 'SPY' }
+          ]
+        }
+      ]
+    }
+  }
+}
+
 // ADR-0024: three screener precomputation jobs (CSP, CC, DITM).
 // All three share the same image (STRATEGY env selects which screener to run).
 // Cron: */15 * * * * — 14-min replica timeout fits inside the 15-min window.
@@ -553,6 +599,7 @@ output aggregatorJobPrincipalId string = aggregatorJob.identity.principalId
 output classifierJobPrincipalId string = classifierJob.identity.principalId
 output detectorJobPrincipalId string = detectorJob.identity.principalId
 output scorerJobPrincipalId string = scorerJob.identity.principalId
+output backfillJobPrincipalId string = backfillJob.identity.principalId
 output screenerCspJobPrincipalId string = screenerCspJob.identity.principalId
 output screenerCcJobPrincipalId string = screenerCcJob.identity.principalId
 output screenerDitmJobPrincipalId string = screenerDitmJob.identity.principalId
@@ -574,6 +621,16 @@ resource scorerKvRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if 
   properties: {
     roleDefinitionId: roleSecretsUser
     principalId: scorerJob.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource backfillKvRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(keyVaultId)) {
+  name: guid(keyVaultId, backfillJob.name, roleSecretsUser)
+  scope: resourceGroup()
+  properties: {
+    roleDefinitionId: roleSecretsUser
+    principalId: backfillJob.identity.principalId
     principalType: 'ServicePrincipal'
   }
 }

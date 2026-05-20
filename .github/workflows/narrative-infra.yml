@@ -131,6 +131,7 @@ jobs:
           inject "classifierImage"    "${{ vars.GHCR_IMAGE_CLASSIFIER }}"
           inject "detectorImage"      "${{ vars.GHCR_IMAGE_DETECTOR }}"
           inject "scorerImage"        "${{ vars.GHCR_IMAGE_SCORER }}"
+          inject "backfillImage"      "${{ vars.GHCR_IMAGE_BACKFILL }}"
           inject "screenerCspImage"   "${{ vars.GHCR_IMAGE_SCREENER }}"
           inject "screenerCcImage"    "${{ vars.GHCR_IMAGE_SCREENER }}"
           inject "screenerDitmImage"  "${{ vars.GHCR_IMAGE_SCREENER }}"

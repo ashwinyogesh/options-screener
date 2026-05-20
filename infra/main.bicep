@@ -62,6 +62,9 @@ param detectorImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 @description('Container image for job-acs-scorer. Preserved by infra workflow.')
 param scorerImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
 
+@description('Container image for job-narrative-backfill. Preserved by infra workflow.')
+param backfillImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+
 @description('GHCR username for pulling worker images. Leave empty to skip registry binding.')
 param ghcrUsername string = ''
 
@@ -145,6 +148,7 @@ module containerapps 'modules/containerapps.bicep' = {
     classifierImage: classifierImage
     detectorImage: detectorImage
     scorerImage: scorerImage
+    backfillImage: backfillImage
     ghcrUsername: ghcrUsername
     ghcrPassword: ghcrPassword
   }
@@ -178,6 +182,7 @@ module cosmosRoles 'modules/cosmos-roles.bicep' = {
       containerapps.outputs.classifierJobPrincipalId
       containerapps.outputs.detectorJobPrincipalId
       containerapps.outputs.scorerJobPrincipalId
+      containerapps.outputs.backfillJobPrincipalId
     ]
     dataReaderPrincipalIds: cosmosDataReaderPrincipalIds
   }
@@ -193,4 +198,5 @@ output aggregatorJobPrincipalId string = containerapps.outputs.aggregatorJobPrin
 output classifierJobPrincipalId string = containerapps.outputs.classifierJobPrincipalId
 output detectorJobPrincipalId string = containerapps.outputs.detectorJobPrincipalId
 output scorerJobPrincipalId string = containerapps.outputs.scorerJobPrincipalId
+output backfillJobPrincipalId string = containerapps.outputs.backfillJobPrincipalId
 output cosmosEndpoint string = cosmos.outputs.accountEndpoint
