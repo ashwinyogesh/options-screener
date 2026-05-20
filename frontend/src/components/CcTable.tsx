@@ -9,6 +9,8 @@ import {
 import { useState, useMemo } from 'react'
 import type { ReactElement } from 'react'
 import type { CcResult, GroupedCcResult } from '../types/cc'
+import { useCcBacktest } from '../hooks/useCcBacktest'
+import { CcBacktestPanel } from './CcBacktestPanel'
 
 const col = createColumnHelper<GroupedCcResult>()
 
@@ -211,6 +213,8 @@ export function CcTable({ data }: Props) {
   const [sorting, setSorting] = useState<SortingState>([{ id: 'best_score', desc: true }])
   const [strikeExpanded, setStrikeExpanded] = useState<Set<string>>(new Set())
   const [staleDismissed, setStaleDismissed] = useState(false)
+  const { backtests, loading: backtestLoading, errors: backtestErrors, fetchBacktest } = useCcBacktest()
+  const [backtestExpanded, setBacktestExpanded] = useState<Set<string>>(new Set())
 
   const anyStale = groupedData.some(
     r => r.using_hv_fallback || r.expirations.some(e => e.strikes.some(s => s.iv_stale))
@@ -366,7 +370,7 @@ export function CcTable({ data }: Props) {
               ? exp.strikes.filter(s => !s.is_best).length
               : 0
             return sum + 1 + altCount
-          }, 0)
+          }, 0) + (backtestExpanded.has(r.symbol) ? 1 : 0)
 
           const rows: ReactElement[] = []
           let absRowIdx = 0
@@ -495,7 +499,29 @@ export function CcTable({ data }: Props) {
                   )}
                   {strikeSub(bestStrike.strike_detail, 'ROC')}
                 </td>
-                <td>{scoreFmt(bestStrike.env_score, bestStrike.strike_score, bestStrike.cc_score, bestStrike.env_detail, bestStrike.strike_detail, true)}</td>
+                <td>
+                  {scoreFmt(bestStrike.env_score, bestStrike.strike_score, bestStrike.cc_score, bestStrike.env_detail, bestStrike.strike_detail, true)}
+                  <button
+                    className="insight-btn"
+                    title="Walk-forward backtest of v3.3 CC scoring on this ticker"
+                    style={{ marginLeft: 4 }}
+                    onClick={() => {
+                      const sym = r.symbol
+                      const isOpen = backtestExpanded.has(sym)
+                      setBacktestExpanded(prev => {
+                        const next = new Set(prev)
+                        if (isOpen) next.delete(sym); else next.add(sym)
+                        return next
+                      })
+                      const bkKey = `${sym}:2:35`
+                      if (!isOpen && !backtests.has(bkKey) && !backtestLoading.has(bkKey)) {
+                        fetchBacktest(sym, 2, 35)
+                      }
+                    }}
+                  >
+                    {backtestExpanded.has(r.symbol) ? '▲ BT' : '📊 BT'}
+                  </button>
+                </td>
                 <td>
                   {topDrags(bestStrike.env_detail ?? '', bestStrike.strike_detail ?? '').map(d => (
                     <span key={d.key} style={{ display: 'block', fontSize: '12px', color: d.drag >= 15 ? '#f87171' : '#fb923c' }}>
@@ -549,6 +575,24 @@ export function CcTable({ data }: Props) {
             }
 
             absRowIdx++
+          }
+
+          // ── Backtest row (once per ticker, after the last expiration block) ──
+          if (backtestExpanded.has(r.symbol)) {
+            const bkKey = `${r.symbol}:2:35`
+            rows.push(
+              <tr key="backtest" className="insight-row">
+                <td colSpan={19} style={{ padding: 0 }}>
+                  {backtestLoading.has(bkKey) ? (
+                    <div className="insight-loading">📊 Running walk-forward backtest (~3–8s)…</div>
+                  ) : backtestErrors.get(bkKey) ? (
+                    <div className="insight-error">⚠ {backtestErrors.get(bkKey)}</div>
+                  ) : backtests.get(bkKey) ? (
+                    <CcBacktestPanel data={backtests.get(bkKey)!} />
+                  ) : null}
+                </td>
+              </tr>
+            )
           }
 
           return <tbody key={r.symbol}>{rows}</tbody>

@@ -14,7 +14,13 @@ from pydantic import BaseModel, field_validator
 from limiter import limiter
 
 from services.cc_service import CcResult, process_cc_symbol
+from services.cc_backtest_service import (
+    BacktestError,
+    BacktestResult,
+    backtest_ticker,
+)
 from services.data_service import get_risk_free_rate
+from services.scan_cache import cc_backtest_cache
 from services.swing.regime import get_vix_context
 from services.screener.result_store import ScreenerStoreEmpty, get_cc_results
 from services.universe import UNIVERSES, get_universe
@@ -261,3 +267,139 @@ def _to_out(r: CcResult) -> CcResultOut:
         dist_from_52w_high_pct=r.dist_from_52w_high_pct,
         chain_median_oi=r.chain_median_oi,
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-ticker CC backtest (mirrors CSP)
+# ---------------------------------------------------------------------------
+
+class BacktestTradeOut(BaseModel):
+    scan_date: str
+    spot: float
+    strike: float
+    dte: int
+    expiry_date: str
+    delta: float
+    premium: float
+    final_score: float
+    env_score: float
+    strike_quant_score: float
+    spot_at_exp: float
+    assigned: int
+    pnl_per_contract: float
+    realised_roc_annualised: float
+
+
+class BacktestBucketOut(BaseModel):
+    bucket: str
+    n: int
+    mean_roc: float
+    median_roc: float
+    win_rate: float
+    assign_rate: float
+
+
+class BacktestSummaryOut(BaseModel):
+    n_trades: int
+    n_winners: int
+    n_losers: int
+    n_assigned: int
+    win_rate: float
+    assign_rate: float
+    mean_roc: float
+    median_roc: float
+    mean_score: float
+    spearman_rho: float
+    spearman_p: float
+    monotone_buckets: bool
+    cutoff_delta_roc: float
+    equity_curve: List[float]
+
+
+class BacktestResponse(BaseModel):
+    symbol: str
+    years: int
+    dte: int
+    scan_start: str
+    scan_end: str
+    summary: BacktestSummaryOut
+    buckets: List[BacktestBucketOut]
+    trades: List[BacktestTradeOut]
+    caveats: List[str]
+
+
+def _to_backtest_response(r: BacktestResult) -> BacktestResponse:
+    return BacktestResponse(
+        symbol=r.symbol,
+        years=r.years,
+        dte=r.dte,
+        scan_start=r.scan_start,
+        scan_end=r.scan_end,
+        summary=BacktestSummaryOut(**r.summary.__dict__),
+        buckets=[BacktestBucketOut(**b.__dict__) for b in r.buckets],
+        trades=[
+            BacktestTradeOut(
+                scan_date=t.scan_date,
+                spot=t.spot,
+                strike=t.strike,
+                dte=t.dte,
+                expiry_date=t.expiry_date,
+                delta=t.delta,
+                premium=t.premium,
+                final_score=t.final_score,
+                env_score=t.env_score,
+                strike_quant_score=t.strike_quant_score,
+                spot_at_exp=t.spot_at_exp,
+                assigned=t.assigned,
+                pnl_per_contract=t.pnl_per_contract,
+                realised_roc_annualised=t.realised_roc_annualised,
+            )
+            for t in r.trades
+        ],
+        caveats=r.caveats,
+    )
+
+
+@router.get("/cc/{symbol}/backtest", response_model=BacktestResponse)
+@limiter.limit("6/minute")
+async def cc_backtest_endpoint(
+    request: Request,
+    symbol: str,
+    years: int = Query(default=2, ge=1, le=5),
+    dte: int = Query(default=35, ge=14, le=60),
+) -> BacktestResponse:
+    """
+    Walk-forward CC backtest for one symbol using the live v3.3 scoring
+    function. Returns headline stats, per-bucket performance, the equity
+    curve, and a per-trade ledger.
+
+    Methodology: HV(30) as IV proxy; BA/LQ omitted (strike score
+    renormalised to Δ + ROC); production hard filters preserved
+    (delta ∈ [+0.10, +0.35], strike > spot × 0.98). Total CC P&L
+    (stock + short call) is realised at expiration.
+
+    Cached for 4 hours per (symbol, years, dte).
+    """
+    sym = symbol.strip().upper()
+    if not sym or len(sym) > 10 or not sym.isalnum():
+        raise HTTPException(status_code=422, detail=f"invalid symbol: '{symbol}'")
+
+    _ = request  # consumed by @limiter.limit
+    cache_key = f"{sym}:{years}:{dte}"
+    cached = cc_backtest_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        result: BacktestResult = await asyncio.to_thread(
+            backtest_ticker, sym, years=years, dte=dte,
+        )
+    except BacktestError as exc:
+        raise HTTPException(status_code=404, detail=exc.reason) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("CC backtest failed for %s", sym)
+        raise HTTPException(status_code=500, detail=f"backtest failed: {exc}") from exc
+
+    response = _to_backtest_response(result)
+    cc_backtest_cache.set(cache_key, response)
+    return response

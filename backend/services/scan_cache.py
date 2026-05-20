@@ -59,6 +59,7 @@ swing_scan_cache: ScanCache = ScanCache()
 # Per-ticker CSP backtest cache. Backtests are expensive (~3–8s) and the
 # answer changes only as new bars arrive, so use a 4-hour TTL.
 csp_backtest_cache: ScanCache = ScanCache(ttl=4 * 3600)
+cc_backtest_cache: ScanCache = ScanCache(ttl=4 * 3600)
 # NOTE: a shared ``regime_cache`` singleton lived here prior to Phase-1
 # cleanup. It was a single-key, process-global memoization of the swing
 # market regime used as a side-channel between ``swing_service.run_scan``

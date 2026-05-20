@@ -1,7 +1,7 @@
-import type { CspBacktestResult } from '../types/cspBacktest'
+import type { CcBacktestResult } from '../types/ccBacktest'
 
 interface Props {
-  data: CspBacktestResult
+  data: CcBacktestResult
 }
 
 function fmtPct(n: number): string {
@@ -41,11 +41,10 @@ function EquityCurve({ curve }: { curve: number[] }) {
   )
 }
 
-export function CspBacktestPanel({ data }: Props) {
+export function CcBacktestPanel({ data }: Props) {
   const { summary, buckets, trades, caveats, symbol, years, dte, scan_start, scan_end } = data
   const totalPnl = summary.equity_curve.length ? summary.equity_curve[summary.equity_curve.length - 1] : 0
 
-  // Stat-significance label for Spearman
   let rhoLabel = '—'
   if (summary.n_trades >= 5) {
     const sig = summary.spearman_p < 0.05 ? ' ✓' : ''
@@ -53,7 +52,7 @@ export function CspBacktestPanel({ data }: Props) {
   }
 
   return (
-    <div className="csp-backtest-panel" style={{
+    <div className="cc-backtest-panel" style={{
       padding: '14px 18px',
       background: '#0f172a',
       borderTop: '2px solid #334155',
@@ -63,13 +62,13 @@ export function CspBacktestPanel({ data }: Props) {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
         <div>
-          <strong style={{ fontSize: '14px' }}>📊 {symbol} CSP Backtest</strong>
+          <strong style={{ fontSize: '14px' }}>📊 {symbol} CC Backtest</strong>
           <span style={{ marginLeft: 10, opacity: 0.7, fontSize: '11px' }}>
             {scan_start} → {scan_end} · weekly · {dte} DTE · {years}y · {summary.n_trades} trades
           </span>
         </div>
         <div style={{ fontSize: '11px', opacity: 0.6 }}>
-          Methodology: HV(30) IV proxy · BA/LQ omitted (renormalised) · ADR-0031
+          Methodology: HV(30) IV proxy · BA/LQ omitted (renormalised) · total CC P&L
         </div>
       </div>
 
@@ -77,7 +76,7 @@ export function CspBacktestPanel({ data }: Props) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10, marginBottom: 14 }}>
         <Tile label="Mean ROC (ann)" value={fmtPct(summary.mean_roc)} color={rocColor(summary.mean_roc)} />
         <Tile label="Win rate" value={summary.win_rate.toFixed(1) + '%'} color={summary.win_rate >= 75 ? '#4ade80' : '#fbbf24'} />
-        <Tile label="Assigned" value={summary.n_assigned + ' / ' + summary.n_trades} sub={summary.assign_rate.toFixed(1) + '%'} />
+        <Tile label="Called away" value={summary.n_assigned + ' / ' + summary.n_trades} sub={summary.assign_rate.toFixed(1) + '%'} />
         <Tile label="Mean score" value={summary.mean_score.toFixed(1)} />
         <Tile label="Spearman" value={rhoLabel} sub={summary.monotone_buckets ? 'monotone ✓' : 'non-monotone'} color={summary.spearman_rho > 0 ? '#4ade80' : '#f87171'} />
         <Tile label="Total P&L" value={'$' + Math.round(totalPnl).toLocaleString()} color={totalPnl >= 0 ? '#4ade80' : '#f87171'} sub="1 contract" />
@@ -86,7 +85,7 @@ export function CspBacktestPanel({ data }: Props) {
       {/* Equity curve */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: '11px', opacity: 0.7, marginBottom: 4 }}>
-          Cumulative P&L (per contract, $ — every weekly trade marked to expiry)
+          Cumulative P&L (per contract, $ — stock + short call, marked to expiry)
         </div>
         <div style={{ background: '#020617', borderRadius: 4, padding: 4 }}>
           <EquityCurve curve={summary.equity_curve} />
@@ -114,7 +113,7 @@ export function CspBacktestPanel({ data }: Props) {
               <th style={{ textAlign: 'right', padding: '4px 8px' }}>Mean ROC</th>
               <th style={{ textAlign: 'right', padding: '4px 8px' }}>Median ROC</th>
               <th style={{ textAlign: 'right', padding: '4px 8px' }}>Win rate</th>
-              <th style={{ textAlign: 'right', padding: '4px 8px' }}>Assign rate</th>
+              <th style={{ textAlign: 'right', padding: '4px 8px' }}>Called away</th>
             </tr>
           </thead>
           <tbody>
@@ -141,7 +140,7 @@ export function CspBacktestPanel({ data }: Props) {
         )}
       </div>
 
-      {/* Trade ledger — collapsed by default; max-height + scroll */}
+      {/* Trade ledger */}
       <details>
         <summary style={{ cursor: 'pointer', fontSize: '11px', opacity: 0.8, marginBottom: 6 }}>
           ▸ Show per-trade ledger ({trades.length} rows)
@@ -157,7 +156,7 @@ export function CspBacktestPanel({ data }: Props) {
                 <th>Premium</th>
                 <th>Score</th>
                 <th>Spot @ exp</th>
-                <th>Assn?</th>
+                <th>Called?</th>
                 <th>P&L</th>
                 <th>ROC ann</th>
               </tr>
@@ -168,11 +167,11 @@ export function CspBacktestPanel({ data }: Props) {
                   <td style={{ textAlign: 'left', padding: '3px 6px' }}>{t.scan_date}</td>
                   <td>${t.spot.toFixed(2)}</td>
                   <td>${t.strike.toFixed(2)}</td>
-                  <td>{t.delta.toFixed(3)}</td>
+                  <td>+{t.delta.toFixed(3)}</td>
                   <td>${t.premium.toFixed(2)}</td>
                   <td>{t.final_score.toFixed(1)}</td>
                   <td>${t.spot_at_exp.toFixed(2)}</td>
-                  <td style={{ color: t.assigned ? '#f87171' : '#94a3b8' }}>{t.assigned ? 'yes' : '—'}</td>
+                  <td style={{ color: t.assigned ? '#fb923c' : '#94a3b8' }}>{t.assigned ? 'yes' : '—'}</td>
                   <td style={{ color: t.pnl_per_contract >= 0 ? '#4ade80' : '#f87171' }}>
                     ${t.pnl_per_contract.toFixed(0)}
                   </td>
