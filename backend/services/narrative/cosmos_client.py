@@ -21,9 +21,10 @@ logger = logging.getLogger(__name__)
 # module level) so that load_dotenv() in main.py is always honoured regardless of
 # import order or hot-reload timing.
 _client: CosmosClient | None = None
-_timeline_container = None  # type: ignore[assignment]
-_alerts_container = None    # type: ignore[assignment]
-_cache_container = None     # type: ignore[assignment]
+_timeline_container = None       # type: ignore[assignment]
+_alerts_container = None         # type: ignore[assignment]
+_cache_container = None          # type: ignore[assignment]
+_signal_events_container = None  # type: ignore[assignment]
 
 
 def _get_client() -> CosmosClient:
@@ -71,6 +72,17 @@ def _get_cache():  # type: ignore[return]
             .get_container_client("narrative_cache")
         )
     return _cache_container
+
+
+def _get_signal_events():  # type: ignore[return]
+    global _signal_events_container
+    if _signal_events_container is None:
+        db_name = os.getenv("NARRATIVE_COSMOS_DB") or os.getenv("COSMOS_DB", "narrative")
+        _signal_events_container = (
+            _get_client().get_database_client(db_name)
+            .get_container_client("signal_events")
+        )
+    return _signal_events_container
 
 
 # Scoreboard cache is stale after this many minutes — fall back to live scan.
@@ -257,4 +269,70 @@ def query_alerts(limit: int = 50, lookback_days: int = 3) -> list[dict]:
         )
     except Exception:
         logger.exception("query_alerts failed — returning empty list")
+        return []
+
+
+def query_signal_events(
+    *,
+    since: str | None = None,
+    min_confidence: float | None = None,
+    transition: str | None = None,
+    ticker: str | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    """Return narrative signal_events ordered by event_date DESC.
+
+    Filters (all optional, ANDed):
+        since           — ISO date "YYYY-MM-DD" lower bound on event_date
+        min_confidence  — keep rows with stage confidence ≥ value
+        transition      — exact match on prev/new stage encoded "PtoN" (e.g. "2to3")
+        ticker          — when provided, single-partition (point-readable) query
+
+    The signal_events container is partitioned by /ticker. When a ticker filter
+    is supplied the query is single-partition; otherwise it is cross-partition
+    but bounded by the ``since`` cutoff (and a hard LIMIT) so RU cost stays
+    bounded for the dashboard use case.
+
+    Returns [] on any Cosmos error — Signals tab degrades gracefully.
+    """
+    container = _get_signal_events()
+    clauses: list[str] = []
+    params: list[dict] = [{"name": "@limit", "value": int(limit)}]
+
+    if since:
+        clauses.append("c.event_date >= @since")
+        params.append({"name": "@since", "value": since})
+    if min_confidence is not None:
+        clauses.append("c.confidence >= @min_conf")
+        params.append({"name": "@min_conf", "value": float(min_confidence)})
+    if transition:
+        # transition encoded as "{prev}to{new}", e.g. "2to3"
+        prev_str, _, new_str = transition.partition("to")
+        try:
+            prev_i = int(prev_str)
+            new_i = int(new_str)
+        except ValueError:
+            return []
+        clauses.append("c.prev_stage = @prev_stage AND c.new_stage = @new_stage")
+        params.append({"name": "@prev_stage", "value": prev_i})
+        params.append({"name": "@new_stage", "value": new_i})
+    if ticker:
+        clauses.append("c.ticker = @ticker")
+        params.append({"name": "@ticker", "value": ticker.upper()})
+
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    query = (
+        f"SELECT TOP @limit * FROM c {where} "
+        "ORDER BY c.event_date DESC"
+    )
+    try:
+        return list(
+            container.query_items(
+                query=query,
+                parameters=params,
+                enable_cross_partition_query=ticker is None,
+            )
+        )
+    except Exception:
+        logger.exception("query_signal_events failed — returning empty list")
         return []

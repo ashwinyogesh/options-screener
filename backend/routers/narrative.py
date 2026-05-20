@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from limiter import limiter
 from services.narrative import read_service
+from services.narrative import signals_service
 from services.narrative.errors import (
     NarrativeNotFound,
     NarrativeUnavailable,
@@ -121,6 +122,44 @@ class NarrativeAlertOut(BaseModel):
     alert_type: str
     triggered_at: datetime
     payload: dict[str, object]
+
+
+class SignalEventOut(BaseModel):
+    id: str
+    ticker: str
+    event_date: str
+    event_ts: str
+    prev_stage: int = Field(..., ge=0, le=6)
+    new_stage: int = Field(..., ge=0, le=6)
+    transition: str
+    confidence: float = Field(..., ge=0, le=1)
+    breadth_score: float | None = None
+    breadth_delta: float | None = None
+    px_at_signal: float | None = None
+    px_t5: float | None = None
+    px_t10: float | None = None
+    px_t20: float | None = None
+    spy_at_signal: float | None = None
+    spy_t5: float | None = None
+    spy_t10: float | None = None
+    spy_t20: float | None = None
+    backfilled_at: str | None = None
+    excess_t5: float | None = None
+    excess_t10: float | None = None
+    excess_t20: float | None = None
+
+
+class HorizonStatsOut(BaseModel):
+    horizon_days: int = Field(..., ge=1)
+    n_complete: int = Field(..., ge=0)
+    hit_rate: float | None = Field(None, ge=0, le=1)
+    median_excess_return: float | None = None
+
+
+class SignalsResponseOut(BaseModel):
+    n_total: int = Field(..., ge=0)
+    horizons: list[HorizonStatsOut]
+    events: list[SignalEventOut]
 
 
 # ---------- Conversion helpers ----------
@@ -293,3 +332,77 @@ async def get_alerts(
     except Exception as exc:
         raise _map_service_error(exc) from exc
     return [_alert_to_out(r) for r in rows]
+
+
+_SINCE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
+_TRANSITION_PATTERN = r"^[0-6]to[0-6]$"
+_TICKER_PATTERN = r"^[A-Z][A-Z0-9.\-]{0,9}$"
+
+
+@router.get("/signals", response_model=SignalsResponseOut)
+@limiter.limit("30/minute")
+async def get_signals(
+    request: Request,
+    since: Annotated[str | None, Query(pattern=_SINCE_PATTERN)] = None,
+    min_confidence: Annotated[float | None, Query(ge=0.0, le=1.0)] = None,
+    transition: Annotated[str | None, Query(pattern=_TRANSITION_PATTERN)] = None,
+    ticker: Annotated[str | None, Query(pattern=_TICKER_PATTERN, max_length=10)] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+) -> SignalsResponseOut:
+    """Stage-transition events with forward-price aggregate stats (ADR-0030).
+
+    Returns event rows newest-first, plus hit-rate / median-excess-return at
+    each forward horizon (T+5, T+10, T+20 trading days). Events whose
+    backfill has not yet completed are still returned but excluded from the
+    aggregate stats denominator.
+    """
+    try:
+        resp = await signals_service.get_signals(
+            since=since,
+            min_confidence=min_confidence,
+            transition=transition,
+            ticker=ticker.upper() if ticker else None,
+            limit=limit,
+        )
+    except Exception as exc:
+        raise _map_service_error(exc) from exc
+
+    return SignalsResponseOut(
+        n_total=resp.n_total,
+        horizons=[
+            HorizonStatsOut(
+                horizon_days=h.horizon_days,
+                n_complete=h.n_complete,
+                hit_rate=h.hit_rate,
+                median_excess_return=h.median_excess_return,
+            )
+            for h in resp.horizons
+        ],
+        events=[
+            SignalEventOut(
+                id=e.id,
+                ticker=e.ticker,
+                event_date=e.event_date,
+                event_ts=e.event_ts,
+                prev_stage=e.prev_stage,
+                new_stage=e.new_stage,
+                transition=e.transition,
+                confidence=e.confidence,
+                breadth_score=e.breadth_score,
+                breadth_delta=e.breadth_delta,
+                px_at_signal=e.px_at_signal,
+                px_t5=e.px_t5,
+                px_t10=e.px_t10,
+                px_t20=e.px_t20,
+                spy_at_signal=e.spy_at_signal,
+                spy_t5=e.spy_t5,
+                spy_t10=e.spy_t10,
+                spy_t20=e.spy_t20,
+                backfilled_at=e.backfilled_at,
+                excess_t5=e.excess_t5,
+                excess_t10=e.excess_t10,
+                excess_t20=e.excess_t20,
+            )
+            for e in resp.events
+        ],
+    )
