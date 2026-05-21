@@ -373,6 +373,9 @@ def _ditm_from_dict(d: dict[str, Any]) -> DitmResult:
             strike_detail=s.get("strike_detail", ""),
             is_best=s.get("is_best", False),
             iv_fallback=s.get("iv_fallback", False),
+            tier=s.get("tier"),
+            score_v4=s.get("score_v4"),
+            factor_breakdown=s.get("factor_breakdown") or {},
         )
         for s in d.get("strikes", [])
     ]
@@ -397,6 +400,7 @@ def _ditm_from_dict(d: dict[str, Any]) -> DitmResult:
         chain_median_oi=d.get("chain_median_oi", 0.0),
         iv_percentile=d.get("iv_percentile"),
         trend_r2=d.get("trend_r2"),
+        best_tier=d.get("best_tier"),
     )
 
 

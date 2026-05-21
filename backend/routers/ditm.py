@@ -21,6 +21,7 @@ from services.ditm_service import (
     get_macro_context,
     process_symbol,
 )
+from services.scoring.ditm_v4_pipeline import apply_v4_scoring
 from services.screener.result_store import ScreenerStoreEmpty, get_ditm_results
 from services.universe import UNIVERSES, get_universe
 
@@ -89,6 +90,10 @@ class DitmStrikeResultOut(BaseModel):
     strike_detail: str
     is_best: bool
     iv_fallback: bool
+    # v4 (ADR-0032)
+    tier: Optional[str] = None
+    score_v4: Optional[float] = None
+    factor_breakdown: Optional[dict] = None
 
 
 class DitmResultOut(BaseModel):
@@ -110,6 +115,7 @@ class DitmResultOut(BaseModel):
     gap_3d_pct: float
     macro_hold: bool
     chain_median_oi: float
+    best_tier: Optional[str] = None
 
 
 class DitmErrorOut(BaseModel):
@@ -163,13 +169,25 @@ async def run_ditm_screener(request: Request, body: DitmRequest) -> DitmResponse
 
     pairs = await asyncio.gather(*[process_one(s) for s in body.symbols])
 
-    results: list[DitmResultOut] = []
+    # Flatten and apply v4 cross-sectional scoring (ADR-0032) over the
+    # combined batch. v4 ranks within the submitted symbols only — a
+    # 1-symbol POST will produce stable orderings within that symbol's
+    # strikes but tier bands are most meaningful on the universe-wide
+    # /ditm/scan endpoint where v4 was applied at precompute time.
+    flat_results: list[DitmResult] = []
     errors: list[DitmErrorOut] = []
     for result_list, error in pairs:
-        for result in result_list:
-            results.append(_to_out(result))
+        flat_results.extend(result_list)
         if error is not None:
             errors.append(DitmErrorOut(symbol=error.symbol, reason=error.reason))
+    try:
+        await asyncio.to_thread(apply_v4_scoring, flat_results)
+    except Exception:
+        # v4 must never break the POST flow — fall back to v3 scores
+        # already populated by the runner.
+        logger.exception("v4 scoring failed; serving v3 scores")
+
+    results: list[DitmResultOut] = [_to_out(r) for r in flat_results]
 
     logger.info("DITM screener complete: %d results, %d errors", len(results), len(errors))
     return DitmResponse(
@@ -261,6 +279,9 @@ def _to_out(r: DitmResult) -> DitmResultOut:
                 strike_detail=s.strike_detail,
                 is_best=s.is_best,
                 iv_fallback=s.iv_fallback,
+                tier=s.tier,
+                score_v4=s.score_v4,
+                factor_breakdown=(s.factor_breakdown or None),
             )
             for s in r.strikes
         ],
@@ -268,4 +289,5 @@ def _to_out(r: DitmResult) -> DitmResultOut:
         gap_3d_pct=r.gap_3d_pct,
         macro_hold=r.macro_hold,
         chain_median_oi=r.chain_median_oi,
+        best_tier=r.best_tier,
     )

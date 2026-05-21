@@ -69,6 +69,24 @@ async def _run_async(
 
     pairs = await asyncio.gather(*[_one(t) for t in tickers], return_exceptions=True)
 
+    # DITM v4 cross-sectional pass (ADR-0032, Phase 2b). Runs once after
+    # all per-ticker results are gathered, scoring the full universe
+    # against itself. Other strategies still ship v3 scoring.
+    if strategy == "ditm":
+        from services.scoring.ditm_v4_pipeline import apply_v4_scoring  # noqa: PLC0415
+        flat: list[Any] = []
+        for item in pairs:
+            if isinstance(item, BaseException):
+                continue
+            _, result_list, error_reason = item
+            if not error_reason and result_list:
+                flat.extend(result_list)
+        try:
+            await asyncio.to_thread(apply_v4_scoring, flat)
+            logger.info("DITM v4 scoring applied to %d results", len(flat))
+        except Exception:
+            logger.exception("DITM v4 scoring failed; emitting v3 scores")
+
     results: dict[str, dict[str, Any]] = {}
     errors: dict[str, str] = {}
 

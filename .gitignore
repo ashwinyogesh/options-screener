@@ -46,3 +46,15 @@ backend.zip
 csp_backtest_*.csv
 cc_backtest_*.csv
 rank_snapshot_*.csv
+
+# DITM backtest artefacts (regenerable from scripts/backtest_ditm*.py et al.)
+ditm_backtest_*.csv
+ditm_bt_*.csv
+
+# EDGAR / fundamentals data cache (fetched on-demand; can be large)
+data/
+
+# Ad-hoc backtest scratch outputs
+cc_bt_*.csv
+cc_bt_*.json
+

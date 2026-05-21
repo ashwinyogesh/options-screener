@@ -231,4 +231,16 @@ def test_ditm_characterization(symbol: str, monkeypatch: pytest.MonkeyPatch) -> 
         {"result": expected["result"], "error": expected["error"]}
     )
 
+    # Strip v4-only fields (ADR-0032): they default to None/empty when
+    # `process_symbol` runs alone — v4 is applied later in the router/
+    # worker post-pass. The fixtures lock in v3 per-symbol semantics.
+    _V4_STRIKE_KEYS = {"tier", "score_v4", "factor_breakdown"}
+    _V4_RESULT_KEYS = {"best_tier"}
+    for r in actual["result"]:
+        for k in _V4_RESULT_KEYS:
+            r.pop(k, None)
+        for s in r.get("strikes", []):
+            for k in _V4_STRIKE_KEYS:
+                s.pop(k, None)
+
     assert actual == expected_payload

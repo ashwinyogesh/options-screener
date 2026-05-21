@@ -79,6 +79,12 @@ class DitmStrikeResult:
     strike_detail: str = ""
     is_best: bool = False
     iv_fallback: bool = False      # True when hv30 used instead of chain IV
+    # v4 (ADR-0032) — populated by `apply_v4_scoring` after the runner
+    # returns. None means the strike was ineligible for v4 (too few
+    # observed factors); ditm_score retains the v3 fallback in that case.
+    tier: Optional[str] = None
+    score_v4: Optional[float] = None
+    factor_breakdown: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -103,6 +109,7 @@ class DitmResult:
     chain_median_oi: float = 0.0
     iv_percentile: Optional[float] = None  # 0–100, HV-based; v3 strike-side single vol-cheapness factor
     trend_r2: Optional[float] = None       # v3.2: R² of 50-day OLS price regression (trend smoothness)
+    best_tier: Optional[str] = None        # v4 tier of the best strike (A/B/C/D/E)
 
 
 @dataclass

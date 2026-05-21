@@ -8,13 +8,17 @@ export interface DitmStrikeInfo {
   capital_efficiency_pct: number  // mid / price * 100 — sweet spot 25–35%
   bid_ask_spread_pct: number | null
   chain_oi: number
-  env_score: number
-  strike_score: number
-  ditm_score: number
-  env_detail: string
-  strike_detail: string
+  env_score: number               // v4: pillar percentile (val+cap+macro), 0–100
+  strike_score: number            // v4: pillar percentile (tech+option), 0–100
+  ditm_score: number              // v4: cross-sectional percentile, 0–100
+  env_detail: string              // v4: "Val:+X Cap:+Y Macro:+Z" group contribution string
+  strike_detail: string           // v4: "Tech:+X Opt:+Y" group contribution string
   is_best: boolean
   iv_fallback: boolean            // true when HV30 used instead of chain IV
+  // v4 (ADR-0032)
+  tier: 'A' | 'B' | 'C' | 'D' | 'E' | null
+  score_v4: number | null         // mirror of ditm_score after v4 pass
+  factor_breakdown: Record<string, number> | null  // signed contribution per factor name
 }
 
 export interface DitmResult {
@@ -38,6 +42,7 @@ export interface DitmResult {
   chain_median_oi: number
   iv_percentile: number | null    // v3 strike-side vol-cheapness factor (0–100, HV-based)
   trend_r2: number | null         // v3.2: R² of 50-day OLS price regression (0–1)
+  best_tier: 'A' | 'B' | 'C' | 'D' | 'E' | null  // v4 tier of the best strike
 }
 
 export interface DitmExpirationRow {
@@ -69,6 +74,7 @@ export interface GroupedDitmResult {
   env_detail: string
   iv_percentile: number | null    // v3 — surface to the IV%ile column
   trend_r2: number | null         // v3.2: R² of 50-day OLS price regression
+  best_tier: 'A' | 'B' | 'C' | 'D' | 'E' | null  // v4 tier of the best strike
 }
 
 export interface DitmFilterState {

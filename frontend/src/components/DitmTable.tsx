@@ -8,7 +8,7 @@ import {
 } from '@tanstack/react-table'
 import { useState, useMemo } from 'react'
 import type { ReactElement } from 'react'
-import type { DitmResult, GroupedDitmResult } from '../types/ditm'
+import type { DitmResult, DitmStrikeInfo, GroupedDitmResult } from '../types/ditm'
 
 const col = createColumnHelper<GroupedDitmResult>()
 
@@ -26,108 +26,121 @@ function fmtPct(n: number | null | undefined, decimals = 1): string {
 }
 
 // ---------------------------------------------------------------------------
-// Detail string parsing (mirrors CspTable pattern)
+// v4 factor breakdown helpers (ADR-0032)
 // ---------------------------------------------------------------------------
 
-function parseDetail(detail: string): Record<string, number> {
-  const out: Record<string, number> = {}
-  for (const part of (detail ?? '').split(' ')) {
-    const idx = part.indexOf(':')
-    if (idx > 0) out[part.slice(0, idx)] = Number(part.slice(idx + 1))
+// Signed fractional weights per factor (must mirror backend ditm_v4.GROUP_WEIGHT_CAPS
+// allocation). Used only to color/badge per-cell contributions.
+const V4_FACTOR_WEIGHTS: Record<string, number> = {
+  // Valuation (-)
+  ps_ttm: -0.146, ev_sales: -0.129, ev_ebitda: -0.075,
+  // Capital (+)
+  debt_to_equity: 0.097, nd_ebitda: 0.053,
+  // Technical
+  wk_rsi: -0.076, dist52w: -0.043, hv30: -0.046, ret_200d: 0.034,
+  // Macro (-)
+  sector_rs_6m: -0.050,
+  // Option chain
+  leverage: 0.094, delta: 0.080, extrinsic_pct: -0.076,
+}
+
+const V4_FACTOR_LABELS: Record<string, string> = {
+  ps_ttm: 'P/S', ev_sales: 'EV/S', ev_ebitda: 'EV/EBITDA',
+  debt_to_equity: 'D/E', nd_ebitda: 'ND/EBITDA',
+  wk_rsi: 'W-RSI', dist52w: '52W Dist', hv30: 'HV30', ret_200d: '200d Ret',
+  sector_rs_6m: 'Sector RS',
+  leverage: 'Leverage', delta: 'Delta', extrinsic_pct: 'Extrinsic%',
+}
+
+// Normalised "goodness" of a single factor's contribution in [0, 1]
+// (1 = best possible contribution given the sign of the weight, 0 = worst).
+function factorGoodness(contrib: number | undefined, weight: number): number {
+  if (contrib == null || !isFinite(contrib) || weight === 0) return 0.5
+  const w = Math.abs(weight)
+  if (weight > 0) return Math.max(0, Math.min(1, contrib / w))
+  // negative weight: best = 0, worst = -w; goodness = 1 + contrib / w (in [0, 1])
+  return Math.max(0, Math.min(1, 1 + contrib / w))
+}
+
+function factorColor(strike: DitmStrikeInfo | undefined, key: string): string {
+  if (!strike) return ''
+  const w = V4_FACTOR_WEIGHTS[key]
+  if (w == null) return ''
+  const contrib = strike.factor_breakdown?.[key]
+  if (contrib == null) return '#64748b' // unobserved
+  const g = factorGoodness(contrib, w)
+  return g >= 0.7 ? '#4ade80' : g >= 0.4 ? '#fbbf24' : '#f87171'
+}
+
+function factorBadge(strike: DitmStrikeInfo | undefined, key: string) {
+  if (!strike) return null
+  const w = V4_FACTOR_WEIGHTS[key]
+  if (w == null) return null
+  const contrib = strike.factor_breakdown?.[key]
+  // Hide badge entirely when contribution is unobserved (small-universe POST path
+  // doesn't populate factor_breakdown; rendering "n/a" everywhere is pure noise).
+  if (contrib == null) return null
+  const g = factorGoodness(contrib, w)
+  const color = g >= 0.7 ? '#4ade80' : g >= 0.4 ? '#fbbf24' : '#f87171'
+  return (
+    <span style={{ fontSize: '10px', color, display: 'block', lineHeight: 1.2 }}>
+      {Math.round(g * 100)}%
+    </span>
+  )
+}
+
+// Top N drags: lowest-goodness observed factors on this strike.
+function topDrags(strike: DitmStrikeInfo | undefined, n = 2): { key: string; goodness: number }[] {
+  if (!strike?.factor_breakdown) return []
+  const ranked: { key: string; goodness: number }[] = []
+  for (const [k, w] of Object.entries(V4_FACTOR_WEIGHTS)) {
+    const c = strike.factor_breakdown[k]
+    if (c == null) continue
+    ranked.push({ key: k, goodness: factorGoodness(c, w) })
   }
-  return out
-}
-
-// v3 ENV factor keys + max pts (ADR-0008)
-const ENV_MAX: Record<string, number> = {
-  Tr: 25, Ret: 15, R2: 10, '52W': 20, WRSI: 15, LQ: 15,
-}
-// v3 Strike factor keys + max pts
-const STRIKE_MAX: Record<string, number> = {
-  'Δ': 20, Lev: 25, Ext: 25, BA: 20, IV: 10,
-}
-const DRAG_LABELS: Record<string, string> = {
-  Tr: 'Trend', WRSI: 'Weekly RSI', '52W': '52W Dist',
-  Ret: '200d Return', R2: 'Trend Stability R²', LQ: 'Liquidity',
-  'Δ': 'Delta', Lev: 'Leverage', Ext: 'Extrinsic%',
-  BA: 'Bid-Ask Spread', IV: 'IV Pctile',
-}
-function topDrags(envDetail: string, strikeDetail: string, n = 2) {
-  const envPts = parseDetail(envDetail)
-  const strikePts = parseDetail(strikeDetail)
-  const all: { key: string; drag: number }[] = []
-  for (const [k, max] of Object.entries(ENV_MAX)) {
-    const v = envPts[k] ?? 0
-    if (v >= 0) all.push({ key: k, drag: max - v })
-  }
-  for (const [k, max] of Object.entries(STRIKE_MAX)) {
-    const v = strikePts[k] ?? 0
-    if (v >= 0) all.push({ key: k, drag: max - v })
-  }
-  return all.sort((a, b) => b.drag - a.drag).slice(0, n)
-}
-
-function subScore(pts: Record<string, number>, key: string, maxMap: Record<string, number>) {
-  const v = pts[key], max = maxMap[key]
-  if (v == null || max == null) return null
-  const ratio = v / max
-  const color = ratio >= 0.70 ? '#4ade80' : ratio >= 0.45 ? '#fbbf24' : '#f87171'
-  return <span style={{ fontSize: '10px', color, display: 'block', lineHeight: 1.2 }}>{Math.round(v)}/{max}</span>
-}
-
-function subColor(pts: Record<string, number>, key: string, maxMap: Record<string, number>): string {
-  const v = pts[key], max = maxMap[key]
-  if (v == null || max == null) return ''
-  const ratio = v / max
-  return ratio >= 0.70 ? '#4ade80' : ratio >= 0.45 ? '#fbbf24' : '#f87171'
-}
-
-function subInline(pts: Record<string, number>, key: string, maxMap: Record<string, number>) {
-  const v = pts[key], max = maxMap[key]
-  if (v == null || max == null) return null
-  const ratio = v / max
-  const color = ratio >= 0.70 ? '#4ade80' : ratio >= 0.45 ? '#fbbf24' : '#f87171'
-  return <span style={{ fontSize: '10px', color, marginLeft: 3 }}>{Math.round(v)}/{max}</span>
+  return ranked.sort((a, b) => a.goodness - b.goodness).slice(0, n)
 }
 
 // ---------------------------------------------------------------------------
-// Score colour (same 5-tier thresholds as CSP/CC)
+// Score colour (v4 tier bands: A≥90, B≥70, C≥50, D≥30, E<30)
 // ---------------------------------------------------------------------------
+
+const TIER_COLORS: Record<string, string> = {
+  A: '#4ade80', B: '#86efac', C: '#facc15', D: '#fb923c', E: '#f87171',
+}
+
+function tierForScore(score: number | undefined | null): 'A' | 'B' | 'C' | 'D' | 'E' {
+  if (score == null) return 'E'
+  if (score >= 90) return 'A'
+  if (score >= 70) return 'B'
+  if (score >= 50) return 'C'
+  if (score >= 30) return 'D'
+  return 'E'
+}
 
 function scoreFmt(
   env: number | undefined,
   strike: number | undefined,
   final: number | undefined,
+  tier?: string | null,
   highlight = false,
 ) {
   if (final == null || isNaN(final)) return <span className="dim">—</span>
-  const rounded = Math.round(final)
-  const cls =
-    rounded >= 75 ? 'score-strong'
-    : rounded >= 65 ? 'score-good'
-    : rounded >= 55 ? 'score-caution'
-    : rounded >= 45 ? 'score-warn'
-    : 'score-bad'
+  const t = (tier as 'A'|'B'|'C'|'D'|'E') ?? tierForScore(final)
+  const color = TIER_COLORS[t] ?? '#94a3b8'
   return (
     <span
-      className={cls}
-      style={highlight ? { fontWeight: 800, fontSize: '15px' } : {}}
-      title={`Env: ${env?.toFixed(0) ?? '—'}  ·  Strike: ${strike?.toFixed(0) ?? '—'}  ·  Final: ${final.toFixed(0)}`}
+      style={{
+        color,
+        fontWeight: highlight ? 800 : 700,
+        fontSize: highlight ? '15px' : undefined,
+      }}
+      title={`Tier ${t}  ·  Score: ${final.toFixed(0)}  ·  Val+Cap+Macro pillar pctile: ${env?.toFixed(0) ?? '—'}  ·  Tech+Option pillar pctile: ${strike?.toFixed(0) ?? '—'}`}
     >
       {final.toFixed(0)}
-      {env != null && strike != null && (
-        <span style={{ fontSize: '10px', opacity: 0.7, display: 'block' }}>
-          E{env.toFixed(0)} S{strike.toFixed(0)}
-        </span>
-      )}
+      <span style={{ fontSize: '11px', marginLeft: 4, opacity: 0.85 }}>{t}</span>
     </span>
   )
-}
-
-const fmtSpread = (v: number | null) => {
-  if (v == null) return <span className="dim">—</span>
-  const cls = v > 10 ? 'spread-wide' : v > 5 ? 'spread-ok' : 'spread-tight'
-  return <span className={cls}>{v.toFixed(1)}%</span>
 }
 
 // ---------------------------------------------------------------------------
@@ -138,11 +151,9 @@ const fmtSpread = (v: number | null) => {
 const COLUMNS = [
   col.accessor('symbol',                 { header: 'Symbol',   cell: () => null, meta: { sticky: 1 } }),
   col.accessor('price',                  { header: 'Price',    cell: () => null, meta: { sticky: 2 } }),
-  col.accessor('sma_ratio',              { header: () => <span className="col-tip col-scored" title="SMA50 ÷ SMA200 · >1 = SMA50 above SMA200 (uptrend)">Trend ⓘ</span>, cell: () => null }),
-  col.accessor('weekly_rsi',             { header: () => <span className="col-tip col-scored" title="Weekly RSI(14) — medium-term momentum on weekly closes · 50–65 = ideal">W-RSI ⓘ</span>, cell: () => null }),
-  col.accessor('ret_200d',               { header: () => <span className="col-tip col-scored" title="200-day median-anchored return · close_today / median(closes 200d ago) − 1">200d Ret ⓘ</span>, cell: () => null }),
-  col.accessor('trend_r2',               { header: () => <span className="col-tip col-scored" title="R² of 50-day OLS price regression · measures trend smoothness · ≥0.85=10pts · 0.70–0.85→7.5–10 · <0.30=0 (v3.2)">R² ⓘ</span>, cell: () => null }),
-  col.accessor('dist_from_52w_high_pct', { header: () => <span className="col-tip col-scored" title="Distance from 52-week high · 0% = at the high · negative = % below">52W Dist ⓘ</span>, cell: () => null }),
+  col.accessor('weekly_rsi',             { header: () => <span className="col-tip col-scored" title="Weekly RSI(14) — medium-term momentum on weekly closes · lower = better (pullback in uptrend, v4 sign −)">W-RSI ⓘ</span>, cell: () => null }),
+  col.accessor('ret_200d',               { header: () => <span className="col-tip col-scored" title="200-day median-anchored return · higher = better (v4 sign +)">200d Ret ⓘ</span>, cell: () => null }),
+  col.accessor('dist_from_52w_high_pct', { header: () => <span className="col-tip col-scored" title="Distance from 52-week high · deeper pullback ranks higher (v4 sign −)">52W Dist ⓘ</span>, cell: () => null }),
   col.accessor('earnings_date',          { header: 'Earnings', cell: () => null }),
   col.accessor('best_score',             { header: () => null, cell: () => null }),
 ]
@@ -170,6 +181,7 @@ function groupResults(results: DitmResult[]): GroupedDitmResult[] {
         env_detail: '',
         iv_percentile: r.iv_percentile,
         trend_r2: r.trend_r2,
+        best_tier: null,
       })
     }
     const g = map.get(r.symbol)!
@@ -191,6 +203,7 @@ function groupResults(results: DitmResult[]): GroupedDitmResult[] {
     const bestStrike = g.expirations.flatMap(e => e.strikes).find(s => s.is_best)
       ?? g.expirations[0]?.strikes[0]
     g.env_detail = bestStrike?.env_detail ?? ''
+    g.best_tier = bestStrike?.tier ?? null
   }
   return [...map.values()].sort((a, b) => b.best_score - a.best_score)
 }
@@ -211,6 +224,16 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
   const anyHvFallback = groupedData.some(r =>
     r.expirations.some(e => e.strikes.some(s => s.iv_fallback))
   )
+
+  // v4 (ADR-0032): scores are cross-sectional percentiles. With a small candidate
+  // pool the ranking is meaningless — every strike floats to the top. Count distinct
+  // tickers and total strikes to decide whether to warn.
+  const tickerCount = groupedData.length
+  const totalStrikes = groupedData.reduce(
+    (sum, r) => sum + r.expirations.reduce((s, e) => s + e.strikes.length, 0),
+    0,
+  )
+  const smallUniverse = tickerCount < 5 || totalStrikes < 20
 
   const toggleStrikes = (key: string) => {
     setStrikeExpanded(prev => {
@@ -269,6 +292,20 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
           <span>⚠ Some delta values are HV-estimated — bid/ask = 0 on those strikes (illiquid or pre-open quotes).</span>
         </div>
       )}
+      {smallUniverse && (
+        <div
+          className="stale-banner"
+          style={{ background: 'rgba(251,191,36,0.10)', borderColor: '#fbbf24' }}
+          title="v4 ranks candidates against each other; tiny pools produce inflated scores."
+        >
+          <span style={{ color: '#fbbf24' }}>
+            ⚠ Small universe ({tickerCount} ticker{tickerCount === 1 ? '' : 's'}, {totalStrikes} strike{totalStrikes === 1 ? '' : 's'})
+          </span>
+          <span style={{ color: '#94a3b8', marginLeft: 10, fontSize: '12px' }}>
+            Scores are universe-relative percentiles — with this few candidates the rankings inflate (the best one is always near 100). Use Auto Scan on S&amp;P 100+ for comparable A/B/C/D/E tiers.
+          </span>
+        </div>
+      )}
       <table className="screener-table">
         <thead>
           {table.getHeaderGroups().map(hg => (
@@ -323,31 +360,11 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
                   Extrinsic% ⓘ
                 </span>
               </th>
-              <th>
-                <span className="col-tip" title="(Strike + Mid − Price) / Price × 100 · Stock must rise this much by expiry to break even · Display only">
-                  BE% ⓘ
-                </span>
-              </th>
-              <th>
-                <span className="col-tip" title="(Ask − Bid) / Mid × 100 · Transaction cost on entry and exit">
-                  Spread% ⓘ
-                </span>
-              </th>
-              <th>
-                <span className="col-tip" title="IV Percentile — % of last 252d where HV < today HV · v3 single vol-cheapness factor (10 pts) · Inverted: low = cheap = full credit">
-                  IV%ile ⓘ
-                </span>
-              </th>
-              <th>
-                <span className="col-tip" title="Per-strike OI · colored by Chain Liquidity factor (audit #12 fix — was incorrectly colored by IV)">
-                  OI ⓘ
-                </span>
-              </th>
               <th
                 className="sortable"
                 onClick={() => scoreCol?.toggleSorting(scoreSorted === 'asc')}
               >
-                <span className="col-tip" title="Final Score = (0.5×Env + 0.5×Strike) × macro_mult (0.85 if macro hold)&#10;&#10;ENV (100 pts)&#10;  Trend Strength       25 pts  P>SMA50>SMA200 (soft factor)&#10;  200d Return          15 pts  ≥25%=full (v3.2: compressed)&#10;  Trend Stability R²   10 pts  OLS R² of 50-day price (v3.2 NEW)&#10;  52W High Dist.       20 pts  peak 3–12% off highs (v3.2 tent curve)&#10;  Weekly RSI           15 pts  50–65=full&#10;  Chain Liquidity      15 pts  log10 ref 500&#10;  Earnings (DTE-scaled)  up to −15 pts penalty&#10;&#10;STRIKE (100 pts)&#10;  Delta            20 pts  0.82–0.90 sweet spot (v3.2)&#10;  Leverage         25 pts  δ×price/mid · flat 2.5–4.0× · hard 0 at ≥5× (v3.2)&#10;  Extrinsic%       25 pts  &lt;2%=full&#10;  Bid-Ask Spread   20 pts  ≤2%=full&#10;  IV Percentile    10 pts  ≤25th=full (inverted)">
+                <span className="col-tip" title="v4 score = candidate's percentile within the scored universe.&#10;Tier band: A≥90 · B≥70 · C≥50 · D≥30 · E<30.&#10;&#10;Cross-sectional rank-and-blend across 13 factors in 5 pillars:&#10;  Valuation (cap 35%)  P/S, EV/S, EV/EBITDA  (lower ranks better)&#10;  Option    (cap 25%)  Leverage, Delta, Extrinsic%&#10;  Technical (cap 20%)  W-RSI, 52W Dist, HV30, 200d Ret&#10;  Capital   (cap 15%)  D/E, ND/EBITDA  (higher ranks better)&#10;  Macro     (cap 5%)   Sector RS  (inert until wired)&#10;&#10;Per-group budget split by |IC| vs realised forward ROC.&#10;Min 8 of 13 observed; missing factors median-imputed.&#10;See ADR-0032 for calibration evidence.">
                   Score ⓘ
                 </span>
                 {scoreSorted === 'asc' && ' ↑'}
@@ -382,12 +399,9 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
             const dteCellRows = 1 + (showAlts ? altStrikes.length : 0)
             const isFirstRow = absRowIdx === 0
 
-            const envPts = isFirstRow ? parseDetail(r.env_detail) : {}
-
-            // Trend label from SMA ratio
-            const trendLabel = r.sma_ratio > 1.0
-              ? (r.sma_ratio > 1.02 ? 'Strong' : 'Bullish')
-              : 'Neutral'
+            // v4: ticker-level cells color by the best strike's factor_breakdown
+            // (the technical/sector factors are stock-level so they're identical across strikes).
+            const tickerSrc = isFirstRow ? bestStrike : undefined
 
             rows.push(
               <tr key={`${expIdx}-best`} className={isFirstRow ? 'first-exp-row' : 'sub-exp-row'}>
@@ -402,69 +416,46 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
                   </td>
                   <td rowSpan={totalRows} className="sticky-col sticky-col-2">{fmt2(r.price)}</td>
 
-                  {/* Trend — v3: soft 25-pt factor, no longer a hard gate */}
-                  <td rowSpan={totalRows}>
-                    <span style={{ color: subColor(envPts, 'Tr', ENV_MAX) || '#94a3b8', fontWeight: 600 }}>{trendLabel}</span>
-                    <br />
-                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>
-                      {isNaN(r.sma_ratio) ? '—' : r.sma_ratio.toFixed(4)}
-                    </span>
-                    {subScore(envPts, 'Tr', ENV_MAX)}
-                  </td>
-
-                  {/* Weekly RSI */}
+                  {/* Weekly RSI — v4: scored factor wk_rsi (sign −) */}
                   <td rowSpan={totalRows}>
                     {isNaN(r.weekly_rsi)
                       ? <span className="dim">—</span>
                       : <>
-                          <span style={{ color: subColor(envPts, 'WRSI', ENV_MAX) }}>
+                          <span style={{ color: factorColor(tickerSrc, 'wk_rsi') }}>
                             {r.weekly_rsi.toFixed(1)}
                           </span>
-                          {subScore(envPts, 'WRSI', ENV_MAX)}
+                          {factorBadge(tickerSrc, 'wk_rsi')}
                         </>
                     }
                   </td>
 
-                  {/* 200d Return */}
+                  {/* 200d Return — v4: scored factor ret_200d (sign +) */}
                   <td rowSpan={totalRows}>
                     {isNaN(r.ret_200d)
                       ? <span className="dim">—</span>
                       : <>
-                          <span style={{ color: subColor(envPts, 'Ret', ENV_MAX) }}>
+                          <span style={{ color: factorColor(tickerSrc, 'ret_200d') }}>
                             {r.ret_200d >= 0 ? '+' : ''}{r.ret_200d.toFixed(1)}%
                           </span>
-                          {subScore(envPts, 'Ret', ENV_MAX)}
+                          {factorBadge(tickerSrc, 'ret_200d')}
                         </>
                     }
                   </td>
 
-                  {/* Trend Stability R² — v3.2 */}
-                  <td rowSpan={totalRows}>
-                    {r.trend_r2 == null
-                      ? <span className="dim">—</span>
-                      : <>
-                          <span style={{ color: subColor(envPts, 'R2', ENV_MAX) }}>
-                            {r.trend_r2.toFixed(2)}
-                          </span>
-                          {subScore(envPts, 'R2', ENV_MAX)}
-                        </>
-                    }
-                  </td>
-
-                  {/* 52W Dist */}
+                  {/* 52W Dist — v4: scored factor dist52w (sign −, deeper pullback = better) */}
                   <td rowSpan={totalRows}>
                     {isNaN(r.dist_from_52w_high_pct)
                       ? <span className="dim">—</span>
                       : <>
-                          <span style={{ color: subColor(envPts, '52W', ENV_MAX) }}>
+                          <span style={{ color: factorColor(tickerSrc, 'dist52w') }}>
                             {r.dist_from_52w_high_pct.toFixed(1)}%
                           </span>
-                          {subScore(envPts, '52W', ENV_MAX)}
+                          {factorBadge(tickerSrc, 'dist52w')}
                         </>
                     }
                   </td>
 
-                  {/* Earnings — v3: DTE-scaled penalty (audit #9), no longer a hard gate */}
+                  {/* Earnings — v4: display-only badge (no longer a scored penalty) */}
                   <td rowSpan={totalRows}>
                     {r.earnings_date
                       ? <>
@@ -478,16 +469,12 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
                               dte <= 7 ? '#f87171'
                               : dte <= 14 ? '#fb923c'
                               : '#94a3b8'
-                            const label =
-                              dte <= 7 ? `−15 ENV × min(1, 30/dte)`
-                              : dte <= 14 ? `−7 ENV × min(1, 30/dte)`
-                              : `${dte}d`
                             return (
                               <span
                                 style={{ fontSize: '10px', color: tone, display: 'block', lineHeight: 1.2 }}
-                                title={`v3 DTE-scaled earnings penalty (replaces v2 hard gate)`}
+                                title="v4 surfaces earnings for awareness only — no scoring penalty"
                               >
-                                {label}
+                                {dte}d
                               </span>
                             )
                           })()}
@@ -508,7 +495,6 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
                         ? (exp.chain_median_oi / 1000).toFixed(1) + 'k'
                         : Math.round(exp.chain_median_oi))
                       : <span className="dim">—</span>}
-                    {subInline(parseDetail(bestStrike.env_detail), 'LQ', ENV_MAX)}
                   </div>
                 </td>
 
@@ -529,70 +515,42 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
                 <td className="prem-cell">${bestStrike.mid.toFixed(2)}</td>
 
                 <td>
-                  <span style={{ color: subColor(parseDetail(bestStrike.strike_detail), 'Δ', STRIKE_MAX) }}>
+                  <span style={{ color: factorColor(bestStrike, 'delta') }}>
                     +{fmtDelta(bestStrike.delta)}
                   </span>
                   {bestStrike.iv_fallback && (
                     <span className="iv-fallback-tag" title="Delta estimated from historical volatility — market closed/stale quotes">~HV</span>
                   )}
-                  {subScore(parseDetail(bestStrike.strike_detail), 'Δ', STRIKE_MAX)}
+                  {factorBadge(bestStrike, 'delta')}
                 </td>
 
-                {/* Leverage — v3 NEW (audit #1) */}
+                {/* Leverage — v4: scored factor leverage (sign +) */}
                 <td>
                   {(() => {
                     const lev = bestStrike.mid > 0 ? bestStrike.delta * r.price / bestStrike.mid : 0
                     return <>
-                      <span style={{ color: subColor(parseDetail(bestStrike.strike_detail), 'Lev', STRIKE_MAX) }}>
+                      <span style={{ color: factorColor(bestStrike, 'leverage') }}>
                         {lev.toFixed(2)}×
                       </span>
-                      {subScore(parseDetail(bestStrike.strike_detail), 'Lev', STRIKE_MAX)}
+                      {factorBadge(bestStrike, 'leverage')}
                     </>
                   })()}
                 </td>
 
                 <td>
-                  <span style={{ color: subColor(parseDetail(bestStrike.strike_detail), 'Ext', STRIKE_MAX) }}>
+                  <span style={{ color: factorColor(bestStrike, 'extrinsic_pct') }}>
                     {fmtPct(bestStrike.extrinsic_pct)}
                   </span>
-                  {subScore(parseDetail(bestStrike.strike_detail), 'Ext', STRIKE_MAX)}
+                  {factorBadge(bestStrike, 'extrinsic_pct')}
                 </td>
 
                 <td>
-                  <span className="dim">{fmtPct(bestStrike.breakeven_pct)}</span>
-                </td>
-
-                <td>
-                  <span style={{ color: subColor(parseDetail(bestStrike.strike_detail), 'BA', STRIKE_MAX) }}>
-                    {fmtSpread(bestStrike.bid_ask_spread_pct)}
-                  </span>
-                  {subScore(parseDetail(bestStrike.strike_detail), 'BA', STRIKE_MAX)}
-                </td>
-
-                {/* IV Percentile — v3: explicit column (was hidden under OI — audit #12) */}
-                <td>
-                  <span style={{ color: subColor(parseDetail(bestStrike.strike_detail), 'IV', STRIKE_MAX) }}>
-                    {r.iv_percentile != null ? `${r.iv_percentile.toFixed(0)}` : '—'}
-                  </span>
-                  {subScore(parseDetail(bestStrike.strike_detail), 'IV', STRIKE_MAX)}
-                </td>
-
-                {/* OI — v3: colored by LQ (audit #12 fix) */}
-                <td>
-                  <span style={{ color: subColor(parseDetail(bestStrike.env_detail), 'LQ', ENV_MAX) }}>
-                    {bestStrike.chain_oi >= 1000
-                      ? (bestStrike.chain_oi / 1000).toFixed(1) + 'k'
-                      : bestStrike.chain_oi}
-                  </span>
-                </td>
-
-                <td>
-                  {scoreFmt(bestStrike.env_score, bestStrike.strike_score, bestStrike.ditm_score, true)}
+                  {scoreFmt(bestStrike.env_score, bestStrike.strike_score, bestStrike.ditm_score, bestStrike.tier, true)}
                 </td>
                 <td>
-                  {topDrags(bestStrike.env_detail ?? '', bestStrike.strike_detail ?? '').map(d => (
-                    <span key={d.key} style={{ display: 'block', fontSize: '12px', color: d.drag >= 15 ? '#f87171' : '#fb923c' }}>
-                      {DRAG_LABELS[d.key] ?? d.key} −{Math.round(d.drag)}
+                  {topDrags(bestStrike).map(d => (
+                    <span key={d.key} style={{ display: 'block', fontSize: '12px', color: d.goodness <= 0.2 ? '#f87171' : '#fb923c' }}>
+                      {V4_FACTOR_LABELS[d.key] ?? d.key} {Math.round(d.goodness * 100)}%
                     </span>
                   ))}
                 </td>
@@ -613,61 +571,39 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
                     </td>
                     <td className="prem-cell">${s.mid.toFixed(2)}</td>
                     <td>
-                      <span style={{ color: subColor(parseDetail(s.strike_detail), 'Δ', STRIKE_MAX) }}>
+                      <span style={{ color: factorColor(s, 'delta') }}>
                         +{fmtDelta(s.delta)}
                       </span>
                       {s.iv_fallback && (
                         <span className="iv-fallback-tag" title="Delta estimated from historical volatility">~HV</span>
                       )}
-                      {subScore(parseDetail(s.strike_detail), 'Δ', STRIKE_MAX)}
+                      {factorBadge(s, 'delta')}
                     </td>
                     {/* Leverage */}
                     <td>
                       {(() => {
                         const lev = s.mid > 0 ? s.delta * r.price / s.mid : 0
                         return <>
-                          <span style={{ color: subColor(parseDetail(s.strike_detail), 'Lev', STRIKE_MAX) }}>
+                          <span style={{ color: factorColor(s, 'leverage') }}>
                             {lev.toFixed(2)}×
                           </span>
-                          {subScore(parseDetail(s.strike_detail), 'Lev', STRIKE_MAX)}
+                          {factorBadge(s, 'leverage')}
                         </>
                       })()}
                     </td>
                     <td>
-                      <span style={{ color: subColor(parseDetail(s.strike_detail), 'Ext', STRIKE_MAX) }}>
+                      <span style={{ color: factorColor(s, 'extrinsic_pct') }}>
                         {fmtPct(s.extrinsic_pct)}
                       </span>
-                      {subScore(parseDetail(s.strike_detail), 'Ext', STRIKE_MAX)}
+                      {factorBadge(s, 'extrinsic_pct')}
                     </td>
                     <td>
-                      <span className="dim">{fmtPct(s.breakeven_pct)}</span>
+                      {scoreFmt(s.env_score, s.strike_score, s.ditm_score, s.tier)}
                     </td>
                     <td>
-                      <span style={{ color: subColor(parseDetail(s.strike_detail), 'BA', STRIKE_MAX) }}>
-                        {fmtSpread(s.bid_ask_spread_pct)}
-                      </span>
-                      {subScore(parseDetail(s.strike_detail), 'BA', STRIKE_MAX)}
-                    </td>
-                    {/* IV%ile — explicit column */}
-                    <td>
-                      <span style={{ color: subColor(parseDetail(s.strike_detail), 'IV', STRIKE_MAX) }}>
-                        {r.iv_percentile != null ? `${r.iv_percentile.toFixed(0)}` : '—'}
-                      </span>
-                      {subScore(parseDetail(s.strike_detail), 'IV', STRIKE_MAX)}
-                    </td>
-                    {/* OI — colored by LQ */}
-                    <td>
-                      <span style={{ color: subColor(parseDetail(s.env_detail), 'LQ', ENV_MAX) }}>
-                        {s.chain_oi >= 1000 ? (s.chain_oi / 1000).toFixed(1) + 'k' : s.chain_oi}
-                      </span>
-                    </td>
-                    <td>
-                      {scoreFmt(s.env_score, s.strike_score, s.ditm_score)}
-                    </td>
-                    <td>
-                      {topDrags(s.env_detail ?? '', s.strike_detail ?? '').map(d => (
-                        <span key={d.key} style={{ display: 'block', fontSize: '12px', color: d.drag >= 15 ? '#f87171' : '#fb923c' }}>
-                          {DRAG_LABELS[d.key] ?? d.key} −{Math.round(d.drag)}
+                      {topDrags(s).map(d => (
+                        <span key={d.key} style={{ display: 'block', fontSize: '12px', color: d.goodness <= 0.2 ? '#f87171' : '#fb923c' }}>
+                          {V4_FACTOR_LABELS[d.key] ?? d.key} {Math.round(d.goodness * 100)}%
                         </span>
                       ))}
                     </td>
@@ -682,8 +618,8 @@ export function DitmTable({ data, macroPass, vixLevel, vix5dChange, spyAboveSma2
         })}
       </table>
       <div className="table-footer-note">
-        v3 (ADR-0008): Trend gate and HV Rank gate removed. Macro hold demotes scores by 15%.
-        ⚠ in Symbol = overnight gap ≥ 3% in last 3 sessions. Best strike highlighted by highest DITM score.
+        v4 (ADR-0032): Cross-sectional rank-and-blend across 13 factors in 5 groups. Score is universe percentile;
+        tier band: A≥90 · B≥70 · C≥50 · D≥30 · E&lt;30. ⚠ in Symbol = overnight gap ≥ 3% in last 3 sessions.
       </div>
     </div>
   )

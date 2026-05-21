@@ -1,11 +1,10 @@
-# Scoring Reference (CSP, CC, DITM) — v3.4
+# Scoring Reference (CSP, CC, DITM) — v3.4 (CSP/CC) · v4 (DITM)
 
 > Single source of truth for the screener scoring system. Every weight and threshold listed
 > here is mirrored in code by `ENV_WEIGHTS` / `STRIKE_WEIGHTS` in
-> [backend/services/scoring/config.py](backend/services/scoring/config.py) (CSP/CC) and the
-> v3 scorer functions in [backend/services/ditm_service.py](backend/services/ditm_service.py)
-> (DITM — kept inline pending a follow-up move to `services/scoring/`). The frontend
-> `SCORE_LEGEND` arrays in [CspInput.tsx](frontend/src/components/CspInput.tsx),
+> [backend/services/scoring/config.py](backend/services/scoring/config.py) (CSP/CC) and by
+> the v4 scorer in [backend/services/scoring/ditm_v4.py](backend/services/scoring/ditm_v4.py)
+> (DITM). The frontend `SCORE_LEGEND` arrays in [CspInput.tsx](frontend/src/components/CspInput.tsx),
 > [CcInput.tsx](frontend/src/components/CcInput.tsx), and
 > [DitmInput.tsx](frontend/src/components/DitmInput.tsx) mirror this document.
 
@@ -29,9 +28,17 @@
 > realised ROC) ≤ 0 and were dropped; IVP raised 35→60; the 52W Trend curve was *flipped*
 > (stocks far from highs gave better outcomes than stocks near highs); strike side
 > rebalanced Δ 25→40, BA 25→15, ROC 35→30. CC scoring is unchanged from v3.3. The
-> `SCORING_VERSION = "3.4.0"` constant gates all CSP env scoring. Diagnostic-preserved fields (`em_buffer_pct`, `dist_pct`, `otm_pct` for CSP/CC;
-> `theta_annualized_pct`, `capital_efficiency_pct`, `breakeven_pct`, `hv_rank` for DITM) are
-> still computed and returned in the response payload but contribute 0 to the score.
+> `SCORING_VERSION = "3.4.0"` constant gates all CSP env scoring. **DITM v4**
+> (May 2026, see [ADR-0032](docs/adr/0032-ditm-v4-cross-sectional-scoring.md)) replaces
+> the per-row piecewise DITM scorer with a cross-sectional rank-and-blend over 13 factors
+> in 5 pillars (valuation 35% · option 25% · technical 20% · capital 15% · macro 5%).
+> Score is the candidate's percentile within the scored universe; tier bands are A ≥ 90 ·
+> B ≥ 70 · C ≥ 50 · D ≥ 30 · E < 30. IC vs forward 120d realised ROC on the 10,767-row
+> PIT panel: **+0.075** (vs production v3 −0.033; +0.107 lift). A-tier median ROC is
+> ≈10× E-tier (150% vs 15%); win rate is monotone A→E (67% → 51%). Diagnostic-preserved
+> fields (`em_buffer_pct`, `dist_pct`, `otm_pct` for CSP/CC; `theta_annualized_pct`,
+> `capital_efficiency_pct`, `breakeven_pct`, `hv_rank` for DITM) are still computed and
+> returned in the response payload but contribute 0 to the score.
 >
 > **Empirical validation (2026-05-20, [ADR-0031](docs/adr/0031-csp-scoring-empirical-validation.md)).**
 > A 12,751-trade synthetic-BS walk-forward backtest (2024-01 → 2026-04, full
@@ -439,13 +446,109 @@ These constraints filter candidates *before* scoring, not as scored factors:
 
 ---
 
-## DITM (Deep-In-The-Money long calls) — v3.2
+## DITM (Deep-In-The-Money long calls) — v4 (current)
 
-`compute_ditm_env_score(...)` and `compute_ditm_strike_score(...)` in
-[backend/services/ditm_service.py](backend/services/ditm_service.py). DITM v3 (ADR-0008)
-shipped after CSP/CC v3 — it applies the same lean philosophy plus DITM-specific fixes.
-DITM v3.2 de-correlates the ENV momentum cluster (see `_score_trend_r2`, `_score_200d_return`,
-`_score_52w_dist` docstrings in `ditm_service.py`).
+Implemented by [backend/services/scoring/ditm_v4.py](backend/services/scoring/ditm_v4.py)
+(pure scorer) and wired through [backend/services/scoring/ditm_v4_pipeline.py](backend/services/scoring/ditm_v4_pipeline.py)
+(fundamentals fetch + candidate assembly + writeback). See
+[ADR-0032](docs/adr/0032-ditm-v4-cross-sectional-scoring.md) for the full design rationale
+and calibration evidence; the v3.2 piecewise scorer below is retained for reference only.
+
+### Final score
+
+```
+score = percentile_rank_of( Σ signed_weight × percentile_rank(factor) , universe )    # 0..100
+tier  = A if score≥90 · B if ≥70 · C if ≥50 · D if ≥30 · E otherwise
+```
+
+- **Cross-sectional**: scoring requires ≥ 2 candidates. A "100" means "best in the
+  scored set", not "passes an absolute bar".
+- **Missing factors**: imputed to the cross-sectional median rank (0.5). Candidates
+  with fewer than `MIN_FACTORS_OBSERVED = 8` of the 13 factors get `score = None`.
+- **Group caps**: weights sum to a per-group budget. Within a group, weights are
+  proportional to |IC|.
+
+### Factor table
+
+| Group | Cap | Factor | Sign | \|w\| | Source |
+|---|---:|---|:---:|---:|---|
+| **Valuation** | 0.35 | `ps_ttm` | − | 0.146 | EDGAR (TTM revenue) |
+|  |  | `ev_sales` | − | 0.129 | EDGAR + market cap + net debt |
+|  |  | `ev_ebitda` | − | 0.075 | EDGAR (TTM EBITDA) |
+| **Option** | 0.25 | `leverage` | + | 0.094 | `delta × price / mid` |
+|  |  | `delta` | + | 0.080 | chain |
+|  |  | `extrinsic_pct` | − | 0.076 | `(mid − intrinsic) / strike × 100` |
+| **Technical** | 0.20 | `wk_rsi` | − | 0.076 | weekly Wilder RSI(14) |
+|  |  | `hv30` | − | 0.046 | 30d realised vol (annualised) |
+|  |  | `dist52w` | − | 0.043 | signed % from 52w high |
+|  |  | `ret_200d` | + | 0.034 | 200-day total return |
+| **Capital** | 0.15 | `debt_to_equity` | + | 0.097 | EDGAR balance sheet |
+|  |  | `nd_ebitda` | + | 0.053 | (debt − cash) / TTM EBITDA |
+| **Macro** | 0.05 | `sector_rs_6m` | − | 0.050 | sector ETF vs SPY (⚠ **not yet wired** — inert) |
+
+Sign convention: `+1` = higher raw value → higher score; `−1` = lower raw value → higher
+score. Note the capital-structure signs are **positive** for DITM (modest leverage
+outperforms on multi-month holds) — opposite of CSP/CC.
+
+### Tier bands
+
+| Tier | Score | n (panel) | Median ROC | Win rate |
+|:---:|---:|---:|---:|---:|
+| A | ≥ 90 | 993 | **+150%** | 67.3% |
+| B | 70–89 | 1,985 | +70% | 59.2% |
+| C | 50–69 | 1,984 | +48% | 56.5% |
+| D | 30–49 | 1,984 | +48% | 55.8% |
+| E | < 30 | 2,976 | +15% | 51.4% |
+
+Numbers from [scripts/verify_ditm_v4_pipeline.py](scripts/verify_ditm_v4_pipeline.py)
+on [ditm_backtest_pit.csv](ditm_backtest_pit.csv) (n = 10,767 PIT rows, 2023–2026; 9,922
+scored, 845 below the 8-factor eligibility bar).
+
+### Wiring fields (Phase 2b — Option C cutover)
+
+The v4 scorer reuses the existing `DitmStrikeResult` shape for backwards-compat:
+
+- `ditm_score` ← v4 percentile (canonical)
+- `score_v4` ← v4 percentile (canonical mirror)
+- `tier` ← A/B/C/D/E
+- `factor_breakdown` ← per-factor signed contribution
+- `env_score` ← **repurposed**: pillar percentile (valuation + capital + macro)
+- `strike_score` ← **repurposed**: pillar percentile (technical + option)
+- `DitmResult.best_tier` ← tier of the best strike (new)
+
+### Hard filters (unchanged from v3)
+
+| Filter | Effect |
+|---|---|
+| Delta range `[0.70, 0.90]` | strikes outside the gate excluded |
+| ITM-only | `strike < current_price` |
+| DTE window | user-supplied (default 90–365) |
+| Earnings badge | rendered in UI; does not zero the v4 score |
+
+### Small-universe caveat
+
+Scores are percentiles within the scored set. The DITM table renders an amber banner
+when `n_tickers < 5` or `n_strikes < 20` to warn that a "100" with 2 tickers is
+"better of two", not "objectively excellent". This is by design — see
+[ADR-0032](docs/adr/0032-ditm-v4-cross-sectional-scoring.md) § Consequences.
+
+### Frozen constants
+
+`GROUP_WEIGHT_CAPS`, `_RAW_FACTORS`, `MIN_FACTORS_OBSERVED`, and `TIER_THRESHOLDS` in
+[ditm_v4.py](backend/services/scoring/ditm_v4.py) are frozen by ADR-0032. Changes
+require a new ADR with the IC re-run on `ditm_backtest_pit.csv` and a tier breakdown
+showing equal-or-better monotonicity.
+
+---
+
+## DITM v3.2 (historical, kept for reference)
+
+Pre-v4 scorer in [backend/services/ditm_service.py](backend/services/ditm_service.py)
+(`compute_ditm_env_score`, `compute_ditm_strike_score`). DITM v3 (ADR-0008) applied the
+v3 lean philosophy to DITM; v3.2 de-correlated the ENV momentum cluster
+(see `_score_trend_r2`, `_score_200d_return`, `_score_52w_dist` docstrings).
+**This section is retained for historical context only.** The v4 scorer (above) is what
+runs in production.
 
 ### Final score formula
 

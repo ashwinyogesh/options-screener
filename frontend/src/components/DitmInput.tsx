@@ -7,106 +7,121 @@ const PRESET_BASKET = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'META', 'GOOGL', 
 // Score legend data
 // ---------------------------------------------------------------------------
 
+// v4 (ADR-0032): cross-sectional rank-and-blend scorer. Weights below are signed
+// fractional contributions (sum |w| per group ≤ group cap). Final ditm_score is
+// each candidate's percentile within the universe; tier is a band on that percentile.
 const SCORE_LEGEND = [
-  { factor: '— ENV SCORE (×0.5) —', weight: null, detail: '', definition: '', why: '', formula: '' },
+  { factor: '— VALUATION (cap 35%) —', weight: null, detail: 'Cheaper stocks rank higher.', definition: '', why: '', formula: '' },
   {
-    factor: 'Trend Strength', weight: 25, detail: 'P>SMA50>SMA200=25 · P>SMA50 only=15 · SMA50>SMA200 only=8 · above SMA200=4 · else=0.',
-    definition: 'Whether price is above SMA50 and SMA50 is above SMA200. v3: soft factor (no longer a hard gate). Full alignment is still the strongest tier; partial alignment earns proportional pts.',
-    why: 'DITM long calls are pure directional bets. The strongest trend (P>SMA50>SMA200) confirms the broader uptrend. v2 used Trend < 22 pts as a hard gate that zeroed ENV — v3 keeps Trend as the highest-weighted ENV factor instead, so failing alignment costs ~17 pts but doesn\'t crater the whole score.',
-    formula: 'P>SMA50>SMA200 → 25 pts\nP>SMA50 only   → 15 pts\nSMA50>SMA200   →  8 pts\nAbove SMA200   →  4 pts\nElse           →  0 pts',
+    factor: 'P/S TTM', weight: -14.6, detail: 'Cheaper price-to-sales wins.',
+    definition: 'Trailing-twelve-month price-to-sales multiple from EDGAR. The richest single sales-multiple signal in the audit.',
+    why: 'Cheap on sales is the most robust value signal across sectors and is least gameable by accounting. Top IC of the 13 factors (|IC|≈0.10).',
+    formula: 'ps_ttm = market_cap / revenue_ttm',
   },
   {
-    factor: '200d Return', weight: 15, detail: '≥25%=15 · 15–25%→11–15 · 5–15%→6–11 · 0–5%→1.5–6 · <0%=0.',
-    definition: 'How much the stock has appreciated vs. its price approximately 200 days ago (median-anchored to smooth noise). Sustained long-term momentum. v3.2: weight compressed 25→15 to reduce momentum-cluster dominance; Trend Stability R² added as the orthogonal replacement signal.',
-    why: 'A +15–25% gain over 200 days confirms a strong trend. Weight reduced so a Trend Stability signal (R²) can add an independent dimension — direction/magnitude was already captured by Trend Strength (25 pts), so awarding 25 pts here was doubling that signal.',
-    formula: 'anchor   = median(Close[-205:-200])\nret_200d = Close_today / anchor − 1',
+    factor: 'EV/Sales', weight: -12.9, detail: 'Cheaper EV-to-sales wins.',
+    definition: 'Enterprise value (mkt cap + debt − cash) / TTM revenue. Capital-structure-neutral version of P/S.',
+    why: 'Captures cheapness for levered names where P/S misleads.',
+    formula: 'ev_sales = (mcap + total_debt − cash) / revenue_ttm',
   },
   {
-    factor: 'Trend Stability (R²)', weight: 10, detail: '≥0.85=10 · 0.70–0.85→7.5–10 · 0.50–0.70→4–7.5 · 0.30–0.50→1–4 · <0.30=0.',
-    definition: 'R² of a 50-day OLS linear regression of closing prices. Measures how smooth and consistent the trend is — orthogonal to direction (Trend Strength) and magnitude (200d Return).',
-    why: 'DITM delta-heavy positions bleed theta slowly but bleed it steadily in choppy, range-bound markets. A clean R² ≥ 0.70 means the trend has been a sustained drift rather than noise. Low R² = high chop = expensive to hold. This is the key de-correlation fix from the v3.2 audit.',
-    formula: '_x      = [0, 1, …, n-1]  (last 50 days)\ncoeffs = np.polyfit(_x, Close, 1)\nfitted = np.polyval(coeffs, _x)\nR² = 1 − SS_res / SS_tot',
+    factor: 'EV/EBITDA', weight: -7.5, detail: 'Cheaper EV-to-cash-flow wins.',
+    definition: 'Enterprise value / TTM EBITDA. Cash-flow-multiple signal.',
+    why: 'Adds a cash-flow dimension to the two sales-based factors. Lower IC than P/S but de-correlated.',
+    formula: 'ev_ebitda = ev / ebitda_ttm',
+  },
+
+  { factor: '— CAPITAL STRUCTURE (cap 15%) —', weight: null, detail: 'Modest leverage rewarded.', definition: '', why: '', formula: '' },
+  {
+    factor: 'Debt / Equity', weight: 9.7, detail: 'More leverage scores higher.',
+    definition: 'Total debt / book equity from latest filing.',
+    why: 'In the audit, modest leverage correlated positively with forward DITM ROC — companies that lever up tend to be the ones with cash-flow visibility.',
+    formula: 'd_e = total_debt / total_equity',
   },
   {
-    factor: '52W High Dist.', weight: 20, detail: '0% (at high)→12 · 0–3%→12–20 · 3–12%=20 · 12–25%→20–6 · 25–40%→6–0 · >40%=0.',
-    definition: 'How far below the 52-week high the stock is currently trading. v3.2 tent curve: rewards 3–12% below the high, penalises buying right at the 52W high (exhaustion risk) and deeply off the high.',
-    why: 'v3 flipped the v2 mean-reversion curve to full credit at 0%. v3.2 refines this: right at a fresh all-time high (0%) carries exhaustion risk — a tiny pullback to 3–12% below is the sweet spot where trend is confirmed but local exhaustion is less likely. Deep retracements (>25%) lose credit as the trend weakens.',
-    formula: 'dist      = (Close − max_252d_close) / max_252d_close × 100\npct_below = abs(min(dist, 0))\n0% → 12 · ramp to 20 at 3% · flat 20 at 3–12% · decay 20→6 at 12–25% · 0 beyond 40%',
+    factor: 'Net Debt / EBITDA', weight: 5.3, detail: 'More leverage scores higher (capped).',
+    definition: '(Total debt − cash) / TTM EBITDA. Years of cash flow needed to retire debt.',
+    why: 'Same direction as D/E but adds a cash-flow constraint.',
+    formula: 'nd_ebitda = (debt − cash) / ebitda_ttm',
+  },
+
+  { factor: '— TECHNICAL (cap 20%) —', weight: null, detail: 'Mean-reverting + selective momentum mix.', definition: '', why: '', formula: '' },
+  {
+    factor: 'Weekly RSI(14)', weight: -7.6, detail: 'Oversold names win (contrarian).',
+    definition: 'Wilder RSI on weekly closes.',
+    why: 'In the v4 audit, low weekly RSI (oversold) was the strongest technical predictor of forward DITM ROC. Contrarian to v3.',
+    formula: 'wk_rsi = Wilder-RSI(weekly_close, 14)',
   },
   {
-    factor: 'Weekly RSI(14)', weight: 15, detail: '50–65=15 · 45–50 or 65–70→11 · 40–45 or 70–75→6 · 35–40+strong trend→9 · else=0.',
-    definition: 'RSI computed on weekly closes (resample daily to weekly, Wilder smoothing). Medium-term momentum — a cleaner signal for multi-month DITM positions than daily RSI.',
-    why: 'Weekly momentum in 50–65 confirms sustained uptrend without being overextended. Weekly RSI in 35–40 plus a confirmed trend signals a strong pullback-entry point.',
-    formula: 'Resample daily Close to weekly\nWilder RSI(14) on weekly series\n50–65=15 · 45–50 or 65–70=11 · 40–45 or 70–75=6 · 35–40+Trend≥18=9 · else=0',
+    factor: '52W High Distance', weight: -4.3, detail: 'Deeper pullbacks score better.',
+    definition: 'Negative pct gap from the 252-day high (e.g. −10% means 10% below the high).',
+    why: 'Mean-reversion signal: deeper pullbacks within ongoing names price in better forward returns. Inverted from v3.',
+    formula: 'dist52w = (close − max_252d) / max_252d × 100',
   },
   {
-    factor: 'Chain Liquidity', weight: 15, detail: 'log10(median_OI) / log10(500) × 15 · capped at 15.',
-    definition: 'Median open interest across the 0.60–0.95 delta range of the call chain. DITM options are typically less liquid than ATM — reference is 500 OI (vs 5000 for CSP/CC).',
-    why: 'Illiquid DITM chains = wide spreads on entry, and difficulty exiting or rolling. Even moderate OI (500+) is sufficient for liquid fills on DITM calls.',
-    formula: 'pts = min(log10(median_OI) / log10(500), 1.0) × 15',
+    factor: 'HV30', weight: -4.6, detail: 'Calmer stocks (lower realised vol) win.',
+    definition: '30-day realised volatility (annualised %).',
+    why: 'Lower realised vol stocks compounded better forward DITM ROC, net of all other factors.',
+    formula: 'hv30 = std(log_returns_30d) × sqrt(252) × 100',
   },
   {
-    factor: 'Earnings (DTE-scaled)', weight: -15, detail: 'penalty = base × min(1, 30/dte) · ≤7d→base=−15 · 8–14d→−7 · else=0.',
-    definition: 'DTE-scaled earnings penalty. A 7-day-out earnings on a 365-DTE LEAP costs ≈ −1.2 ENV; on a 30-DTE position, the full −15.',
-    why: 'v2 treated earnings ≤ 7d as a hard gate (ENV = 0). For a 365-DTE LEAP, that was a category error: any IV pop reverses within a week and 358 days of thesis remain. v3 scales the penalty by remaining DTE so long-dated trades aren\'t fatally penalised by a near-term print.',
-    formula: 'scale   = min(1, 30 / dte)\npenalty = -15 × scale  if days_to_earn ≤ 7\n        = -7  × scale  if days_to_earn ∈ [8, 14]\n        = 0            otherwise',
+    factor: '200d Return', weight: 3.4, detail: 'Mild long-term momentum bonus.',
+    definition: '200-day median-anchored return.',
+    why: 'Residual momentum after the contrarian RSI/52W signals are factored in. Small but positive.',
+    formula: 'ret_200d = close / median(close[-205:-200]) − 1',
   },
-  { factor: '— STRIKE SCORE (×0.5) —', weight: null, detail: '', definition: '', why: '', formula: '' },
+
+  { factor: '— MACRO (cap 5%) —', weight: null, detail: 'Sector relative-strength tilt (when wired).', definition: '', why: '', formula: '' },
   {
-    factor: 'Delta', weight: 20, detail: '0.82–0.90=20 · 0.75–0.82→12–20 · 0.70–0.75→0–12 · 0.90–0.95→14–20 · 0.95–1.0→9–14 · <0.70=0.',
-    definition: 'Black-Scholes call delta. For DITM calls, delta is high (0.70–0.95+); the option moves nearly dollar-for-dollar with the stock.',
-    why: 'v3.2 shifts the sweet spot to 0.82–0.90 (from 0.80–0.85). Higher delta reduces gamma risk and makes the position more stock-like, improving the stock-replacement thesis. Below 0.70 = not deep enough in-the-money; decay above 0.90 is gentle because very high delta is acceptable.',
+    factor: 'Sector RS 6m', weight: -5.0, detail: 'Lagging sectors win (currently inert).',
+    definition: '6-month relative strength of the stock\u2019s GICS sector vs SPY.',
+    why: 'Lagging sectors mean-revert better than leaders over the DITM horizon. Currently logged as None (rank-neutral) — sector-RS feed pending.',
+    formula: 'sector_rs_6m = sector_etf.ret_126d − spy.ret_126d',
+  },
+
+  { factor: '— OPTION CHAIN (cap 25%) —', weight: null, detail: 'Trade-mechanics edge.', definition: '', why: '', formula: '' },
+  {
+    factor: 'Leverage', weight: 9.4, detail: 'More leverage (δ×spot/mid) wins.',
+    definition: 'delta × spot / mid. The headline DITM number — exposure per dollar deployed.',
+    why: 'Top option-side IC in the audit. Stock-replacement only works when leverage is meaningful (typically 2.0–4.0×).',
+    formula: 'leverage = delta × current_price / mid',
+  },
+  {
+    factor: 'Delta', weight: 8.0, detail: 'Deeper-in-the-money wins.',
+    definition: 'Black-Scholes call delta.',
+    why: 'High delta keeps the position stock-like and reduces gamma whipsaw. Independent residual value over Leverage.',
     formula: 'd1 = (ln(S/K) + (r + 0.5σ²)T) / (σ√T)\ndelta = N(d1)',
   },
   {
-    factor: 'Leverage  (v3.2)', weight: 25, detail: '2.5–4.0×=25 · 2.0–2.5×→17–25 · 1.5–2.0×→8–17 · 0–1.5×→0–8 · 4.0–5.0×→25–0 · ≥5.0×=0.',
-    definition: 'leverage = delta × current_price / mid. The headline DITM metric — the actual exposure-per-dollar-deployed that stock-replacement is about.',
-    why: 'v3.2 tightens the cap: flat top extended to 4× (was 3.5×), then a sharper linear drop to zero at 5× (was gradual decay to 8×). Leverage >5× almost always means a mispriced or extremely wide-spread option, not a genuinely advantaged setup — hard zero removes those from contention.',
-    formula: 'leverage = delta × current_price / mid\n0–1.5×    → 0 → 8 pts\n1.5–2.0×  → 8 → 17\n2.0–2.5×  → 17 → 25\n2.5–4.0×  → 25 (full credit)\n4.0–5.0×  → 25 → 0  (sharp decay)\n≥ 5.0×    → 0  (hard zero)',
-  },
-  {
-    factor: 'Extrinsic %', weight: 25, detail: '<2%=25 · 2–4%→19–25 · 4–6%→13–19 · 6–9%→5–13 · 9–12%→0–5 · >12%=0.',
-    definition: 'Extrinsic value (time value) as a percentage of strike price. extrinsic = mid − max(price − strike, 0).',
-    why: 'The entire premise of DITM: minimise the extrinsic you pay. Extrinsic is money that evaporates to theta. <2% of strike means almost all your premium is pure intrinsic — you are essentially buying stock on leverage with bounded downside. v3 drops the separate Theta% factor (audit #4: ~90% correlated with Extrinsic).',
-    formula: 'intrinsic     = max(price − strike, 0)\nextrinsic     = mid − intrinsic\nextrinsic_pct = extrinsic / strike × 100',
-  },
-  {
-    factor: 'Bid-Ask Spread', weight: 20, detail: '≤2%=20 · 2–4%→14–20 · 4–7%→7–14 · 7–12%→1–7 · >12%=0.',
-    definition: '(Ask − Bid) / Mid × 100. The transaction cost paid on entry — and again on exit.',
-    why: 'Wide spreads are especially costly for DITM calls because you pay them on large-notional positions. A 10% spread on a $80 DITM call costs $8 on entry alone ($16 round-trip per contract).',
-    formula: 'spread_pct = (ask − bid) / mid × 100\nwhere mid = (bid + ask) / 2',
-  },
-  {
-    factor: 'IV Percentile', weight: 10, detail: '≤25=10 · 25–50→7–10 · 50–75→3–7 · >75=0.',
-    definition: 'HV-based IV percentile: % of days in the past year when IV was lower than today. The single vol-cheapness factor in v3.',
-    why: 'Unlike CSP/CC (premium sellers), DITM buyers want low IV. v3 keeps IV Percentile as the only vol-cheapness factor — the v2 ENV HV Rank factor was dropped because it measured the same signal (audit #5).',
-    formula: 'iv_percentile = % of last 252d where HV < today HV\nScored inversely: ≤25th pct = full marks',
+    factor: 'Extrinsic %', weight: -7.6, detail: 'Less time value paid wins.',
+    definition: '(mid − intrinsic) / strike × 100.',
+    why: 'Extrinsic is the slice that bleeds to theta. The whole DITM premise is to minimise it.',
+    formula: 'intrinsic     = max(close − strike, 0)\nextrinsic     = mid − intrinsic\nextrinsic_pct = extrinsic / strike × 100',
   },
 ]
 
 const HARD_GATES = [
-  // v3 (ADR-0008) removed all v2 hard gates. Score-floor effects come from
-  // the 0.85× macro-hold multiplier and DTE-scaled earnings penalty instead.
-  { gate: 'Macro hold regime', effect: '× 0.85 final', reason: 'VIX ≥ 25 AND rising, OR SPY < SMA200. v3 demotes scores 15% during macro-hold instead of just displaying a banner. The directional, leveraged thesis is most fragile in exactly these regimes.' },
-  { gate: 'Earnings ≤ 7 days',  effect: 'penalty −15 × min(1, 30/dte)', reason: 'DTE-scaled. A 7-day-out earnings on a 365-DTE LEAP costs ≈ −1.2 ENV; on a 30-DTE position, the full −15. v2 used a hard gate (ENV = 0) regardless of remaining DTE — fixed in v3.' },
-  { gate: 'Earnings 8–14 days', effect: 'penalty −7 × min(1, 30/dte)',  reason: 'Same DTE-scaling as above; smaller base.' },
+  // v4 (ADR-0032) replaces v3 score modifiers with universe-relative ranking.
+  // The macro-hold multiplier and DTE-scaled earnings penalty are removed:
+  // sector RS handles regime drift, and earnings risk is selected at trade entry, not in the score.
+  { gate: 'Earnings within DTE', effect: 'badge only (display)', reason: 'Surfaced in the table for awareness; no longer scored. Pick around earnings at the trader level — DITM LEAPs ride through prints.' },
+  { gate: 'Min factors observed', effect: 'tier = E if < 8 of 13 observed', reason: 'A candidate must have at least 8 of the 13 factors populated to receive a non-bottom tier. Ensures sparse fundamentals can\u2019t score above-rank by missing the bad factors.' },
 ]
 
 const SCORE_TIERS = [
-  // v3: aligned with CSP/CC v3 tier scheme (75/65/55/45). v2 frontend used
-  // 80/65/50/35 in legend but 75/65/55/45 in table colors (audit #11). Now consistent.
-  { range: '≥ 75',  label: 'Strong',   color: '#4ade80', desc: 'Strong trend + leverage + cheap extrinsic',     action: 'Take it, normal size' },
-  { range: '65–74', label: 'Solid',    color: '#86efac', desc: 'Solid setup, understand the drag',              action: 'Take it, understand the weakness' },
-  { range: '55–64', label: 'Moderate', color: '#facc15', desc: 'Mechanically fine, thesis-dependent',           action: 'Only with strong conviction' },
-  { range: '45–54', label: 'Weak',     color: '#fb923c', desc: 'Multiple factor drags',                         action: 'Usually skip' },
-  { range: '< 45',  label: 'Avoid',    color: '#f87171', desc: 'Macro hold and/or scattered factor scores',     action: 'Skip' },
+  // v4: A/B/C/D/E percentile bands. Score is the candidate\u2019s percentile within the universe.
+  { range: '≥ 90',  label: 'A',  color: '#4ade80', desc: 'Top decile across val, capital, technical, and chain factors.',     action: 'Take it, normal size' },
+  { range: '70–89', label: 'B',  color: '#86efac', desc: 'Strong all-round; one or two pillars merely average.',                action: 'Take it, sized to conviction' },
+  { range: '50–69', label: 'C',  color: '#facc15', desc: 'Mechanically OK but a clear pillar drag.',                            action: 'Only with a thesis' },
+  { range: '30–49', label: 'D',  color: '#fb923c', desc: 'Multiple weak pillars or sparse fundamentals.',                       action: 'Usually skip' },
+  { range: '< 30',  label: 'E',  color: '#f87171', desc: 'Bottom of the universe and/or below the min-factors floor.',          action: 'Skip' },
 ]
 
 const DECISION_STEPS = [
-  { n: 1, q: 'Score ≥ 65?',                                                   a: 'Trade it. Steps 2–4 are confirmation, not a gate. The v3 "take it" threshold is 65 — same as CSP/CC.' },
-  { n: 2, q: 'Is trend confirmed? (P > SMA50 > SMA200)',                       a: 'Trend is no longer a hard gate in v3, but full alignment earns the 25 pts that anchor the ENV score. If alignment fails, your ENV will sit ~17 pts lower — read the breakdown.' },
-  { n: 3, q: 'What is the leverage and the 2 biggest factor drags?',           a: 'Leverage = delta × price / mid. Sweet spot 2.5–3.5×. The lowest-scoring factors define the specific risk being priced in.' },
-  { n: 4, q: 'Can I define the thesis: duration, target, and catalyst?',       a: 'If no, skip. DITM calls require a specific view — not just "bullish". Write down: entry, exit target, max loss date, catalyst window.' },
+  { n: 1, q: 'Tier A or B?',                                                  a: 'Trade it. The v4 tier captures the cross-sectional consensus across 13 factors — these are the universe-best setups.' },
+  { n: 2, q: 'Is the dominant pillar sane for the regime?',                  a: 'Look at env_detail (Val/Cap/Macro) vs strike_detail (Tech/Opt). If everything is riding on Option-chain edge with weak Valuation, you are betting on cheap optionality only.' },
+  { n: 3, q: 'What are the 2 biggest factor drags?',                          a: 'The Drags column shows the lowest-contribution factors after sign. Read them as: \u201cthis trade is paying for X and Y to be merely average.\u201d' },
+  { n: 4, q: 'Can I define the thesis: duration, target, and catalyst?',     a: 'If no, skip. DITM calls require a specific view \u2014 not just \u201cbullish\u201d. Write down: entry, exit target, max loss date, catalyst window.' },
 ]
 
 interface ExitNode { cond: string; action: string; tone?: 'close' | 'hold' | 'monitor' | 'assign' | 'roll' }
@@ -126,15 +141,15 @@ const EXIT_STRATEGY: ExitBranch[] = [
     children: [
       { cond: '−35% on option mid',    action: 'Hard stop — exit immediately',                       tone: 'roll' },
       { cond: 'Price breaks SMA200',   action: 'Exit — trend thesis is invalidated',                 tone: 'roll' },
-      { cond: 'Score drops below 45',  action: 'Re-evaluate; close if no recovery thesis',           tone: 'monitor' },
-      { cond: '120 DTE checkpoint',    action: 'Review: roll forward if score ≥ 55; close if not',   tone: 'monitor' },
+      { cond: 'Score drops below D (30)',  action: 'Re-evaluate; close if no recovery thesis',           tone: 'monitor' },
+      { cond: '120 DTE checkpoint',    action: 'Review: roll forward if tier still B or better; close if not',   tone: 'monitor' },
     ],
   },
   {
-    label: 'Macro hold regime — defensive posture',
+    label: 'Macro context — read the regime before sizing',
     children: [
-      { cond: 'VIX ≥ 25 and rising · or SPY < SMA200',  action: 'Scores already × 0.85 — don\'t add new exposure',           tone: 'monitor' },
-      { cond: 'Existing positions in macro hold',       action: 'Tighten stops 25% · consider partial profit-take',          tone: 'close' },
+      { cond: 'VIX ≥ 25 and rising · or SPY < SMA200',  action: 'v4 no longer multiplies the score — cut size yourself in chop',           tone: 'monitor' },
+      { cond: 'Sector RS pillar deeply negative',      action: 'Confirm thesis isn’t fighting a clear sector downtrend',                   tone: 'monitor' },
     ],
   },
   {
@@ -301,14 +316,14 @@ export function DitmInput({ onScan, onCustom, loading }: Props) {
               <span className="thumb-rule-label">Thumb rule</span>
               <span className="thumb-rule-text">
                 At 120 DTE: <em>is the trend still intact and extrinsic still cheap?</em>
-                &nbsp;Roll forward if score ≥ 50 and trend holds. Exit if thesis is broken.
+                &nbsp;Roll forward if tier is still B or better and thesis holds. Exit if thesis is broken.
               </span>
             </div>
           </div>
 
           {/* Hard gates */}
           <div className="score-legend-factors">
-            <div className="score-legend-header">Score modifiers — v3 replaces hard gates with scaled penalties</div>
+            <div className="score-legend-header">Score modifiers — v4 ranks the universe; very few hard rails remain</div>
             {HARD_GATES.map(g => (
               <div key={g.gate} className="score-factor-block">
                 <div className="score-factor-row">
@@ -322,7 +337,10 @@ export function DitmInput({ onScan, onCustom, loading }: Props) {
 
           {/* Score breakdown */}
           <div className="score-legend-factors">
-            <div className="score-legend-header">Score breakdown — Final = 0.5 × Env + 0.5 × Strike</div>
+            <div className="score-legend-header">Score breakdown — how each factor influences the final tier</div>
+            <div style={{ padding: '6px 8px', marginBottom: '6px', background: '#0f172a', borderRadius: '5px', fontSize: '11px', color: '#94a3b8', borderLeft: '3px solid #334155', lineHeight: 1.5 }}>
+              <strong style={{ color: '#cbd5e1' }}>How to read this:</strong> the percentage is the factor’s <strong>share of the final score</strong> (bigger = more influence). The arrow shows which direction wins: <strong>↑ higher input scores higher</strong> &nbsp;·&nbsp; <strong>↓ lower input scores higher</strong>. Neither direction is "good" or "bad" — both contribute equally to the score. Click any factor for the formula.
+            </div>
             {SCORE_LEGEND.map(f => (
               f.weight === null
                 ? <div key={f.factor} className="score-factor-section">{f.factor}</div>
@@ -338,14 +356,15 @@ export function DitmInput({ onScan, onCustom, loading }: Props) {
                       <span className="score-factor-name">{f.factor}</span>
                       <span
                         className="score-factor-weight"
-                        style={{ color: f.weight >= 20 ? '#4ade80' : f.weight >= 10 ? '#fbbf24' : '#94a3b8' }}
+                        style={{ color: '#cbd5e1' }}
+                        title={f.weight >= 0 ? 'Higher input scores higher' : 'Lower input scores higher'}
                       >
-                        +{f.weight} pts
+                        {Math.abs(f.weight).toFixed(1)}% {f.weight >= 0 ? '↑' : '↓'}
                       </span>
                       <div className="score-factor-bar-wrap">
                         <div className="score-factor-bar" style={{
-                          width: `${Math.min(f.weight / 30 * 100, 100)}%`,
-                          background: f.weight >= 20 ? '#4ade80' : f.weight >= 10 ? '#fbbf24' : '#94a3b8'
+                          width: `${Math.min(Math.abs(f.weight) / 15 * 100, 100)}%`,
+                          background: '#60a5fa'
                         }} />
                       </div>
                       <span className="score-factor-detail">{f.detail}</span>
@@ -360,7 +379,7 @@ export function DitmInput({ onScan, onCustom, loading }: Props) {
                   </div>
             ))}
             <div style={{ marginTop: '6px', padding: '5px 8px', background: '#0f172a', borderRadius: '5px', fontSize: '11px', color: '#64748b', borderLeft: '3px solid #334155' }}>
-              <strong style={{ color: '#94a3b8' }}>Tie-break:</strong> equal scores → closest to <strong>0.82 delta</strong> wins. If also equal → lower <strong>Extrinsic%</strong> wins.
+              <strong style={{ color: '#94a3b8' }}>Tie-break:</strong> within a tier, highest <strong>option-pillar percentile</strong> wins, then closest to <strong>0.85 delta</strong>.
             </div>
           </div>
         </div>
