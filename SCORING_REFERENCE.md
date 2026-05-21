@@ -1,4 +1,4 @@
-# Scoring Reference (CSP, CC, DITM) — v3.3
+# Scoring Reference (CSP, CC, DITM) — v3.4
 
 > Single source of truth for the screener scoring system. Every weight and threshold listed
 > here is mirrored in code by `ENV_WEIGHTS` / `STRIKE_WEIGHTS` in
@@ -23,8 +23,13 @@
 > at 5×. **v3.3** (May 2026) replaces the IV/HV Ratio factor (35 pts) in the CSP/CC ENV
 > model with IV Percentile (IVP, 35 pts): raw IV/HV was noisy in low-liquidity names and
 > double-counted HV already priced into the options chain. IVP measures where current IV
-> stands in its own trailing distribution — a cleaner seller's-edge signal. The v3.3
-> `SCORING_VERSION = "3.3.0"` constant gates all ENV scoring. Diagnostic-preserved fields (`em_buffer_pct`, `dist_pct`, `otm_pct` for CSP/CC;
+> stands in its own trailing distribution — a cleaner seller's-edge signal. **v3.4 — CSP
+> Method D** (May 2026, see [ADR-0011](docs/adr/0011-method-d-csp-scoring.md)) is a
+> CSP-only rebalance driven by a 7,085-trade backtest: SMA/SLP/RSI showed ρ(factor,
+> realised ROC) ≤ 0 and were dropped; IVP raised 35→60; the 52W Trend curve was *flipped*
+> (stocks far from highs gave better outcomes than stocks near highs); strike side
+> rebalanced Δ 25→40, BA 25→15, ROC 35→30. CC scoring is unchanged from v3.3. The
+> `SCORING_VERSION = "3.4.0"` constant gates all CSP env scoring. Diagnostic-preserved fields (`em_buffer_pct`, `dist_pct`, `otm_pct` for CSP/CC;
 > `theta_annualized_pct`, `capital_efficiency_pct`, `breakeven_pct`, `hv_rank` for DITM) are
 > still computed and returned in the response payload but contribute 0 to the score.
 >
@@ -46,19 +51,64 @@
 final_score = 0.4 × env_score + 0.6 × strike_score
 ```
 
-Tiers (mirror the in-app legend in `CspInput.tsx` / `CcInput.tsx`):
+**Blend validation (2026-05, n=12,751 Method D trades).** A grid sweep of
+α ∈ {0.0, 0.1, …, 1.0} where `final = α·env + (1−α)·strike` was scored against
+realised annualised ROC. The rank-correlation maximum sits at α=0.30
+(ρ=+0.479), and production α=0.40 (ρ=+0.475) is statistically
+indistinguishable — bootstrap 95% CI on the difference is [−0.016, +0.022],
+spanning zero. The entire α ∈ [0.20, 0.50] interval is on the same plateau.
+α=0.40 was retained because it sits inside the rank-correlation plateau **and**
+gives a stronger top-quartile mean ROC (+26.3%) than the rank-max α=0.30
+(+24.4%) — a better profile for the "rank top-N, pick from the head" workflow
+the screener is actually used for.
 
-| Score | Interpretation                              | Action                                       | Color  |
-|-------|---------------------------------------------|----------------------------------------------|--------|
-| ≥ 75  | All signals aligned, rare                   | Take it, normal size                          | green  |
-| 65–74  | Solid trade with minor weakness             | Take it, understand the weakness              | light green |
-| 55–64  | Mechanically fine, thesis-dependent         | Only if you have a directional view           | amber  |
-| 45–54  | Something structural is off                 | Usually skip                                  | orange |
-| < 45  | Multiple red flags                          | Skip                                          | red    |
+### CSP tiers — v3.4 Method D calibration (recalibrated 2026-05)
 
-The "take it" threshold is **65**: scores at or above 65 are tradeable on score alone
-(modulo the would-I-own-it check); 55–64 require a documented thesis; below 55 the
-structural drag outweighs the premium and the trade should be skipped.
+Recalibrated against an 18,016-trade backtest on the full 154-ticker universe
+(3y, 35 DTE, weekly step, ρ(score, realised ROC) = +0.49). Bands are placed
+at empirical cliff points in the decile distribution rather than evenly spaced.
+
+| Score   | Label      | What you're getting                                                | Action                                              | Pop. share | Mean ROC | Win rate | Assign% | Mean $ PnL |
+|---------|------------|--------------------------------------------------------------------|-----------------------------------------------------|-----------:|---------:|---------:|--------:|-----------:|
+| ≥ 87    | Excellent  | Top decile — best win rate, lowest assignment, biggest $ PnL       | Take it, size up if conviction matches thesis      |       10%  |  +29.8%  |  90.8%   |  14.4%  |   +$365    |
+| 79–86   | Strong     | Strong setup, mean ROC +17%                                        | Take it, normal size                                |       20%  |  +17.0%  |  86.2%   |  19.3%  |   +$200    |
+| 69–78   | Good       | First profitable band — clear lift over middle pack                | Take it, understand the weakest factor              |       20%  |   +8.5%  |  83.2%   |  21.0%  |    +$44    |
+| 51–68   | Marginal   | Mean ROC negative — high win rate masks tail assignment losses     | Only with a documented directional thesis          |       40%  |   −3.6%  |  78.2%   |  25.5%  |    −$94    |
+| < 51    | Skip       | Bottom decile — worst $ PnL, drag outweighs premium                | Skip                                                |       10%  |   −4.1%  |  76.6%   |  26.5%  |   −$141    |
+
+The "take it" threshold under v3.4 is **69**, not 65 — D5→D6 (score ≈ 69) is
+the empirical cliff where mean ROC flips from −4% to +4% and mean $ PnL
+crosses zero. Below 69 the high (~78%) win rate is misleading: a handful of
+deep assignments wipe out months of small credits. The 65 gate in production
+code remains a soft filter, but inside the 65–68 sub-band the edge does not
+materialise without an overriding thesis.
+
+D10 separation is the strongest signal: ≥ 87 captures only the top 10% but
+delivers nearly double the mean ROC of the next band down and an assignment
+rate that's 5 pts below it.
+
+### CC tiers — v3.3 (recalibrated 2026-05)
+
+Recalibrated against a 16,521-trade backtest on the full 154-ticker universe
+(3y, 35 DTE, weekly step). Bands are chosen at empirical cliff points in the
+decile distribution rather than evenly spaced.
+
+| Score    | Label      | What you're getting                                                  | Action                                  | % pop | mean ROC | retain% | mean opp cost | phi  |
+| -------- | ---------- | -------------------------------------------------------------------- | --------------------------------------- | ----- | -------- | ------- | ------------- | ---- |
+| ≥ 83     | Excellent  | Top decile — best retention, lowest opportunity cost                 | Take it, size up if thesis matches      |  10%  |  +25.7%  |  82.8%  |    11.1       | +15  |
+| 79–82    | Strong     | Phi crosses positive — upside preserved net of called-away cost      | Take it, normal size                    |  10%  |  +22.6%  |  77.6%  |    20.1       |  +3  |
+| 72–78    | Good       | Clear lift over the middle pack (mean ROC jumps from 15% → 22%)      | Take it, understand the weakest factor  |  30%  |  +22.6%  |  73.6%  |    26.4       |  −4  |
+| 56–71    | Marginal   | Noisy middle — score barely separates from random                    | Only with a directional thesis          |  35%  |  +13.7%  |  69.3%  |    32.1       | −18  |
+| < 56     | Skip       | Worst retention (57%), highest opp cost, deeply negative phi         | Skip                                    |  15%  |  +11.8%  |  56.9%  |    36.7       | −25  |
+
+The "take it" threshold under v3.3 is **72**, not 65 — D5→D6 is where mean
+ROC jumps from 15% → 23% and opp_cost falls from 30 → 26. Below 72 the score
+barely separates the deciles.
+
+ρ(score, realised ROC) = +0.077, ρ(score, phi) = +0.110 on the full universe.
+Method D was investigated for CC in May 2026 and **rejected** — it looked
+strong on the original 109-ticker panel (in-sample optimism) but underperformed
+v3.3 on the full 154-ticker universe and broke philosophy-fit monotonicity.
 
 Both `env_score` and `strike_score` cap at 100, so `final_score` ∈ [0, 100].
 
@@ -69,13 +119,28 @@ Both `env_score` and `strike_score` cap at 100, so `final_score` ∈ [0, 100].
 `compute_env_score(..., direction='csp'|'cc', iv_stale=False)` in
 [backend/services/scoring/env.py](backend/services/scoring/env.py).
 
+### CSP v3.4 Method D (ADR-0011)
+
+CSP path drops SMA / SMA-Slope / RSI (each had ρ ≤ 0 against realised ROC in the
+7,085-trade backtest) and re-allocates the freed weight onto IVP and 52W Trend.
+
+| Factor             | Weight | Notes                                          |
+|--------------------|-------:|------------------------------------------------|
+| IV Percentile (IVP)|  60    | v3.3 curve × 60/35                             |
+| Trend: 52W dist    |  20    | **flipped** — rewards distance FROM the high   |
+| Chain Median OI    |  20    | unchanged                                      |
+| Earnings in DTE    | −15    | penalty (unchanged)                             |
+| **Total**          | **100**|                                                |
+
+### CC v3.3 (unchanged)
+
 | Factor             | Weight | CSP / CC differs? |
 |--------------------|-------:|:-----------------:|
 | IV Percentile (IVP)|  35    | no                |
-| Trend: 52W dist    |  15    | **yes**           |
-| Trend: SMA align   |   5    | no (higher = more pts for both) |
-| Trend: SMA slope   |   5    | no                |
-| RSI(14)            |  20    | **yes**           |
+| Trend: 52W dist    |  15    | **yes** (CC tent, CSP flipped)                |
+| Trend: SMA align   |   5    | no (CC-only in v3.4)                          |
+| Trend: SMA slope   |   5    | no (CC-only in v3.4)                          |
+| RSI(14)            |  20    | **yes** (CC-only in v3.4)                     |
 | Chain Median OI    |  20    | no                |
 | Earnings in DTE    | −15    | no (penalty)      |
 | **Total**          | **100**| (Earnings is a deductible penalty) |
@@ -113,18 +178,19 @@ dist       = (Closeₜ − max(Close, 252d)) / max(Close, 252d) × 100
 pct_below  = abs(min(dist, 0))
 ```
 
-**CSP curve** (rewards strength near the 52W high — uptrend reduces put assignment risk):
+**CSP curve (v3.4 Method D — *flipped*: rewards distance FROM the high):**
 
 | pct_below     | Pts                          |
 |---------------|------------------------------|
-| ≤ 5%          | **15** (flat top)            |
-| 5–30%         | linear 15 → 0                |
-| > 30%         | 0                            |
+| ≤ 5%          | 0                            |
+| 5–30%         | linear 0 → 20                |
+| > 30%         | **20** (flat top)            |
 
-> v3 used a multi-segment decay (5→10, 10→20, 20→30). v3.1 uses a single linear
-> decay from 15 at ≤5% to 0 at 30% — simpler and equally monotone.
+> v3.3 CSP curve was the inverse (15 pts flat top near the high, decaying to 0 at
+> 30%). The flip was forced by a 7,085-trade backtest: ρ(Tr_old, realised ROC) = −0.29.
+> See [ADR-0011](docs/adr/0011-method-d-csp-scoring.md).
 
-**CC curve** (penalizes near-high — assignment risk; rewards 5–15% consolidation):
+**CC curve (v3.3 — unchanged):**
 
 | pct_below     | Pts                          |
 |---------------|------------------------------|
@@ -227,22 +293,27 @@ Source: yfinance calendarEvents.earnings
 
 ---
 
-## CSP Strike score (max 100)
+## CSP Strike score (max 100) — v3.4 Method D
 
 `compute_csp_strike_score(...)` in [backend/services/scoring/strike.py](backend/services/scoring/strike.py).
 
-| Factor               | Weight |
-|----------------------|-------:|
-| Δ (delta position)   |  25    |
-| Bid-Ask Spread %     |  25    |
-| OI / Volume (per strike) | 15 |
-| Annualized ROC       |  35    |
-| **Total**            | **100**|
+| Factor               | Weight | v3.4 change vs v3.3 |
+|----------------------|-------:|---------------------|
+| Δ (delta position)   |  40    | **↑40**             |
+| Bid-Ask Spread %     |  15    | **↓15**             |
+| OI / Volume (per strike) | 15 | unchanged           |
+| Annualized ROC       |  30    | **↓30**             |
+| **Total**            | **100**|                     |
 
-### Δ (delta position) — 25 pts (v3.1)
+Curves are identical in shape to the v3.3 helpers — each per-strike point value is
+rescaled by the new cap (e.g. Δ sweet spot 25 × 40/25 = 40 pts; BA ≤1% spread
+25 × 15/25 = 15 pts). Internally `_score_delta_symmetric_methodd`, `_score_bid_ask_methodd`,
+`_score_roc_methodd` wrap the v3.3 helpers with the scale factors.
 
-Smooth piecewise-linear bell around `ideal_delta = -0.225` (v3.1: raised from 20 pts,
-step-bands replaced with continuous interpolation).
+### Δ (delta position) — 40 pts (v3.4 Method D)
+
+Smooth piecewise-linear bell around `ideal_delta = -0.225`. Same band boundaries as
+v3.3, all values rescaled × 40/25.
 
 ```
 offset = abs(delta - (-0.225))
@@ -250,39 +321,31 @@ offset = abs(delta - (-0.225))
 
 | offset                    | Pts                  |
 |---------------------------|----------------------|
-| ≤ 0.025 (Δ in [−0.25, −0.20]) | 25 (flat top)   |
-| 0.025–0.075               | linear 25 → 16       |
-| 0.075–0.125               | linear 16 → 9        |
-| 0.125–0.175               | linear 9 → 0         |
+| ≤ 0.025                   | 40 (flat top)        |
+| 0.025–0.075               | linear 40 → 25.6     |
+| 0.075–0.125               | linear 25.6 → 14.4   |
+| 0.125–0.175               | linear 14.4 → 0      |
 | > 0.175                   | 0                    |
 
-> **v3.1 change:** v3 used step bands (20/13/7/0) creating 7-pt cliffs at offsets
-> 0.025, 0.075, and 0.125. v3.1 replaces with piecewise-linear interpolation through the
-> same boundaries plus adds a 0.125–0.175 band (Δ −0.05 range that maps to 0).
-> Max raised from 20 to 25 (rebalanced vs Bid-Ask lowered from 30 to 25).
-
-### Bid-Ask Spread % — 25 pts (v3.1)
+### Bid-Ask Spread % — 15 pts (v3.4 Method D)
 
 ```
 spread_pct = (ask − bid) / mid × 100   where mid = (bid + ask) / 2
 ```
 
-Lower spread = better execution. Wide spreads erode realized premium on entry and every roll.
+Same v3.3 curve rescaled × 15/25:
 
 | Bucket    | Pts            |
 |-----------|----------------|
-| ≤ 1%      | 25             |
-| 1–3%      | linear 25 → 17 |
-| 3–5%      | linear 17 → 9  |
-| 5–8%      | linear 9 → 2   |
+| ≤ 1%      | 15             |
+| 1–3%      | linear 15 → 10.2 |
+| 3–5%      | linear 10.2 → 5.4 |
+| 5–8%      | linear 5.4 → 1.2 |
 | > 8%      | 0              |
 
-> **v3.1 change:** lowered from 30 pts to 25 pts (rebalanced vs Delta raised to 25).
+### OI / Volume (per strike) — 15 pts (unchanged)
 
-### OI / Volume (per strike) — 15 pts
-
-Per-strike circuit-breaker. Uses volume during US market hours (9:30–16:00 ET weekday),
-otherwise falls back to openInterest.
+Per-strike circuit-breaker. Uses volume during US market hours, otherwise openInterest.
 
 | Bucket      | Pts            |
 |-------------|----------------|
@@ -292,31 +355,24 @@ otherwise falls back to openInterest.
 | 100–200     | linear 0 → 6   |
 | < 100       | 0              |
 
-Rescaled from 5 in v2.
-
-### Annualized ROC — 35 pts
+### Annualized ROC — 30 pts (v3.4 Method D)
 
 ```
 capital_per_share = strike − credit
 ROC               = (credit / capital_per_share) × (365 / DTE) × 100
 ```
 
-For CSP, capital at risk = strike − credit (cash secured minus premium received).
+For CSP, capital at risk = strike − credit (cash secured minus premium received). Same
+v3.3 curve rescaled × 30/35 (ceiling 12% unchanged):
 
 | ROC %       | Pts                  |
 |-------------|----------------------|
-| ≥ 12%       | 35 (ceiling v3.1)    |
-| 8–12%       | linear 24.5 → 35     |
-| 4–8%        | linear 14 → 24.5     |
-| 2–4%        | linear 3.5 → 14      |
-| 1–2%        | linear 0 → 3.5       |
+| ≥ 12%       | 30 (ceiling)         |
+| 8–12%       | linear 21 → 30       |
+| 4–8%        | linear 12 → 21       |
+| 2–4%        | linear 3 → 12        |
+| 1–2%        | linear 0 → 3         |
 | < 1%        | 0                    |
-
-> **v3.1 change:** ceiling lowered from 20% → 12%. Rationale: stable low-IV names
-> (KO, JNJ, DUK) generate 5–10% annualised ROC at the configured ideal delta — under the
-> old 20% ceiling they could never exceed 24.5 pts (70% utilisation). The new 12% ceiling
-> lets them reach full credit at realistic premium levels. The tier boundaries are scaled
-> proportionally.
 
 The API response exposes the raw value as `roc_annualized`.
 

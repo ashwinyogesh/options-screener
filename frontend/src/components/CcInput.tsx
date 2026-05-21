@@ -61,15 +61,15 @@ const SCORE_LEGEND = [
 ]
 
 const SCORE_TIERS = [
-  { range: '≥ 75', label: 'Take it',       color: '#4ade80', desc: 'All signals aligned, rare',                  action: 'Take it, normal size' },
-  { range: '65–74', label: 'Take it',       color: '#86efac', desc: 'Solid trade with minor weakness',           action: 'Take it, understand the weakness' },
-  { range: '55–64', label: 'Directional',   color: '#facc15', desc: 'Mechanically fine, thesis-dependent',       action: 'Only if you have a directional view' },
-  { range: '45–54', label: 'Usually skip',  color: '#fb923c', desc: 'Something structural is off',               action: 'Usually skip' },
-  { range: '< 45',  label: 'Skip',          color: '#f87171', desc: 'Multiple red flags',                        action: 'Skip' },
+  { range: '≥ 83', label: 'Excellent',     color: '#4ade80', desc: 'Top decile — best retention, lowest opportunity cost',  action: 'Take it, size up if thesis matches' },
+  { range: '79–82', label: 'Strong',        color: '#86efac', desc: 'Phi crosses positive — upside preserved net of called-away cost', action: 'Take it, normal size' },
+  { range: '72–78', label: 'Good',          color: '#bef264', desc: 'Clear lift over middle pack — solid trade',              action: 'Take it, understand the weakest factor' },
+  { range: '56–71', label: 'Marginal',      color: '#facc15', desc: 'Noisy middle — score barely separates from random',     action: 'Only with a directional thesis' },
+  { range: '< 56',  label: 'Skip',          color: '#f87171', desc: 'Worst retention (57%), highest opp cost, deeply negative phi', action: 'Skip' },
 ]
 
 const DECISION_STEPS = [
-  { n: 1, q: 'Score ≥ 65?',                                              a: 'Trade it. Steps 2–4 are confirmation, not a gate.' },
+  { n: 1, q: 'Score ≥ 72?',                                              a: 'Trade it. Below 72 the score barely separates from random. Steps 2–4 are confirmation, not a gate.' },
   { n: 2, q: 'Am I OK getting called away at this strike?',              a: 'If no, stop. A CC is a conditional sell — only sell the call at a price you’d actually take for the shares.' },
   { n: 3, q: 'What are the 2 biggest factor drags?',                     a: 'Lowest-scoring factors in Env and Strike define the “ticker question” — the specific risk this trade is paying you to accept.' },
   { n: 4, q: 'Can I articulate the thesis that overrides those drags?',  a: 'If no, skip. If yes, size normally and write the thesis down before entering.' },
