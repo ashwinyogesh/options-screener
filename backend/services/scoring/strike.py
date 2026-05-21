@@ -100,12 +100,10 @@ def _score_roc(roc: float) -> float:
 
 
 def _score_delta_symmetric(delta: float, ideal: float) -> float:
-    """Δ smooth bell — 25 pts (v3.1: raised from 20, step-cliffs replaced with
-    piecewise-linear interpolation through same band boundaries).
+    """Δ smooth bell — 25 pts (CC v3.1, retained verbatim).
 
     Sweet band ±0.025 around ideal = 25 pts flat top.
     Piecewise-linear decay: 25→16 (0.025−0.075) →09 (0.075−0.125) →0 (0.125−0.175).
-    Awards 0 outside ±0.175 (upstream filter enforces -0.35 to -0.10 for CSP).
     """
     if math.isnan(delta):
         return 0.0
@@ -119,6 +117,32 @@ def _score_delta_symmetric(delta: float, ideal: float) -> float:
     if offset <= 0.175:
         return 9.0 - (offset - 0.125) / 0.05 * 9.0     # 9 → 0
     return 0.0
+
+
+# ---------------------------------------------------------------------------
+# CSP v3.4 Method D helpers — ADR-0011
+# Same curve shapes as v3.3 helpers, rescaled to the Method D caps:
+#   Δ 25 → 40   ·   BA 25 → 15   ·   ROC 35 → 30   ·   LQ 15 (unchanged).
+# ---------------------------------------------------------------------------
+
+_DELTA_METHODD_SCALE: float = 40.0 / 25.0
+_BA_METHODD_SCALE: float = 15.0 / 25.0
+_ROC_METHODD_SCALE: float = 30.0 / 35.0
+
+
+def _score_delta_symmetric_methodd(delta: float, ideal: float) -> float:
+    """CSP v3.4 Method D — same bell shape, rescaled to 40-pt cap."""
+    return _score_delta_symmetric(delta, ideal) * _DELTA_METHODD_SCALE
+
+
+def _score_bid_ask_methodd(spread_pct: float | None) -> float:
+    """CSP v3.4 Method D — same BA curve, rescaled to 15-pt cap."""
+    return _score_bid_ask(spread_pct) * _BA_METHODD_SCALE
+
+
+def _score_roc_methodd(roc: float) -> float:
+    """CSP v3.4 Method D — same ROC curve, rescaled to 30-pt cap."""
+    return _score_roc(roc) * _ROC_METHODD_SCALE
 
 
 def _diag_em_buffer_pct(current_price: float, strike: float, iv_used: float, dte: int, *, side: str) -> float:
@@ -161,15 +185,16 @@ def compute_csp_strike_score(
     credit: float | None = None,
 ) -> tuple[float, str, dict]:
     """
-    CSP Strike Safety Score 0–100. Weights: Δ 20 + BA 30 + LQ 15 + ROC 35 = 100.
+    CSP Strike Safety Score 0–100 — v3.4 Method D (ADR-0011).
+    Weights: Δ 40 + BA 15 + LQ 15 + ROC 30 = 100.
     """
     _ = vol_support_1, vol_support_2, vol_support_3  # explicitly unused in v3
     bk: dict[str, float] = {}
 
-    p_delta = _score_delta_symmetric(delta, ideal=-0.225)
+    p_delta = _score_delta_symmetric_methodd(delta, ideal=-0.225)
     bk['Δ'] = p_delta
 
-    p_ba = _score_bid_ask(bid_ask_spread_pct)
+    p_ba = _score_bid_ask_methodd(bid_ask_spread_pct)
     bk['BA'] = p_ba
 
     p_lq, liquidity_count = _score_liquidity(market_open, volume, open_interest)
@@ -182,7 +207,7 @@ def compute_csp_strike_score(
         if capital_per_share > 0:
             roc = (credit / capital_per_share) * (365.0 / dte) * 100.0
             _roc_annualized = round(roc, 2)
-            p_roc = _score_roc(roc)
+            p_roc = _score_roc_methodd(roc)
     bk['ROC'] = p_roc
 
     score = p_delta + p_ba + p_lq + p_roc

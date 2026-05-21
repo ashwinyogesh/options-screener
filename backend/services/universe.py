@@ -60,6 +60,22 @@ _NON_AI_CORE: list[str] = [
     "QQQ", "SOXX", "SMH",
 ]
 
+# Diversified core: 45 large-cap names across 8 non-tech sectors. Added
+# 2026-05 per ADR-0011 universe-expansion validation (n=158, Spearman
+# rho of CSP final_score vs realised ROC improves from +0.475 to +0.486 —
+# Method D generalises off the momentum tickers). All names: liquid options
+# chains, regular earnings cadence, multiple market-makers.
+_DIVERSIFIED_CORE: dict[str, list[str]] = {
+    "financials":   ["JPM", "BAC", "GS", "MS", "V", "MA", "SCHW", "BLK"],
+    "staples":      ["KO", "PG", "PEP", "COST", "WMT", "MO", "MDLZ"],
+    "healthcare":   ["JNJ", "UNH", "ABT", "MRK", "PFE", "ABBV", "TMO"],
+    "industrials":  ["CAT", "DE", "HON", "RTX", "LMT", "UNP"],
+    "energy":       ["XOM", "CVX", "COP", "EOG", "SLB"],
+    "materials":    ["LIN", "FCX", "NEM", "NUE"],
+    "real_estate": ["PLD", "AMT", "SPG", "O"],
+    "consumer_disc":["HD", "LOW", "NKE", "MCD"],
+}
+
 # Stable CSP universe: large-cap names with liquid option chains, tight put spreads,
 # RSI that spends meaningful time in the 42–62 sweet spot, and IV/HV closer to 1.1–1.3.
 # Ideal for traders with limited capital (≤ $20K per contract) who need tradeable CSP signals.
@@ -80,7 +96,7 @@ _STABLE_CSP: list[str] = [
 
 
 def _build_universe() -> list[str]:
-    """Flatten AI buckets + core, preserving order, deduped."""
+    """Flatten AI buckets + core + diversified, preserving order, deduped."""
     seen: set[str] = set()
     out: list[str] = []
     for bucket in ("energy", "chips", "infrastructure", "models", "applications"):
@@ -92,6 +108,12 @@ def _build_universe() -> list[str]:
         if sym not in seen:
             seen.add(sym)
             out.append(sym)
+    for bucket in ("financials", "staples", "healthcare", "industrials",
+                   "energy", "materials", "real_estate", "consumer_disc"):
+        for sym in _DIVERSIFIED_CORE[bucket]:
+            if sym not in seen:
+                seen.add(sym)
+                out.append(sym)
     return out
 
 
@@ -171,6 +193,9 @@ UNIVERSES: dict[str, list[str]] = {
     "ai_models": list(AI_BUILDOUT["models"]),
     "ai_applications": list(AI_BUILDOUT["applications"]),
     "stable_csp": _STABLE_CSP,
+    "diversified": [s for bucket in ("financials", "staples", "healthcare", "industrials",
+                                       "energy", "materials", "real_estate", "consumer_disc")
+                       for s in _DIVERSIFIED_CORE[bucket]],
     "swing_eligible": SWING_UNIVERSE,
 }
 

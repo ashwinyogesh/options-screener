@@ -19,13 +19,19 @@ from __future__ import annotations
 # v3.2 = DITM de-correlation (trend R², 52W tent, return compress,
 #         delta 0.82-0.90, leverage hard cap 5×)
 # v3.3 = IV/HV Ratio → IV Percentile (regime-agnostic vol signal)
-SCORING_VERSION: str = "3.3.0"
+# v3.4 = CSP Method D (ADR-0011). CSP env drops SMA/SLP/RSI (each had ρ<0
+#        or ~0 against realised ROC); IV-percentile weight raised 35→60;
+#        the CSP 52W-distance factor is *flipped* (rewards distance FROM
+#        the 52W high, not proximity to it) and weight raised 15→20.
+#        CSP strike rebalanced: Δ 25→40, BA 25→15, ROC 35→30, LQ 15
+#        (unchanged). CC scoring is unchanged from v3.3.
+SCORING_VERSION: str = "3.4.0"
 
-# Environment-score factor weights (CSP/CC). Sum = 100.
-# Mirror of the per-factor caps inside `compute_env_score` in `env.py`.
+# ----- CC Environment weights (unchanged from v3.3) ------------------------
+# Sum = 100. Mirror of the per-factor caps inside `compute_env_score(..., direction='cc')`.
 ENV_WEIGHTS: dict[str, float] = {
-    'IVP': 35.0,   # IV Percentile (% of last-252d where HV < today) — v3.3 replaces IV/HV
-    'Tr':  15.0,   # Trend: 52W high distance (direction-aware)
+    'IVP': 35.0,   # IV Percentile (% of last-252d where HV < today)
+    'Tr':  15.0,   # Trend: 52W high distance (direction-aware tent for CC)
     'SMA':  5.0,   # Trend: SMA alignment (P>SMA50>SMA200 categorical)
     'SLP':  5.0,   # Trend: SMA50 10-day slope (momentum confirmation)
     'RSI': 20.0,   # RSI(14) (direction-aware)
@@ -33,10 +39,23 @@ ENV_WEIGHTS: dict[str, float] = {
 }
 ENV_MAX: float = sum(ENV_WEIGHTS.values())  # 100.0
 
+# ----- CSP Environment weights (v3.4 Method D — ADR-0011) ------------------
+# Sum = 100. Mirror of the per-factor caps inside `compute_env_score(..., direction='csp')`.
+# Removed factors (SMA, SLP, RSI) had ρ(factor, realised ROC) ≤ 0 across a
+# 7,085-trade 3-year backtest — they were degrading the rank. The CSP Tr
+# factor is flipped: stocks near their 52W high had WORSE realised ROC and
+# larger loss-given-assignment than stocks far below.
+CSP_ENV_WEIGHTS: dict[str, float] = {
+    'IVP': 60.0,   # IV Percentile (regime-agnostic vol signal)
+    'Tr':  20.0,   # 52W high *distance* — flipped: far-from-high = more credit
+    'OI':  20.0,   # Chain Median OI (circuit breaker)
+}
+CSP_ENV_MAX: float = sum(CSP_ENV_WEIGHTS.values())  # 100.0
+
 # Earnings-within-DTE penalty applied on top of the env score.
 EARNINGS_PENALTY: float = -15.0
 
-# Strike-score factor weights (CSP/CC). Sum = 100.
+# ----- CC Strike weights (unchanged from v3.3) -----------------------------
 STRIKE_WEIGHTS: dict[str, float] = {
     'Δ':   25.0,   # Delta bell-curve (smooth piecewise-linear)
     'BA':  25.0,   # Bid-Ask spread
@@ -44,6 +63,19 @@ STRIKE_WEIGHTS: dict[str, float] = {
     'ROC': 35.0,   # Annualized return on capital
 }
 STRIKE_MAX: float = sum(STRIKE_WEIGHTS.values())  # 100.0
+
+# ----- CSP Strike weights (v3.4 Method D) ----------------------------------
+# Δ raised 25→40 (best capital-safety lever — close to ideal delta = lower
+# assignment); ROC lowered 35→30 (premium chase was rewarding into-the-money
+# overrides); BA lowered 25→15 (effect on realised ROC was marginal); LQ
+# unchanged. Sum = 100.
+CSP_STRIKE_WEIGHTS: dict[str, float] = {
+    'Δ':   40.0,
+    'BA':  15.0,
+    'LQ':  15.0,
+    'ROC': 30.0,
+}
+CSP_STRIKE_MAX: float = sum(CSP_STRIKE_WEIGHTS.values())  # 100.0
 
 # ---------------------------------------------------------------------------
 # DITM factor weights (v3.2 lean model — ADR-0008)

@@ -70,18 +70,18 @@ def _cc_neutral_kwargs() -> dict:
 
 # === CSP =====================================================================
 
-# --- Delta bell-curve (25 pts smooth) — v3.1 ----------------------------------
+# --- Delta bell-curve (40 pts smooth) — v3.4 Method D ------------------------
 
 @pytest.mark.parametrize(
     "delta, expected_pts",
     [
-        (-0.22, 25.0),   # sweet spot (offset ≤0.025)
-        (-0.20, 25.0),   # exactly at flat-top boundary
-        (-0.25, 25.0),   # exactly at flat-top boundary
-        (-0.18, 21.4),   # shoulder (offset 0.045 in 0.025–0.075 band)
-        (-0.28, 19.6),   # shoulder (offset 0.055 in 0.025–0.075 band)
-        (-0.12, 11.8),   # outer (offset 0.105 in 0.075–0.125 band)
-        (-0.10, 9.0),    # outer edge (offset 0.125, lerp endpoint = 9.0)
+        (-0.22, 40.0),   # sweet spot (offset ≤0.025) — 25 × 40/25
+        (-0.20, 40.0),   # exactly at flat-top boundary
+        (-0.25, 40.0),   # exactly at flat-top boundary
+        (-0.18, 34.24),  # shoulder — 21.4 × 40/25
+        (-0.28, 31.36),  # shoulder — 19.6 × 40/25
+        (-0.12, 18.88),  # outer — 11.8 × 40/25
+        (-0.10, 14.4),   # outer edge — 9.0 × 40/25
         (-0.05, 0.0),    # too close to ATM (offset >0.175)
         (0.10, 0.0),     # wrong sign
     ],
@@ -124,16 +124,16 @@ def test_csp_em_buffer_diagnostic_at_half_em_boundary():
     assert raw["em_buffer_pct"] == pytest.approx(0.0, abs=2.0)
 
 
-# --- Bid-Ask spread (25 pts) — v3.1 -----------------------------------------
+# --- Bid-Ask spread (15 pts) — v3.4 Method D --------------------------------
 
 @pytest.mark.parametrize(
     "spread, expected_min",
     [
-        (0.5, 25.0),
-        (1.0, 25.0),
-        (3.0, 17.0),
-        (5.0, 9.0),
-        (8.0, 2.0),
+        (0.5, 15.0),
+        (1.0, 15.0),
+        (3.0, 10.2),   # 17 × 15/25
+        (5.0, 5.4),    # 9 × 15/25
+        (8.0, 1.2),    # 2 × 15/25
         (12.0, 0.0),
     ],
 )
@@ -166,16 +166,16 @@ def test_csp_liquidity_uses_volume_when_market_open():
     assert score == pytest.approx(15.0, abs=0.1)
 
 
-# --- ROC factor (35 pts, ceiling 12%) — v3.1 ---------------------------------
+# --- ROC factor (30 pts, ceiling 12%) — v3.4 Method D -----------------------
 
 def test_csp_roc_factor_strong_premium():
     kw = _csp_neutral_kwargs()
     kw["strike"] = 100.0
     kw["dte"] = 30
-    kw["credit"] = 3.0  # capital = 97; roc = 3/97 * 365/30 * 100 ≈ 37.6 → cap at 12% → 35 pts
+    kw["credit"] = 3.0  # capital = 97; roc ≈ 37.6 → cap at 12% → 30 pts (Method D)
     score, _, raw = compute_csp_strike_score(**kw)
     assert raw["roc_annualized"] >= 12.0
-    assert score >= 35.0
+    assert score >= 30.0
 
 
 # --- Final-blend helpers ---------------------------------------------------
@@ -213,13 +213,13 @@ def test_cc_delta_factor_at_elbows(delta: float, expected_pts: float):
 # --- CC vs CSP delta divergence --------------------------------------------
 
 def test_cc_and_csp_delta_factor_mirror_signs():
-    """Both screeners should award full Δ credit at their respective sweet
-    spots: CSP at -0.22, CC at +0.22. Each should give zero on the opposite
-    sign. v3.1: max = 25 pts."""
+    """Both screeners award full Δ credit at their respective sweet spots:
+    CSP at -0.22 (40 pts under v3.4 Method D), CC at +0.22 (25 pts under v3.3).
+    Each gives zero on the opposite sign."""
     csp_kw = _csp_neutral_kwargs()
     csp_kw["delta"] = -0.22
     csp_score, _, _ = compute_csp_strike_score(**csp_kw)
-    assert csp_score == pytest.approx(25.0, abs=0.1)
+    assert csp_score == pytest.approx(40.0, abs=0.1)
 
     csp_kw["delta"] = 0.22
     csp_wrong_sign, _, _ = compute_csp_strike_score(**csp_kw)

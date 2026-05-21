@@ -1,17 +1,20 @@
 """
-Environment scorer — v3.1 calibration (see ADR-0007 + ADR-0009).
+Environment scorer — direction-aware (CSP v3.4 Method D / CC v3.3).
 
-`compute_env_score` is direction-aware via the `direction` arg ('csp' | 'cc');
-it shapes the Trend (52W), SMA, and RSI curves accordingly.
+`compute_env_score` dispatches to one of two scoring profiles based on the
+`direction` arg:
 
-v3 reduced ENV from 7 factors to 4. v3.1 splits the 25-pt Trend factor into
-three independent signals (total still 25 pts, total ENV still 100):
-  Tr:  15 pts  52W high distance  — momentum proxy, direction-aware
-  SMA:  5 pts  SMA alignment categorical (P>SMA50>SMA200)
-  SLP:  5 pts  SMA50 10-day slope  — momentum confirmation
+  - direction='csp' → v3.4 Method D (ADR-0011):
+        IVP 60 + Tr_flipped 20 + OI 20 = 100
+        (SMA/SLP/RSI dropped; Tr rewards distance FROM 52W high)
 
-The legacy parameters `iv_rank`, `price_above_sma50`, `sma50_above_sma200`,
-and `dte` are kept in the signature for back-compat but ignored.
+  - direction='cc'  → v3.3 (ADR-0007 / ADR-0009):
+        IVP 35 + Tr 15 + SMA 5 + SLP 5 + RSI 20 + OI 20 = 100
+        (Tr is a tent: 5–15% below high is the sweet spot)
+
+The legacy parameters `iv_rank`, `iv_hv_ratio`, `price_above_sma50`,
+`sma50_above_sma200`, `dte`, and `iv_stale` are accepted in the signature
+for back-compat but no longer affect the score.
 
 DITM environment scoring lives in `services.scoring.ditm`.
 """
@@ -34,80 +37,159 @@ def compute_env_score(
     rsi: float,
     chain_median_oi: float,
     earnings_within_dte: bool,
-    direction: str = 'csp',            # 'csp' or 'cc' — affects Trend and RSI curves
+    direction: str = 'csp',            # 'csp' (v3.4 Method D) or 'cc' (v3.3)
     dte: int | None = None,            # IGNORED (DTE Sweet Spot dropped) — kept for back-compat
-    iv_stale: bool = False,            # IGNORED in scoring (v3.3) — percentile is HV-derived
-    sma_ratio: float = 1.0,            # v3.1: SMA50/SMA200 ratio (1.0 = neutral default)
-    sma50_slope_pct: float = 0.0,      # v3.1: SMA50 10-day % change (0.0 = flat default)
-    iv_percentile: float | None = None,  # v3.3: % of last-252d where HV < today (0–100)
+    iv_stale: bool = False,            # IGNORED in scoring (v3.3+) — percentile is HV-derived
+    sma_ratio: float = 1.0,            # used by CC only (v3.3); ignored by CSP (v3.4)
+    sma50_slope_pct: float = 0.0,      # used by CC only (v3.3); ignored by CSP (v3.4)
+    iv_percentile: float | None = None,
 ) -> tuple[float, str]:
     """
-    Environment Score 0–100 (+earnings penalty up to −15).
-    Direction-aware: CSP rewards strength near 52W high; CC rewards
-    consolidation 5–15% below the high.
-
-    Weights (v3.3): IVP 35 + Tr 15 + SMA 5 + SLP 5 + RSI 20 + OI 20 = 100
-    Penalty: Earnings within DTE = −15
-
-    v3.3 change: IV/HV Ratio (35 pts) replaced by IV Percentile (35 pts).
-    IV percentile = % of last-252-trading-day window where 30d HV < today's 30d HV.
-    Curve: <30th=0, 30–50th→0→10, 50–75th→10→25, 75–90th→25→35, ≥90th=35.
-    This makes the factor regime-agnostic: a stable stock in its own elevated-IV
-    period scores well regardless of absolute IV/HV level.
-
-    Back-compat: `iv_rank`, `iv_hv_ratio`, `price_above_sma50`, `sma50_above_sma200`,
-    `dte`, `iv_stale` are accepted but unused in scoring.
+    Environment Score 0–100 (+earnings penalty up to −15). Dispatches by
+    `direction` to either the CSP Method-D scorer (v3.4) or the CC scorer (v3.3).
     """
     _ = iv_rank, iv_hv_ratio, price_above_sma50, sma50_above_sma200, dte, iv_stale  # explicitly unused
-    direction = direction.lower()
+    if direction.lower() == 'cc':
+        return _compute_env_score_cc_v33(
+            dist_from_52w_high_pct=dist_from_52w_high_pct,
+            rsi=rsi,
+            chain_median_oi=chain_median_oi,
+            earnings_within_dte=earnings_within_dte,
+            sma_ratio=sma_ratio,
+            sma50_slope_pct=sma50_slope_pct,
+            iv_percentile=iv_percentile,
+        )
+    return _compute_env_score_csp_v34(
+        dist_from_52w_high_pct=dist_from_52w_high_pct,
+        chain_median_oi=chain_median_oi,
+        earnings_within_dte=earnings_within_dte,
+        iv_percentile=iv_percentile,
+    )
+
+
+# ---------------------------------------------------------------------------
+# CSP v3.4 Method D scorer — ADR-0011
+# Weights: IVP 60 + Tr_flipped 20 + OI 20 = 100   (SMA/SLP/RSI dropped)
+# ---------------------------------------------------------------------------
+
+
+def _compute_env_score_csp_v34(
+    *,
+    dist_from_52w_high_pct: float,
+    chain_median_oi: float,
+    earnings_within_dte: bool,
+    iv_percentile: float | None,
+) -> tuple[float, str]:
+    """
+    CSP env score under Method D.
+
+    - IVP (60 pts): same shape as v3.3, rescaled ×60/35.
+      <30th=0 · 30–50th→0→17.1 · 50–75th→17.1→42.9 · 75–90th→42.9→60 · ≥90th=60.
+    - Tr_flipped (20 pts): rewards distance FROM 52W high (the v3.3 CSP
+      direction had ρ(Tr, realised ROC) = −0.29 in backtest — empirically
+      wrong-signed).
+      pct_below ≤ 5%: 0   ·   5–30%: linear 0 → 20   ·   >30%: clamp 20.
+    - OI (20 pts): unchanged from v3.3.
+    - Earnings: −15 penalty if within DTE.
+    """
     score = 0.0
     bk: dict[str, float] = {}
 
-    # --- IV Percentile (35 pts) — v3.3 replacement for IV/HV Ratio ---
-    # iv_percentile = % of last-252-day window where 30d HV < today's 30d HV.
-    # Regime-agnostic: rewards options elevated *relative to this stock's own history*,
-    # not relative to a market-wide IV/HV ratio that favours high-beta names.
-    # Curve: <30th=0, 30-50th→0→10, 50-75th→10→25, 75-90th→25→35, ≥90th=35.
+    # IVP — 60 pts (same curve as v3.3, rescaled).
     p = 0.0
     if iv_percentile is not None and not math.isnan(iv_percentile):
         pct = iv_percentile
         if pct >= 90:
             p = 35.0
         elif pct >= 75:
-            p = 25.0 + (pct - 75.0) / 15.0 * 10.0   # 25 → 35
+            p = 25.0 + (pct - 75.0) / 15.0 * 10.0
         elif pct >= 50:
-            p = 10.0 + (pct - 50.0) / 25.0 * 15.0   # 10 → 25
+            p = 10.0 + (pct - 50.0) / 25.0 * 15.0
         elif pct >= 30:
-            p = (pct - 30.0) / 20.0 * 10.0           # 0 → 10
-    score += p; bk['IVP'] = p
+            p = (pct - 30.0) / 20.0 * 10.0
+    p = p * (60.0 / 35.0)
+    score += p
+    bk['IVP'] = p
 
-    # --- Trend: 52W High Distance (15 pts) — direction-aware, smooth curves ---
-    # v3.1: scaled from 25 to 15 pts (10 pts moved to SMA+Slope sub-factors).
-    # Smooth: flat top then single linear decay (CSP) / smooth tent (CC).
-    # No slope discontinuities: 9.9% and 10.1% below high differ by <0.15 pts.
+    # Tr_flipped — 20 pts. Mirror of v3.3 CSP curve.
     p = 0.0
     if not math.isnan(dist_from_52w_high_pct):
         pct_below = abs(min(dist_from_52w_high_pct, 0.0))
-        if direction == 'cc':
-            # CC: sweet spot 5–15% consolidation; smooth tent both sides.
-            if pct_below <= 5:
-                p = 0.0
-            elif pct_below <= 15:
-                p = (pct_below - 5.0) / 10.0 * 15.0          # 0 → 15
-            elif pct_below <= 35:
-                p = max(0.0, 15.0 * (1.0 - (pct_below - 15.0) / 20.0))  # 15 → 0
+        if pct_below <= 5:
+            p = 0.0
+        elif pct_below <= 30:
+            p = (pct_below - 5.0) / 25.0 * 20.0   # 0 → 20
         else:
-            # CSP: flat top ≤5%, single linear decay to 0 at 30%.
-            if pct_below <= 5:
-                p = 15.0
-            else:
-                p = max(0.0, 15.0 * (1.0 - (pct_below - 5.0) / 25.0))
+            p = 20.0
+    score += p
+    bk['Tr'] = p
+
+    # OI — 20 pts (unchanged).
+    p = 0.0
+    if not math.isnan(chain_median_oi) and chain_median_oi > 0:
+        p = min(math.log10(chain_median_oi) / math.log10(5000), 1.0) * 20.0
+    score += p
+    bk['OI'] = p
+
+    # Earnings penalty.
+    earn_p = 0.0
+    if earnings_within_dte:
+        earn_p = EARNINGS_PENALTY
+        score += earn_p
+
+    detail = ' '.join(f"{k}:{round(v)}" for k, v in bk.items())
+    if earn_p != 0:
+        detail += f' Ear:{round(earn_p)}'
+    return round(score, 1), detail
+
+
+# ---------------------------------------------------------------------------
+# CC v3.3 scorer — kept verbatim (only the CSP path changed for v3.4)
+# Weights: IVP 35 + Tr 15 + SMA 5 + SLP 5 + RSI 20 + OI 20 = 100
+# ---------------------------------------------------------------------------
+
+
+def _compute_env_score_cc_v33(
+    *,
+    dist_from_52w_high_pct: float,
+    rsi: float,
+    chain_median_oi: float,
+    earnings_within_dte: bool,
+    sma_ratio: float,
+    sma50_slope_pct: float,
+    iv_percentile: float | None,
+) -> tuple[float, str]:
+    """CC env score under v3.3 — unchanged."""
+    score = 0.0
+    bk: dict[str, float] = {}
+
+    # --- IV Percentile (35 pts) ---
+    p = 0.0
+    if iv_percentile is not None and not math.isnan(iv_percentile):
+        pct = iv_percentile
+        if pct >= 90:
+            p = 35.0
+        elif pct >= 75:
+            p = 25.0 + (pct - 75.0) / 15.0 * 10.0
+        elif pct >= 50:
+            p = 10.0 + (pct - 50.0) / 25.0 * 15.0
+        elif pct >= 30:
+            p = (pct - 30.0) / 20.0 * 10.0
+    score += p; bk['IVP'] = p
+
+    # --- Trend: 52W (15 pts) — CC tent (5–15% sweet spot) ---
+    p = 0.0
+    if not math.isnan(dist_from_52w_high_pct):
+        pct_below = abs(min(dist_from_52w_high_pct, 0.0))
+        if pct_below <= 5:
+            p = 0.0
+        elif pct_below <= 15:
+            p = (pct_below - 5.0) / 10.0 * 15.0          # 0 → 15
+        elif pct_below <= 35:
+            p = max(0.0, 15.0 * (1.0 - (pct_below - 15.0) / 20.0))  # 15 → 0
     score += p; bk['Tr'] = p
 
-    # --- Trend: SMA Alignment (5 pts) — v3.1 restored signal ---
-    # Categorical: P>SMA50>SMA200 is structurally different from 52W proximity.
-    # Back-compat booleans are still ignored; sma_ratio encodes the same info
-    # continuously: >1.02 = P>SMA50>SMA200 likely; 1.0–1.02 = borderline; etc.
+    # --- SMA Alignment (5 pts) ---
     p = 0.0
     if not math.isnan(sma_ratio):
         if sma_ratio > 1.02:
@@ -118,51 +200,36 @@ def compute_env_score(
             p = 1.5
     score += p; bk['SMA'] = p
 
-    # --- Trend: SMA50 Slope (5 pts) — v3.1 momentum confirmation ---
-    # 10-day % change in SMA50. Rewards accelerating uptrend; zeroes on flat/declining.
+    # --- SMA50 Slope (5 pts) ---
     p = 0.0
     if not math.isnan(sma50_slope_pct):
         slp = sma50_slope_pct
         if slp >= 0.5:
             p = 5.0
         elif slp >= 0.2:
-            p = 3.0 + (slp - 0.2) / 0.3 * 2.0   # 3.0 → 5.0
+            p = 3.0 + (slp - 0.2) / 0.3 * 2.0
         elif slp >= 0.0:
-            p = slp / 0.2 * 3.0                   # 0 → 3.0
+            p = slp / 0.2 * 3.0
     score += p; bk['SLP'] = p
 
-    # --- RSI(14) (20 pts) — direction-aware, cliff-fixed (#2, #8) ---
+    # --- RSI (20 pts) — CC sweet spot 38–58, ceiling 75 ---
     p = 0.0
     if not math.isnan(rsi):
-        if direction == 'cc':
-            # CC sweet spot 38–58; smooth ramps both sides.
-            # Ceiling extended from 70 to 75 (fix #8) so AAPL/MSFT in normal trends
-            # (RSI 62–68) earn meaningful pts.
-            if 38 <= rsi <= 58:
-                p = 20.0
-            elif 30 <= rsi < 38:
-                p = (rsi - 30.0) / 8.0 * 20.0      # 0 → 20 (continuous)
-            elif 58 < rsi <= 75:
-                p = (75.0 - rsi) / 17.0 * 20.0     # 20 → 0
-        else:
-            # CSP sweet spot 42–62; smooth ramps both sides.
-            # Cliff fix #2: removed the 30–35 floor of 2 pts that created a
-            # 4-pt jump at RSI=35. Now: <35 = 0, 35–42 ramps continuously.
-            if 42 <= rsi <= 62:
-                p = 20.0
-            elif 35 <= rsi < 42:
-                p = (rsi - 35.0) / 7.0 * 20.0      # 0 → 20 (continuous)
-            elif 62 < rsi <= 75:
-                p = (75.0 - rsi) / 13.0 * 20.0     # 20 → 0
+        if 38 <= rsi <= 58:
+            p = 20.0
+        elif 30 <= rsi < 38:
+            p = (rsi - 30.0) / 8.0 * 20.0
+        elif 58 < rsi <= 75:
+            p = (75.0 - rsi) / 17.0 * 20.0
     score += p; bk['RSI'] = p
 
-    # --- Chain Median OI (20 pts) — circuit breaker, scaled from 8 ---
+    # --- Chain Median OI (20 pts) ---
     p = 0.0
     if not math.isnan(chain_median_oi) and chain_median_oi > 0:
         p = min(math.log10(chain_median_oi) / math.log10(5000), 1.0) * 20.0
     score += p; bk['OI'] = p
 
-    # --- Earnings penalty (applied on top) ---
+    # --- Earnings penalty ---
     earn_p = 0.0
     if earnings_within_dte:
         earn_p = EARNINGS_PENALTY

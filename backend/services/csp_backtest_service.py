@@ -35,7 +35,7 @@ import yfinance as yf
 
 from services.greeks_service import black_scholes_put_delta
 from services.scoring.env import compute_env_score
-from services.scoring.strike import _score_delta_symmetric, _score_roc
+from services.scoring.strike import _score_delta_symmetric_methodd, _score_roc_methodd
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ DEFAULT_RF = 0.045
 DELTA_GATE = (-0.35, -0.10)        # production filter (csp_service.py)
 ITM_TOL = 1.02                     # production strike_filter (2% ITM tolerance)
 STRIKE_GRID_FRACTIONS = [0.85, 0.875, 0.90, 0.925, 0.95, 0.975]
-STRIKE_QUANT_MAX = 25.0 + 35.0     # Δ(25) + ROC(35) — full chain weights = 100
+STRIKE_QUANT_MAX = 40.0 + 30.0     # v3.4 Method D: Δ(40) + ROC(30); BA+LQ absent in backtest
 
 SCORE_BUCKETS: list[tuple[float, float, str]] = [
     (0.0, 50.0, "0-50"),
@@ -335,12 +335,12 @@ def _best_csp_trade(
         if premium <= 0:
             continue
 
-        p_delta = _score_delta_symmetric(delta, ideal=-0.225)
+        p_delta = _score_delta_symmetric_methodd(delta, ideal=-0.225)
         capital_per_share = strike - premium
         if capital_per_share <= 0:
             continue
         roc = (premium / capital_per_share) * (365.0 / dte) * 100.0
-        p_roc = _score_roc(roc)
+        p_roc = _score_roc_methodd(roc)
         strike_quant_score = (p_delta + p_roc) * 100.0 / STRIKE_QUANT_MAX
         final_score = round(0.4 * env_score + 0.6 * strike_quant_score, 1)
 
