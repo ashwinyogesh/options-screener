@@ -235,10 +235,6 @@ def main() -> None:
         sys.exit(1)
 
 
-if __name__ == "__main__":
-    main()
-
-
 # ---------------------------------------------------------------------------
 # IC snapshot helpers — called from _score_one and main().
 # FROZEN schema: do not change field names or forward_days during 90-day window.
@@ -327,4 +323,8 @@ def _fill_mature_ic_returns(cosmos: ScorerCosmosClient, today: str) -> None:
         filled += 1
     if filled:
         logger.info("IC snapshots return-filled: %d", filled)
+
+
+if __name__ == "__main__":
+    main()
 
