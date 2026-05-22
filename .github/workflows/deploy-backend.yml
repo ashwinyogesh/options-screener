@@ -31,17 +31,24 @@ jobs:
         working-directory: backend
         run: python -m pip install --dry-run -r requirements.txt > /dev/null || true
 
+      - name: Strip dev artifacts before upload
+        run: |
+          rm -rf backend/antenv backend/venv backend/.venv
+          find backend -type d -name __pycache__ -prune -exec rm -rf {} +
+          find backend -type f -name '*.pyc' -delete
+
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: |
-            backend/**
-            !backend/antenv/**
-            !backend/venv/**
-            !backend/.venv/**
-            !backend/**/__pycache__/**
-            !backend/**/*.pyc
+          # NOTE: path is a directory (trailing slash). upload-artifact uploads
+          # its contents at the root of the artifact so the zip extracts to
+          # `main.py`, `services/`, ... — which is what the App Service
+          # startup command (`uvicorn main:app`) and Oryx expect. Do NOT
+          # switch this to `backend/**`; that preserves the `backend/`
+          # prefix and the app ends up under wwwroot/backend/, which fails
+          # to start with ModuleNotFoundError: No module named 'main'.
+          path: backend/
 
   deploy:
     runs-on: ubuntu-latest
