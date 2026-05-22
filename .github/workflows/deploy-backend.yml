@@ -81,10 +81,15 @@ jobs:
 
       - name: Set startup command
         run: |
+          # Invoke uvicorn as a module so it uses the python on PYTHONPATH
+          # (Oryx adds antenv/lib/python3.12/site-packages to PYTHONPATH but
+          # does NOT put antenv/bin on PATH, and the `uvicorn` script's
+          # shebang baked in the GitHub runner's python path, so running
+          # `uvicorn ...` directly yields 'uvicorn: not found' on App Service).
           az webapp config set \
             --name optionsapi \
             --resource-group options-rg \
-            --startup-file "uvicorn main:app --host 0.0.0.0 --port 8000"
+            --startup-file "python -m uvicorn main:app --host 0.0.0.0 --port 8000"
 
       - name: Logout
         run: az logout
