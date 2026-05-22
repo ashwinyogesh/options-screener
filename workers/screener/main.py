@@ -53,6 +53,7 @@ def main() -> None:
     )
 
     now = datetime.now(tz=timezone.utc)
+    run_id = now.isoformat()
     threshold = _staleness_threshold(now, config)
 
     if cosmos.is_fresh(threshold_seconds=threshold):
@@ -73,7 +74,13 @@ def main() -> None:
             # For DITM, macro context is embedded in result["macro"]; lift it
             # to top-level doc fields so get_ditm_results() can read it.
             macro_fields = result.get("macro") or None if config.strategy == "ditm" else None
-            cosmos.upsert_result(ticker=ticker, result=result, error=None, macro_fields=macro_fields)
+            cosmos.upsert_result(
+                ticker=ticker,
+                result=result,
+                error=None,
+                macro_fields=macro_fields,
+                run_id=run_id,
+            )
             scored += 1
         except Exception:
             logger.exception("Failed to write result for ticker %s", ticker)
@@ -81,9 +88,16 @@ def main() -> None:
 
     for ticker, reason in errors.items():
         try:
-            cosmos.upsert_result(ticker=ticker, result=None, error=reason)
+            cosmos.upsert_result(ticker=ticker, result=None, error=reason, run_id=run_id)
         except Exception:
             logger.exception("Failed to write error doc for ticker %s", ticker)
+
+    if config.strategy == "swing":
+        try:
+            deleted = cosmos.prune_stale_runs(run_id)
+            logger.info("Swing stale-run cleanup complete — deleted=%d keep_run_id=%s", deleted, run_id)
+        except Exception:
+            logger.exception("Swing stale-run cleanup failed for run_id=%s", run_id)
 
     logger.info(
         "Screener worker complete — strategy=%s scored=%d errors=%d write_errors=%d",

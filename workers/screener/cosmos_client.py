@@ -6,6 +6,7 @@ Doc shape:
     {
       "id": "<ticker>",
       "ticker": "<ticker>",
+            "run_id": "<ISO UTC run timestamp>",
       "computed_at": "<ISO UTC>",
       "result": { ...serialised result dict... } | null,
       "error": null | "reason string"
@@ -88,11 +89,13 @@ class ScreenerCosmosClient:
         result: dict[str, Any] | None,
         error: str | None,
         macro_fields: dict[str, Any] | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Upsert a per-ticker precomputed result doc."""
         doc: dict[str, Any] = {
             "id": ticker,
             "ticker": ticker,
+            "run_id": run_id,
             "computed_at": datetime.now(tz=timezone.utc).isoformat(),
             "result": result,
             "error": error,
@@ -100,6 +103,38 @@ class ScreenerCosmosClient:
         if macro_fields:
             doc.update(macro_fields)
         self._container.upsert_item(doc)
+
+    def prune_stale_runs(self, keep_run_id: str) -> int:
+        """Delete docs whose run_id does not match keep_run_id.
+
+        Legacy docs without run_id are also deleted. Returns delete count.
+        """
+        query = (
+            "SELECT c.id, c.ticker FROM c "
+            "WHERE NOT IS_DEFINED(c.run_id) OR c.run_id != @run_id"
+        )
+        victims = list(
+            self._container.query_items(
+                query=query,
+                parameters=[{"name": "@run_id", "value": keep_run_id}],
+                enable_cross_partition_query=True,
+            )
+        )
+
+        deleted = 0
+        for doc in victims:
+            item_id = doc.get("id")
+            pk = doc.get("ticker") or item_id
+            if not item_id or not pk:
+                continue
+            try:
+                self._container.delete_item(item=item_id, partition_key=pk)
+                deleted += 1
+            except Exception:
+                logger.warning(
+                    "Failed deleting stale doc id=%s pk=%s", item_id, pk, exc_info=True
+                )
+        return deleted
 
     # ------------------------------------------------------------------
     # Read: fetch all docs for a list of tickers (point reads — cheap).

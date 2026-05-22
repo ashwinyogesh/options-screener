@@ -190,23 +190,60 @@ def get_ditm_results(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _fetch_docs(strategy: str, tickers: list[str]) -> list[dict[str, Any]]:
+def _fetch_docs(
+    strategy: str,
+    tickers: list[str],
+    run_id: str | None = None,
+    allow_empty_filtered: bool = False,
+) -> list[dict[str, Any]]:
     """Fetch precomputed docs for *tickers* via per-partition point reads."""
     container = _get_container(strategy)
     docs = []
+    found_any = False
     for ticker in tickers:
         try:
             doc = container.read_item(item=ticker, partition_key=ticker)
+            found_any = True
+            if run_id is not None and doc.get("run_id") != run_id:
+                continue
             docs.append(doc)
         except Exception:
             logger.debug("No precomputed doc for %s/%s", strategy, ticker)
 
-    if not docs:
+    if not found_any:
+        raise ScreenerStoreEmpty(
+            f"No precomputed docs found for strategy={strategy!r}. "
+            "The background worker has not populated the container yet."
+        )
+    if not docs and not allow_empty_filtered:
         raise ScreenerStoreEmpty(
             f"No precomputed docs found for strategy={strategy!r}. "
             "The background worker has not populated the container yet."
         )
     return docs
+
+
+def _latest_run_id(strategy: str) -> str | None:
+    """Return newest run_id for strategy, or None if run_id is absent."""
+    container = _get_container(strategy)
+    query = (
+        "SELECT TOP 1 c.run_id, c.computed_at FROM c "
+        "WHERE IS_DEFINED(c.run_id) "
+        "ORDER BY c.computed_at DESC"
+    )
+    try:
+        items = list(
+            container.query_items(
+                query=query,
+                enable_cross_partition_query=True,
+            )
+        )
+    except Exception:
+        logger.warning("Failed to query latest run_id for %s", strategy, exc_info=True)
+        return None
+    if not items:
+        return None
+    return items[0].get("run_id")
 
 
 def _timestamps(docs: list[dict[str, Any]]) -> tuple[str | None, float | None]:
@@ -421,7 +458,13 @@ def get_swing_results(
         last_updated_at — ISO UTC of the newest doc, or None
         oldest_age_s    — seconds since oldest doc was written, or None
     """
-    docs = _fetch_docs("swing", tickers)
+    latest_run_id = _latest_run_id("swing")
+    docs = _fetch_docs(
+        "swing",
+        tickers,
+        run_id=latest_run_id,
+        allow_empty_filtered=True,
+    )
     rows: list[dict[str, Any]] = []
     regime_dict: dict[str, Any] = {}
 
