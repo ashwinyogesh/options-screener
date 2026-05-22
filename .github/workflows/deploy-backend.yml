@@ -24,16 +24,23 @@ jobs:
         with:
           python-version: '3.12'
 
-      # No local venv build: Oryx installs requirements on the App Service
-      # at deploy time (SCM_DO_BUILD_DURING_DEPLOYMENT=true). Shipping a
-      # pre-built Linux venv was bloating the zip and breaking OneDeploy.
-      - name: Validate requirements parse
+      # IMPORTANT: build the venv as `antenv/` and SHIP IT.
+      # OneDeploy (which azure/webapps-deploy@v3 uses) does NOT run Oryx,
+      # so SCM_DO_BUILD_DURING_DEPLOYMENT is ignored on this path. The
+      # App Service startup script (`/opt/startup/startup.sh`) activates
+      # /home/site/wwwroot/antenv before running uvicorn, so the venv
+      # must be present in the artifact. If antenv is missing the app
+      # returns 503 ("uvicorn: not found" in the docker log).
+      - name: Build antenv virtualenv
         working-directory: backend
-        run: python -m pip install --dry-run -r requirements.txt > /dev/null || true
-
-      - name: Strip dev artifacts before upload
         run: |
-          rm -rf backend/antenv backend/venv backend/.venv
+          python -m venv antenv
+          source antenv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Strip build cruft (keep antenv intact)
+        run: |
           find backend -type d -name __pycache__ -prune -exec rm -rf {} +
           find backend -type f -name '*.pyc' -delete
 
@@ -41,13 +48,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          # NOTE: path is a directory (trailing slash). upload-artifact uploads
-          # its contents at the root of the artifact so the zip extracts to
-          # `main.py`, `services/`, ... — which is what the App Service
-          # startup command (`uvicorn main:app`) and Oryx expect. Do NOT
-          # switch this to `backend/**`; that preserves the `backend/`
-          # prefix and the app ends up under wwwroot/backend/, which fails
-          # to start with ModuleNotFoundError: No module named 'main'.
+          # path: backend/ ships the *contents* of backend at the artifact
+          # root (main.py, services/, antenv/, ...). Do NOT switch to
+          # `backend/**`; that preserves the `backend/` prefix and the
+          # startup script can't find antenv or main.
           path: backend/
 
   deploy:
