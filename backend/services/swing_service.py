@@ -29,7 +29,12 @@ from services.scoring.swing import (
     SWING_SCORER_VERSION,
     compute_swing_score,
 )
+from services.scoring.swing_lasso import (
+    SWING_LASSO_VERSION,
+    compute_swing_score_lasso,
+)
 from services.swing.classifier import classify_setup
+from services.swing.lasso_features import compute_lasso_features
 from services.swing.regime import RegimeState, compute_regime
 from services.swing.indicators import (
     compute_ad_line_slope,
@@ -108,6 +113,13 @@ class SwingResult:
     forced_short_hold: bool = False
     rr_gate: float = 0.0
     regime_label: str = ""
+    # --- v3 Lasso calibrated probability scorer (always computed) ---
+    swing_score_v2: float = 0.0           # legacy bucket score (same as swing_score for back-compat)
+    swing_score_v3: int = 0                # calibrated probability × 100
+    p_target: float | None = None          # calibrated P(target hit), 0–1
+    lasso_confidence: str = "speculative"
+    lasso_top_features: list[dict] = field(default_factory=list)
+    lasso_missing_features: list[str] = field(default_factory=list)
     excluded: bool = False
     exclude_reason: str | None = None
 
@@ -189,6 +201,7 @@ def process_symbol(
     regime: RegimeState | None = None,
     df: pd.DataFrame | None = None,
     bypass_gates: bool = False,
+    vix_close: pd.Series | None = None,
 ) -> SwingResult:
     """Run the full swing pipeline for one symbol. Never raises.
 
@@ -333,6 +346,33 @@ def process_symbol(
             extended=plan.extended,
         )
 
+        # --- v3 Lasso calibrated scorer (always computed for toggle) ---
+        try:
+            lasso_feats = compute_lasso_features(
+                df=df,
+                spy_df=spy_df,
+                vix_close=vix_close,
+                rr_planned=plan.rr,
+                setup_score=cls["best_score"],
+                adx_value=adx.get("adx"),
+                ad_line_slope_pct=ad_slope,
+                higher_lows=hl,
+                institutional_ownership_pct=inst_own,
+                extended=plan.extended,
+                setup_label=cls["best_setup"],
+                regime_label=regime_label,
+            )
+            lasso = compute_swing_score_lasso(lasso_feats)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("v3 lasso scoring failed for %s: %s", symbol, exc)
+            lasso = {
+                "score": 0,
+                "p_target": None,
+                "confidence": "speculative",
+                "top_features": [],
+                "missing_features": [],
+            }
+
         return SwingResult(
             symbol=symbol,
             price=round(price, 2),
@@ -377,6 +417,12 @@ def process_symbol(
             forced_short_hold=forced_short_hold,
             rr_gate=rr_gate,
             regime_label=regime_label,
+            swing_score_v2=scored["score"],
+            swing_score_v3=int(lasso.get("score", 0)),
+            p_target=lasso.get("p_target"),
+            lasso_confidence=lasso.get("confidence", "speculative"),
+            lasso_top_features=lasso.get("top_features", []),
+            lasso_missing_features=lasso.get("missing_features", []),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("swing process_symbol failed for %s: %s", symbol, exc)
@@ -463,6 +509,21 @@ def run_scan(
         logger.error("SPY fetch failed; using flat baseline: %s", exc)
         spy_df = pd.DataFrame({"Close": [1.0] * 252})
 
+    # VIX bars for the v3 Lasso scorer (best-effort; missing → NaN imputed)
+    try:
+        vix_df = yf.download(
+            "^VIX", period="1y", auto_adjust=True, progress=False, threads=False
+        )
+        if vix_df is not None and not vix_df.empty:
+            if isinstance(vix_df.columns, pd.MultiIndex):
+                vix_df.columns = vix_df.columns.get_level_values(0)
+            vix_close: pd.Series | None = vix_df["Close"]
+        else:
+            vix_close = None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("VIX fetch failed; v3 vix features will be NaN: %s", exc)
+        vix_close = None
+
     # Stage 1: pre-fetch OHLC for the whole universe (used by regime + scan)
     ohlc: dict[str, pd.DataFrame] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
@@ -481,16 +542,27 @@ def run_scan(
     qualified: list[SwingResult] = []
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {
-            ex.submit(process_symbol, sym, spy_df, regime, ohlc.get(sym), bypass_gates): sym
+            ex.submit(
+                process_symbol, sym, spy_df, regime, ohlc.get(sym), bypass_gates, vix_close,
+            ): sym
             for sym in symbols
         }
         for fut in as_completed(futures):
             res = fut.result()
             if not res.excluded:
                 qualified.append(res)
-    qualified.sort(key=lambda r: r.swing_score, reverse=True)
+    # Sort by the better of (legacy v2 score, calibrated v3 score) so the
+    # top-N slice contains the top picks under *either* scorer. Frontend
+    # toggle re-sorts client-side.
+    qualified.sort(
+        key=lambda r: max(r.swing_score, float(r.swing_score_v3)), reverse=True,
+    )
     return [asdict(r) for r in qualified], regime
 
 
 def get_version() -> str:
     return SWING_SCORER_VERSION
+
+
+def get_lasso_version() -> str:
+    return SWING_LASSO_VERSION

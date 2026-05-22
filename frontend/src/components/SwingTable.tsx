@@ -6,8 +6,8 @@ import {
   createColumnHelper,
   type SortingState,
 } from '@tanstack/react-table'
-import { Fragment, useState } from 'react'
-import type { SwingResult } from '../types/swing'
+import { Fragment, useEffect, useState } from 'react'
+import type { SwingResult, SwingScorerVersion } from '../types/swing'
 
 const col = createColumnHelper<SwingResult>()
 
@@ -37,6 +37,21 @@ function scoreColor(s: number): string {
   if (s >= 55) return '#fbbf24'
   if (s >= 45) return '#fb923c'
   return '#f87171'
+}
+
+// v3 = calibrated probability (0–100). Thresholds match
+// backend/services/scoring/swing_lasso.confidence_label:
+//   p >= 0.65 → high, >= 0.50 → medium, else speculative.
+function scoreColorV3(s: number): string {
+  if (s >= 65) return '#4ade80'
+  if (s >= 50) return '#fbbf24'
+  return '#fb923c'
+}
+
+function confidencePillColor(c: string | undefined): { bg: string; fg: string } {
+  if (c === 'high') return { bg: '#0f2d1a', fg: '#4ade80' }
+  if (c === 'medium') return { bg: '#2d2200', fg: '#fbbf24' }
+  return { bg: '#2a1810', fg: '#fb923c' }
 }
 
 const TRIGGER_DESC: Record<string, string> = {
@@ -87,11 +102,19 @@ function PriceLadder({ stop, entry, target }: { stop: number; entry: number; tar
 interface Props {
   data: SwingResult[]
   gatesBypassed?: boolean
+  scorerVersion?: SwingScorerVersion
 }
 
-export function SwingTable({ data, gatesBypassed = false }: Props) {
-  const [sorting, setSorting] = useState<SortingState>([{ id: 'swing_score', desc: true }])
+export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }: Props) {
+  const initialSortId = scorerVersion === 'v3' ? 'swing_score_v3' : 'swing_score'
+  const [sorting, setSorting] = useState<SortingState>([{ id: initialSortId, desc: true }])
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
+
+  // When the user flips the scorer toggle, re-default the sort to the active scorer
+  // so the top of the table reflects the rankings users are looking at.
+  useEffect(() => {
+    setSorting([{ id: scorerVersion === 'v3' ? 'swing_score_v3' : 'swing_score', desc: true }])
+  }, [scorerVersion])
 
   function readinessRank(row: SwingResult): number {
     if (row.extended) return 2
@@ -155,9 +178,53 @@ export function SwingTable({ data, gatesBypassed = false }: Props) {
         )
       },
     }),
-    col.accessor('swing_score', {
+    scorerVersion === 'v3'
+      ? col.accessor(row => row.swing_score_v3 ?? 0, {
+          id: 'swing_score_v3',
+          header: () => (
+            <span title="v3 calibrated probability. Lasso-regularized logistic regression (24 of 39 features kept after L1) + isotonic calibration. Score = round(P(target hit before stop) \u00d7 100). Out-of-sample Brier 0.226 vs 0.250 baseline.">
+              P(target)
+            </span>
+          ),
+          cell: info => {
+            const v = info.getValue() as number
+            const r = info.row.original
+            const p = r.p_target ?? v / 100
+            const pill = confidencePillColor(r.lasso_confidence)
+            return (
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: scoreColorV3(v), fontWeight: 700, minWidth: 34, textAlign: 'right' }}>
+                    {(p * 100).toFixed(0)}%
+                  </span>
+                  <span style={{
+                    display: 'inline-block', width: 44, height: 5,
+                    background: '#1e2235', borderRadius: 3, overflow: 'hidden',
+                  }}>
+                    <span style={{
+                      display: 'block', width: `${Math.min(100, v)}%`, height: '100%',
+                      background: scoreColorV3(v), borderRadius: 3,
+                    }} />
+                  </span>
+                </span>
+                <span
+                  title={`Calibrated confidence based on P(target). high \u2265 65%, medium \u2265 50%, else speculative.`}
+                  style={{
+                    fontSize: 10, padding: '1px 5px', borderRadius: 3,
+                    background: pill.bg, color: pill.fg,
+                    fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
+                    alignSelf: 'flex-start',
+                  }}
+                >
+                  {r.lasso_confidence ?? 'speculative'}
+                </span>
+              </span>
+            )
+          },
+        })
+      : col.accessor('swing_score', {
       header: () => (
-        <span title="Composite swing score 0–100. R:R earns up to 40 pts, setup quality up to 30, trend context up to 20, institutional signals up to 10. Then multiplied by regime, earnings proximity, and chase-entry penalty.">
+        <span title="Composite swing score 0\u2013100. R:R earns up to 40 pts, setup quality up to 30, trend context up to 20, institutional signals up to 10. Then multiplied by regime, earnings proximity, and chase-entry penalty.">
           Score
         </span>
       ),
@@ -423,8 +490,67 @@ export function SwingTable({ data, gatesBypassed = false }: Props) {
                             </>
                           )}
                         </div>
-                        <div style={{ maxWidth: 300 }}>
-                          <h4 style={{ margin: '0 0 6px', fontSize: 13 }}>Score Breakdown</h4>
+                        <div style={{ maxWidth: 320 }}>
+                          {scorerVersion === 'v3' && (
+                            <>
+                              <h4 style={{ margin: '0 0 6px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                v3 Calibrated Score
+                                <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 400 }}>
+                                  P(target) = {((r.p_target ?? 0) * 100).toFixed(1)}%
+                                </span>
+                              </h4>
+                              <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6, lineHeight: 1.5 }}>
+                                Lasso-trained probability the price reaches the target before the stop.
+                                Top features below show which signals pushed this trade above or below the
+                                training-set mean.
+                              </div>
+                              {r.lasso_top_features && r.lasso_top_features.length > 0 ? (
+                                <table style={{ fontSize: 11, width: '100%', marginBottom: 10 }}>
+                                  <thead>
+                                    <tr style={{ color: '#64748b' }}>
+                                      <th style={{ textAlign: 'left', fontWeight: 500 }}>Feature</th>
+                                      <th style={{ textAlign: 'right', fontWeight: 500 }}>Value</th>
+                                      <th style={{ textAlign: 'right', fontWeight: 500 }} title="Z-score vs training-set mean">σ</th>
+                                      <th style={{ textAlign: 'right', fontWeight: 500 }} title="log-odds contribution = coef \u00d7 z-score">Δ</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {r.lasso_top_features.map(f => {
+                                      const contribColor = f.contribution > 0 ? '#4ade80' : '#f87171'
+                                      return (
+                                        <tr key={f.name}>
+                                          <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10.5 }}>{f.name}</td>
+                                          <td style={{ textAlign: 'right' }}>{f.value.toFixed(2)}</td>
+                                          <td style={{ textAlign: 'right', color: '#94a3b8' }}>{f.std_value >= 0 ? '+' : ''}{f.std_value.toFixed(2)}</td>
+                                          <td style={{ textAlign: 'right', color: contribColor, fontWeight: 600 }}>
+                                            {f.contribution >= 0 ? '+' : ''}{f.contribution.toFixed(3)}
+                                          </td>
+                                        </tr>
+                                      )
+                                    })}
+                                  </tbody>
+                                </table>
+                              ) : (
+                                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 10, fontStyle: 'italic' }}>
+                                  No contributions available — feature extraction may have failed.
+                                </div>
+                              )}
+                              {r.lasso_missing_features && r.lasso_missing_features.length > 0 && (
+                                <div style={{
+                                  fontSize: 10, color: '#fbbf24', marginBottom: 10,
+                                  padding: '4px 8px', background: '#2d2200', borderRadius: 3,
+                                }}>
+                                  Missing features (mean-imputed): {r.lasso_missing_features.join(', ')}
+                                </div>
+                              )}
+                              <h4 style={{ margin: '12px 0 6px', fontSize: 13, color: '#64748b' }}>
+                                v2 Bucket Breakdown (for reference)
+                              </h4>
+                            </>
+                          )}
+                          {scorerVersion !== 'v3' && (
+                            <h4 style={{ margin: '0 0 6px', fontSize: 13 }}>Score Breakdown</h4>
+                          )}
                           <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: '#1e2235', marginBottom: 4 }}>
                             <div title={`R:R: ${r.breakdown.rr?.toFixed(1)} / 40 pts`}         style={{ width: `${r.breakdown.rr        || 0}%`, background: '#60a5fa', transition: 'width 0.3s' }} />
                             <div title={`Setup: ${r.breakdown.setup?.toFixed(1)} / 30 pts`}     style={{ width: `${r.breakdown.setup      || 0}%`, background: '#4ade80', transition: 'width 0.3s' }} />

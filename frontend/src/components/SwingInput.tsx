@@ -1,10 +1,15 @@
 import { useState } from 'react'
 import type { KeyboardEvent } from 'react'
+import type { SwingScorerVersion } from '../types/swing'
 
 interface Props {
   onScan: (topN: number, universe: string) => void
   onCustom: (symbols: string[], bypassGates: boolean) => void
   loading: boolean
+  scorerVersion: SwingScorerVersion
+  onScorerVersionChange: (v: SwingScorerVersion) => void
+  scoringVersion: string | null
+  scoringVersionV3: string | null
 }
 
 const UNIVERSE_KEY = 'swing_eligible'
@@ -201,7 +206,7 @@ const PLAYBOOK = [
   { n: 6, q: 'Plan the exit before entry',          a: 'Stop hit → out, no negotiation. Target hit → out OR trail with 1× ATR. Max hold = upper hold-day band; trimmed automatically if it would span earnings.' },
 ]
 
-export function SwingInput({ onScan, onCustom, loading }: Props) {
+export function SwingInput({ onScan, onCustom, loading, scorerVersion, onScorerVersionChange, scoringVersion, scoringVersionV3 }: Props) {
   const [mode, setMode] = useState<'scan' | 'custom'>('scan')
   const [topN, setTopN] = useState<number>(20)
   const [symbolsText, setSymbolsText] = useState<string>('')
@@ -358,7 +363,39 @@ export function SwingInput({ onScan, onCustom, loading }: Props) {
         </div>
       )}
 
-      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+            Scorer
+          </span>
+          <div className="momentum-mode-toggle" style={{ marginBottom: 0 }}>
+            <button
+              type="button"
+              className={`mode-btn${scorerVersion === 'v3' ? ' mode-btn-active' : ''}`}
+              onClick={() => onScorerVersionChange('v3')}
+              disabled={loading}
+              title="Lasso-regularized logistic regression + isotonic calibration. Returns a true P(target hit) probability instead of an additive bucket score."
+              style={{ padding: '6px 12px', fontSize: 12 }}
+            >
+              Calibrated v3 · P(target)
+            </button>
+            <button
+              type="button"
+              className={`mode-btn${scorerVersion === 'v2' ? ' mode-btn-active' : ''}`}
+              onClick={() => onScorerVersionChange('v2')}
+              disabled={loading}
+              title="Classic additive bucket scorer: R:R 40 + Setup 30 + Context 20 + Institutional 10."
+              style={{ padding: '6px 12px', fontSize: 12 }}
+            >
+              Classic v2.3 · Buckets
+            </button>
+          </div>
+          <span style={{ fontSize: 10, color: '#64748b' }}>
+            {scorerVersion === 'v3'
+              ? `v3 model: ${scoringVersionV3 ?? '3.0.0-lasso'}`
+              : `v2 model: ${scoringVersion ?? '2.3.0'}`}
+          </span>
+        </div>
         <button
           className="link-btn"
           onClick={() => setShowLegend(v => !v)}
@@ -378,6 +415,50 @@ export function SwingInput({ onScan, onCustom, loading }: Props) {
 
       {showLegend && (
         <div className="score-legend">
+          <div className="score-legend-factors" style={{ borderLeft: '3px solid #4338ca', paddingLeft: 10 }}>
+            <div className="score-legend-header" style={{ color: '#a5b4fc' }}>
+              Calibrated v3 (Lasso) — what the toggle does
+            </div>
+            <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.55, marginBottom: 8 }}>
+              <strong style={{ color: '#e2e8f0' }}>v3</strong> replaces the additive
+              bucket sum with an L1-regularized logistic regression trained on
+              ~3.3K historical swing trades (39 features → 24 kept after Lasso
+              shrinks weak factors to zero), then runs the raw probability through
+              an isotonic calibrator so the displayed number is a true{' '}
+              <em>P(target hit before stop)</em>. Score = round(P × 100).
+            </div>
+            <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.55, marginBottom: 8 }}>
+              <strong style={{ color: '#e2e8f0' }}>Why it&apos;s better than v2:</strong>{' '}
+              weights are learned, not assigned. Out-of-sample Brier 0.226 vs
+              0.250 baseline, monotonic Spearman ρ ≈ +1.0 (higher score → higher
+              realized hit-rate), and ~4× the usable signal at score ≥ 60.
+              Features it learned to lean on most: <code>rr_planned</code>,{' '}
+              <code>setup_score</code>, <code>adx</code>,{' '}
+              <code>dist_sma50</code>, <code>vix_vs_med20</code>,{' '}
+              <code>regime_label</code>, <code>institutional_ownership_pct</code>.
+              Features Lasso pruned to zero (no predictive value): MACD inflection,
+              RSI divergence, fib-618 hold, BB squeeze, several setup one-hots.
+            </div>
+            <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.55, marginBottom: 8 }}>
+              <strong style={{ color: '#e2e8f0' }}>How to read v3:</strong>{' '}
+              treat the number as a probability percentage.{' '}
+              <span style={{ color: '#4ade80' }}>≥ 65</span> = high-conviction
+              (model expects the target ahead of the stop &gt;65% of the time);{' '}
+              <span style={{ color: '#fbbf24' }}>50–64</span> = medium;{' '}
+              <span style={{ color: '#fb923c' }}>&lt; 50</span> = speculative.
+              The expanded row shows the top-5 standardized contributions —
+              positive = setup is above the training-set mean on a feature the
+              model rewards, negative = the opposite.
+            </div>
+            <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
+              Both v2 and v3 are computed every scan. Use the toggle to switch
+              the display without re-scanning. v2&apos;s bucket breakdown is the
+              right tool when you want to understand <em>why</em> a setup looks
+              good qualitatively; v3 is the right tool when you want a
+              risk-calibrated probability to size against.
+            </div>
+          </div>
+
           <div className="score-legend-tiers">
             <div className="score-tier-table-header">
               <span>Score</span>

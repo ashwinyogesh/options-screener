@@ -437,6 +437,12 @@ def get_swing_results(
             regime_dict = result_data.get("regime") or {}
         rows.append(data)
 
-    rows.sort(key=lambda r: r.get("swing_score", 0.0), reverse=True)
+    rows.sort(
+        key=lambda r: max(
+            float(r.get("swing_score", 0.0) or 0.0),
+            float(r.get("swing_score_v3", 0.0) or 0.0),
+        ),
+        reverse=True,
+    )
     last_updated, oldest_age = _timestamps(docs)
     return rows[:top_n], regime_dict, last_updated, oldest_age

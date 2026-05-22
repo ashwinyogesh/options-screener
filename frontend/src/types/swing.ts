@@ -56,7 +56,24 @@ export interface SwingResult {
   regime_label: string
   narrative?: string | null
   risk_note?: string | null
+  // --- v3 Lasso calibrated probability scorer ---
+  swing_score_v2?: number
+  swing_score_v3?: number
+  p_target?: number | null
+  lasso_confidence?: SwingConfidence
+  lasso_top_features?: SwingLassoFeature[]
+  lasso_missing_features?: string[]
 }
+
+export interface SwingLassoFeature {
+  name: string
+  value: number
+  std_value: number
+  coef: number
+  contribution: number
+}
+
+export type SwingScorerVersion = 'v2' | 'v3'
 
 export interface RegimeState {
   index_trend: string
@@ -80,6 +97,7 @@ export interface RegimeState {
 export interface SwingResponse {
   results: SwingResult[]
   scoring_version: string
+  scoring_version_v3?: string
   regime?: RegimeState | null
   last_updated_at?: string | null
 }

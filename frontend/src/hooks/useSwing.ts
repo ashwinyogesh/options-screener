@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import type { RegimeState, SwingResponse, SwingResult } from '../types/swing'
+import type { RegimeState, SwingResponse, SwingResult, SwingScorerVersion } from '../types/swing'
 import { loadResultCache, saveResultCache, clearResultCache } from '../utils/resultCache'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
+const SCORER_VERSION_KEY = 'swing.scorerVersion'
 
 interface UseSwingReturn {
   results: SwingResult[]
@@ -13,7 +14,10 @@ interface UseSwingReturn {
   errorMessage: string | null
   cachedAt: number | null
   scoringVersion: string | null
+  scoringVersionV3: string | null
   lastUpdatedAt: string | null
+  scorerVersion: SwingScorerVersion
+  setScorerVersion: (v: SwingScorerVersion) => void
   scan: (topN?: number, universe?: string) => Promise<void>
   run: (symbols: string[], bypassGates?: boolean) => Promise<void>
 }
@@ -27,7 +31,23 @@ export function useSwing(): UseSwingReturn {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [cachedAt, setCachedAt] = useState<number | null>(null)
   const [scoringVersion, setScoringVersion] = useState<string | null>(null)
+  const [scoringVersionV3, setScoringVersionV3] = useState<string | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
+  const [scorerVersion, setScorerVersionState] = useState<SwingScorerVersion>(() => {
+    try {
+      const stored = localStorage.getItem(SCORER_VERSION_KEY)
+      return stored === 'v2' || stored === 'v3' ? stored : 'v3'
+    } catch {
+      return 'v3'
+    }
+  })
+
+  function setScorerVersion(v: SwingScorerVersion): void {
+    setScorerVersionState(v)
+    try {
+      localStorage.setItem(SCORER_VERSION_KEY, v)
+    } catch { /* ignore */ }
+  }
 
   useEffect(() => {
     const entry = loadResultCache<{ results: SwingResult[]; scoringVersion: string | null; regime: RegimeState | null }>('swing')
@@ -54,6 +74,7 @@ export function useSwing(): UseSwingReturn {
     const data: SwingResponse = await response.json()
     setResults(data.results)
     setScoringVersion(data.scoring_version)
+    setScoringVersionV3(data.scoring_version_v3 ?? null)
     setRegime(data.regime ?? null)
     setLastUpdatedAt(data.last_updated_at ?? null)
     saveResultCache('swing', { results: data.results, scoringVersion: data.scoring_version, regime: data.regime ?? null })
@@ -101,5 +122,5 @@ export function useSwing(): UseSwingReturn {
     }
   }
 
-  return { results, regime, loading, isScanMode, gatesBypassed, errorMessage, cachedAt, scoringVersion, lastUpdatedAt, scan, run }
+  return { results, regime, loading, isScanMode, gatesBypassed, errorMessage, cachedAt, scoringVersion, scoringVersionV3, lastUpdatedAt, scorerVersion, setScorerVersion, scan, run }
 }

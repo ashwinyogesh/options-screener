@@ -13,6 +13,7 @@ from pydantic import BaseModel, field_validator
 
 from services.scan_cache import swing_scan_cache
 from services.scoring.swing import SWING_SCORER_VERSION
+from services.scoring.swing_lasso import SWING_LASSO_VERSION
 from services.screener.result_store import ScreenerStoreEmpty, get_swing_results
 from services.swing.regime import RegimeState, compute_regime
 from services.swing_insight_service import get_batch_commentary
@@ -92,11 +93,19 @@ class SwingResultOut(BaseModel):
     regime_label: str = ""
     narrative: str | None = None
     risk_note: str | None = None
+    # --- v3 Lasso calibrated probability scorer ---
+    swing_score_v2: float = 0.0
+    swing_score_v3: int = 0
+    p_target: float | None = None
+    lasso_confidence: str = "speculative"
+    lasso_top_features: list[dict] = []
+    lasso_missing_features: list[str] = []
 
 
 class SwingResponse(BaseModel):
     results: list[SwingResultOut]
     scoring_version: str = SWING_SCORER_VERSION
+    scoring_version_v3: str = SWING_LASSO_VERSION
     regime: RegimeOut | None = None
     last_updated_at: Optional[str] = None
 
