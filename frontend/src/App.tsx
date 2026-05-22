@@ -458,7 +458,11 @@ export default function App() {
               scoringVersionV3={swingScoringVersionV3}
             />
             {swingResults.length > 0 && (
-              <SwingFilterPanel filters={swingFilters} onChange={setSwingFilters} />
+              <SwingFilterPanel
+                filters={swingFilters}
+                onChange={setSwingFilters}
+                scorerVersion={swingScorerVersion}
+              />
             )}
             {swingLoading && (
               <div className="loading-state">

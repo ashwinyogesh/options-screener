@@ -24,6 +24,13 @@ function fmtPct(n: number | null | undefined): string {
   return n.toFixed(1) + '%'
 }
 
+function expectedValuePerShare(row: SwingResult): number | null {
+  const p = row.p_target ?? (row.swing_score_v3 != null ? row.swing_score_v3 / 100 : null)
+  if (p == null) return null
+  if (!Number.isFinite(row.reward_per_share) || !Number.isFinite(row.risk_per_share)) return null
+  return (p * row.reward_per_share) - ((1 - p) * row.risk_per_share)
+}
+
 const SETUP_COLOR: Record<string, string> = {
   breakout: '#60a5fa',
   momentum: '#4ade80',
@@ -182,8 +189,8 @@ export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }
       ? col.accessor(row => row.swing_score_v3 ?? 0, {
           id: 'swing_score_v3',
           header: () => (
-            <span title="v3 calibrated probability. Lasso-regularized logistic regression (24 of 39 features kept after L1) + isotonic calibration. Score = round(P(target hit before stop) \u00d7 100). Out-of-sample Brier 0.226 vs 0.250 baseline.">
-              P(target)
+            <span title="Calibrated probability that price reaches target before stop. This is the headline metric for v3.">
+              Chance To Hit
             </span>
           ),
           cell: info => {
@@ -242,8 +249,8 @@ export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }
         })
       : col.accessor('swing_score', {
       header: () => (
-        <span title="Composite swing score 0\u2013100. R:R earns up to 40 pts, setup quality up to 30, trend context up to 20, institutional signals up to 10. Then multiplied by regime, earnings proximity, and chase-entry penalty.">
-          Score
+        <span title="Composite swing score 0\u2013100 from setup quality, reward/risk, trend context, and institutional confirmation.">
+          Composite Score
         </span>
       ),
       cell: info => {
@@ -293,8 +300,22 @@ export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }
         )
       },
     }),
+    ...(scorerVersion === 'v3'
+      ? [
+          col.display({
+            id: 'ev_per_share',
+            header: () => <span title="Expected value per share = P(target) × reward per share − (1 − P(target)) × risk per share.">EV / Share</span>,
+            cell: info => {
+              const ev = expectedValuePerShare(info.row.original)
+              if (ev == null) return <span style={{ color: '#64748b' }}>—</span>
+              const color = ev >= 0 ? '#4ade80' : '#f87171'
+              return <span style={{ color, fontWeight: 600 }}>${fmt2(ev)}</span>
+            },
+          }),
+        ]
+      : []),
     col.accessor('rr', {
-      header: () => <span title="Reward-to-Risk: (target − entry) ÷ (entry − stop). Must be ≥2.5 to pass the gate; ≥3.5 earns top points. Higher means more reward per dollar risked.">R:R</span>,
+      header: () => <span title="Reward-to-Risk: (target − entry) ÷ (entry − stop). Higher means more upside for each dollar risked.">Reward / Risk</span>,
       cell: info => {
         const v = info.getValue()
         const color = v >= 3.5 ? '#4ade80' : v >= 2.75 ? '#86efac' : v >= 2.5 ? '#fbbf24' : '#f87171'
@@ -302,7 +323,7 @@ export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }
       },
     }),    col.display({
       id: 'risk_pct',
-      header: () => <span title="Stop-loss distance as a percentage of the entry price. Use this to size your position: shares = (account risk $) \u00f7 (entry price \u00d7 risk %).">% Risk</span>,
+      header: () => <span title="Maximum loss from trigger to stop, as a percentage of trigger price.">Max Loss %</span>,
       cell: info => {
         const r = info.row.original
         if (!r.entry || !r.stop || r.entry <= 0) return <span>\u2014</span>
@@ -311,7 +332,7 @@ export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }
         return <span style={{ color, fontWeight: 500 }}>{pct.toFixed(1)}%</span>
       },
     }),    col.accessor('entry', {
-      header: () => <span title="The structural price where the trade triggers. Readiness dot: green = near trigger, yellow = waiting, red = extended/chasing. Click to sort by readiness status.">Entry</span>,
+      header: () => <span title="Trigger price for the setup. Readiness dot: green = near trigger, yellow = waiting, red = extended/chasing.">Trigger Price</span>,
       sortingFn: (a, b) => readinessRank(a.original) - readinessRank(b.original),
       cell: info => {
         const row = info.row.original
@@ -378,20 +399,20 @@ export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }
         )
       },
     }),
-    col.accessor('stop', { header: 'Stop', cell: i => (
+    col.accessor('stop', { header: 'Stop Loss', cell: i => (
       <span style={{ color: '#f87171' }}>${fmt2(i.getValue())}</span>
     ) }),
-    col.accessor('target', { header: 'Target', cell: i => (
+    col.accessor('target', { header: 'Take Profit', cell: i => (
       <span style={{ color: '#4ade80' }}>${fmt2(i.getValue())}</span>
     ) }),
     col.accessor(row => `${row.hold_min_days}–${row.hold_max_days}d`, {
       id: 'hold',
-      header: () => <span title="Suggested hold period in trading days. Auto-trimmed when an earnings event falls inside the window.">Hold</span>,
+      header: () => <span title="Planned holding window. Auto-trimmed when it would cross earnings.">Planned Hold</span>,
       cell: info => <span style={{ fontSize: 11 }}>{info.getValue()}</span>,
     }),
     col.display({
       id: 'earnings',
-      header: () => <span title="Days until the next earnings report. \u226514d → no flag. \u226414d → yellow. \u22647d → orange. Reversion setups are blocked within 7 days; all setups blocked within 1 day.">Earnings</span>,
+      header: () => <span title="Days until next earnings report. Lower values increase event risk.">Days To Earnings</span>,
       cell: info => {
         const r = info.row.original
         const dte = r.days_to_earnings
