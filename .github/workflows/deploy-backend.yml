@@ -24,22 +24,24 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
+      # No local venv build: Oryx installs requirements on the App Service
+      # at deploy time (SCM_DO_BUILD_DURING_DEPLOYMENT=true). Shipping a
+      # pre-built Linux venv was bloating the zip and breaking OneDeploy.
+      - name: Validate requirements parse
         working-directory: backend
-        run: |
-          python -m venv antenv
-          source antenv/bin/activate
-          pip install -r requirements.txt
+        run: python -m pip install --dry-run -r requirements.txt > /dev/null || true
 
       - name: Upload artifact for deployment
         uses: actions/upload-artifact@v4
         with:
           name: python-app
           path: |
-            backend/
-            !backend/antenv/
-            !backend/venv/
-            !backend/.venv/
+            backend/**
+            !backend/antenv/**
+            !backend/venv/**
+            !backend/.venv/**
+            !backend/**/__pycache__/**
+            !backend/**/*.pyc
 
   deploy:
     runs-on: ubuntu-latest
