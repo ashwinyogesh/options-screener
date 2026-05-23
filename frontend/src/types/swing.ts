@@ -67,6 +67,7 @@ export interface SwingResult {
   lasso_missing_features?: string[]
   // --- composite: 30% v3.0 rank + 70% Lasso rank, 0-100 ---
   composite_score?: number
+  adv_usd?: number
 }
 
 export interface SwingLassoFeature {
@@ -110,6 +111,7 @@ export interface SwingFilterState {
   setupType: SwingSetupType | 'all'
   minRR: number
   minScore: number
-  minConfidence: SwingConfidence | 'all'
   excludeEarningsWarning: boolean
+  minPrice: number
+  minAdvM: number
 }

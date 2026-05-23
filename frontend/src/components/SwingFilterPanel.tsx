@@ -1,4 +1,4 @@
-import type { SwingFilterState, SwingSetupType, SwingConfidence } from '../types/swing'
+import type { SwingFilterState, SwingSetupType } from '../types/swing'
 
 interface Props {
   filters: SwingFilterState
@@ -11,13 +11,6 @@ const SETUP_OPTIONS: { value: SwingSetupType | 'all'; label: string }[] = [
   { value: 'momentum', label: 'Momentum' },
   { value: 'reversion', label: 'Bounce' },
   { value: 'retest', label: 'Retest' },
-]
-
-const CONFIDENCE_OPTIONS: { value: SwingConfidence | 'all'; label: string }[] = [
-  { value: 'all', label: 'Any quality' },
-  { value: 'high', label: 'Strong only' },
-  { value: 'medium', label: 'Medium+' },
-  { value: 'speculative', label: 'All' },
 ]
 
 export function SwingFilterPanel({ filters, onChange }: Props) {
@@ -65,18 +58,24 @@ export function SwingFilterPanel({ filters, onChange }: Props) {
           step={5}
           onChange={e => set('minScore', Number(e.target.value))}
         />
-        <span className="filter-hint">(0 = off, 65 recommended)</span>
       </label>
 
-      <label className="filter-item">
-        Quality:
-        <select
-          value={filters.minConfidence}
-          onChange={e => set('minConfidence', e.target.value as SwingConfidence | 'all')}
-          className="filter-select"
-        >
-          {CONFIDENCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+      <label className="filter-item filter-toggle">
+        <input
+          type="checkbox"
+          checked={filters.minPrice > 0}
+          onChange={e => set('minPrice', e.target.checked ? 5 : 0)}
+        />
+        Price ≥ $5
+      </label>
+
+      <label className="filter-item filter-toggle">
+        <input
+          type="checkbox"
+          checked={filters.minAdvM > 0}
+          onChange={e => set('minAdvM', e.target.checked ? 5 : 0)}
+        />
+        ADV ≥ $5M
       </label>
 
       <label className="filter-item filter-toggle">

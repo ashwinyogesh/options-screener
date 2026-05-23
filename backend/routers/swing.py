@@ -100,6 +100,7 @@ class SwingResultOut(BaseModel):
     lasso_confidence: str = "speculative"
     lasso_top_features: list[dict] = []
     lasso_missing_features: list[str] = []
+    adv_usd: float = 0.0
     # --- composite: 30% v3.0 rank + 70% Lasso rank, scaled 0-100 ---
     composite_score: int = 0
 

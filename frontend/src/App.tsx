@@ -51,9 +51,10 @@ const DEFAULT_DITM_FILTERS: DitmFilterState = {
 const DEFAULT_SWING_FILTERS: SwingFilterState = {
   setupType: 'all',
   minRR: 0,
-  minScore: 0,
-  minConfidence: 'all',
+  minScore: 50,
   excludeEarningsWarning: false,
+  minPrice: 5,
+  minAdvM: 5,
 }
 
 function applySwingFilters(
@@ -64,10 +65,8 @@ function applySwingFilters(
     if (filters.setupType !== 'all' && r.setup_type !== filters.setupType) return false
     if (filters.minRR > 0 && r.rr < filters.minRR) return false
     if (filters.minScore > 0 && (r.composite_score ?? 0) < filters.minScore) return false
-    if (filters.minConfidence !== 'all') {
-      const order: Record<string, number> = { speculative: 0, medium: 1, high: 2 }
-      if (order[r.confidence] < order[filters.minConfidence]) return false
-    }
+    if (filters.minPrice > 0 && r.price < filters.minPrice) return false
+    if (filters.minAdvM > 0 && (r.adv_usd ?? 0) < filters.minAdvM * 1_000_000) return false
     if (filters.excludeEarningsWarning && r.earnings_warning) return false
     return true
   })

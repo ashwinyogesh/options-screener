@@ -124,6 +124,7 @@ class SwingResult:
     lasso_confidence: str = "speculative"
     lasso_top_features: list[dict] = field(default_factory=list)
     lasso_missing_features: list[str] = field(default_factory=list)
+    adv_usd: float = 0.0
     excluded: bool = False
     exclude_reason: str | None = None
 
@@ -429,6 +430,7 @@ def process_symbol(
             lasso_confidence=lasso.get("confidence", "speculative"),
             lasso_top_features=lasso.get("top_features", []),
             lasso_missing_features=lasso.get("missing_features", []),
+            adv_usd=round(adv_usd, 0),
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("swing process_symbol failed for %s: %s", symbol, exc)
