@@ -258,6 +258,56 @@ def compute_macd_histogram_inflection(df: pd.DataFrame, lookback: int = 5) -> bo
     return False
 
 
+def compute_macd_histogram_value(df: pd.DataFrame) -> float | None:
+    """
+    Return the current MACD histogram value (fast=12, slow=26, signal=9).
+
+    Positive = bullish momentum (MACD above signal line).
+    Negative = bearish momentum.
+    Returns None if insufficient data (< 35 bars).
+
+    v3.0: added for IC-based scoring — rho(macd_hist, r_realized) = +0.209
+    on the 3,366-trade walk-forward backtest (2024-2026).
+    """
+    close = df["Close"]
+    if len(close) < 35:
+        return None
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    macd = ema12 - ema26
+    signal = macd.ewm(span=9, adjust=False).mean()
+    hist = macd - signal
+    return round(float(hist.iloc[-1]), 4)
+
+
+def compute_bb_position(df: pd.DataFrame, period: int = 20) -> float | None:
+    """
+    Return price's position within the 20-day Bollinger Bands (±2σ).
+
+    0.0 = at lower band, 0.5 = at middle (SMA), 1.0 = at upper band.
+    Can be < 0 (below lower) or > 1 (above upper) in extreme moves.
+    Returns None if insufficient data.
+
+    v3.0: added for IC-based scoring — rho(bb_pos, r_realized) = +0.180
+    on the 3,366-trade walk-forward backtest (2024-2026). Higher position
+    (price near or above upper band) correlates with better forward returns —
+    a momentum-continuation signal.
+    """
+    close = df["Close"]
+    if len(close) < period:
+        return None
+    sma = close.rolling(period).mean()
+    std = close.rolling(period).std(ddof=1)
+    upper = sma + 2.0 * std
+    lower = sma - 2.0 * std
+    price = float(close.iloc[-1])
+    lo = float(lower.iloc[-1])
+    hi = float(upper.iloc[-1])
+    if hi == lo:
+        return 0.5
+    return round((price - lo) / (hi - lo), 4)
+
+
 def compute_consolidation_base(df: pd.DataFrame, min_days: int = 7, max_range_pct: float = 0.08) -> dict:
     """
     Detect a tight consolidation base: most recent N>=min_days where

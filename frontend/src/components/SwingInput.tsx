@@ -2,35 +2,21 @@ import { useState } from 'react'
 import type { KeyboardEvent } from 'react'
 
 interface Props {
-  onScan: (topN: number, universe: string) => void
+  onScan: (universe: string) => void
   onCustom: (symbols: string[], bypassGates: boolean) => void
   loading: boolean
-  scoringVersionV3: string | null
 }
 
 const UNIVERSE_KEY = 'swing_eligible'
 const UNIVERSE_LABEL = 'Swing-eligible (~200)'
 const UNIVERSE_HINT = '$500M+ mcap, 500K+ ADV — incl. high-beta movers (ASTS, RKLB, MU, IONQ, MSTR…)'
 
-interface ScoreFactor {
-  factor: string
-  weight: number | null
-  detail?: string
-  definition?: string
-  why?: string
-  formula?: string
-}
-
-// v2.4.0 recalibration (2026-05, n=3,366 backtest trades).
-// Max score ≈ 67; P90=52, P75=45, P50=37. R:R is the primary predictor
-// (ρ=+0.21); composite IC=+0.095 (weak positive). Use score as a
-// relative rank within the universe scan — not as an absolute gate.
 const SCORE_TIERS = [
-  { range: '≥ 52', label: 'High',        color: '#4ade80', desc: 'Top ~10% — best R:R + confirming context; confidence="high" (v2.4)',  action: 'Take it, normal size' },
-  { range: '45–51', label: 'Solid',      color: '#86efac', desc: 'Upper quartile — clean setup, R:R typically ≥ 2.75',                  action: 'Take it; honor stop' },
-  { range: '37–44', label: 'Medium',     color: '#fbbf24', desc: 'Near median — workable but mixed context or thin volume confirmation', action: 'Smaller size; tighter stop' },
-  { range: '30–36', label: 'Speculative',color: '#fb923c', desc: 'Below-median — setup weak or R:R at gate minimum',                  action: 'Skip unless strong off-screener thesis' },
-  { range: '< 30',  label: 'Skip',       color: '#f87171', desc: 'Bottom quartile — minimal R:R or setup fails on multiple signals',   action: 'Skip' },
+  { range: '≥ 80',  label: 'Strong', color: '#4ade80', desc: 'Top 20% — win rate 63%, avg gain 2.7R', action: 'Take it — normal size' },
+  { range: '65–79', label: 'Solid',  color: '#86efac', desc: 'Good — win rate 51%, avg gain 1.3R',    action: 'Take it — honor the stop' },
+  { range: '50–64', label: 'Medium', color: '#fbbf24', desc: 'Decent — win rate 41%; modest edge',    action: 'Smaller size only' },
+  { range: '35–49', label: 'Weak',   color: '#fb923c', desc: 'Below average — win rate 30%',          action: 'Skip unless special reason' },
+  { range: '< 35',  label: 'Skip',   color: '#f87171', desc: 'Bottom tier — win rate 26%',            action: 'Skip' },
 ]
 
 const SETUP_GUIDE = [
@@ -38,180 +24,43 @@ const SETUP_GUIDE = [
     name: 'Breakout',
     hold: '5–10d',
     color: '#60a5fa',
-    signals: 'Tight base ≥ 7d (range ≤ 8%) · 1.5× volume surge · structure-high reclaim · BB squeeze <25p',
-    thesis: 'Compression releases; ride the expansion. Stop below the base low.',
+    signals: 'Price breaks out of a tight 7+ day range · Volume 1.5× normal · BB squeeze releasing',
+    thesis: 'The stock was coiling and just launched. Ride the expansion. Stop below the base.',
   },
   {
     name: 'Momentum',
     hold: '7–14d',
     color: '#4ade80',
-    signals: 'EMA stack 7/9 · ADX ≥ 22 with +DI dominant · RS vs SPY > 1.1 · MACD zero-cross',
-    thesis: 'Trend in motion stays in motion. Trail behind the 8/21 EMA.',
+    signals: 'All EMAs stacked (price > EMA8 > EMA21 > EMA50) · ADX ≥ 22 · outperforming the market',
+    thesis: 'Strong trend in motion. Trail your stop behind the 8-day EMA.',
   },
   {
-    name: 'Reversion',
+    name: 'Bounce',
     hold: '3–7d',
     color: '#fbbf24',
-    signals: 'RSI < 30 · Stoch %K < 20 · bullish RSI divergence · 0.618 fib hold · above 200 EMA',
-    thesis: 'Oversold bounce in a still-intact uptrend. Quick exit; tight stop under the swing low.',
+    signals: 'RSI < 30 (oversold) · price holds above EMA 200 · bullish divergence forming',
+    thesis: 'Oversold within an uptrend. Quick trade — take profit early, keep a tight stop.',
   },
   {
     name: 'Retest',
     hold: '10–21d',
     color: '#a78bfa',
-    signals: 'Structure reclaim 5–20d ago · new base forming above the level · RS holding ≥ 1.0',
-    thesis: 'Second leg after a breakout cools off. Stop below the reclaimed level.',
-  },
-]
-
-const GATES = [
-  { gate: 'R:R',                threshold: '≥ 2.5 / 2.75 / 3.0',  note: 'Dynamic per regime — risk_on / neutral / risk_off' },
-  { gate: 'Setup score',        threshold: '≥ 40 / 100',         note: 'Below this, no setup is well-formed enough' },
-  { gate: 'ADV (dollar)',       threshold: '≥ $5,000,000',       note: 'Liquidity for clean exits' },
-  { gate: 'Price',              threshold: '≥ $5',               note: 'Avoid sub-$5 chop' },
-  { gate: 'OHLC history',       threshold: '≥ 200 bars',         note: '~10 months — required for EMA 200 reliability and reversion safety guard' },
-  { gate: 'Stop distance',      threshold: '≤ 50% of entry',     note: 'Wider stop = structurally invalid setup' },
-  { gate: 'Earnings — any setup',     threshold: 'days_to_earnings > 1', note: '≤ 1 day to earnings → excluded outright' },
-  { gate: 'Earnings — reversion',     threshold: 'days_to_earnings > 7', note: 'Reversion ≤ 7 days from earnings → excluded' },
-  { gate: 'Regime-disabled setups',   threshold: 'setup ∉ regime.disable_setups', note: 'Reversion blocked in risk_off regime' },
-]
-
-const SCORE_BREAKDOWN: ScoreFactor[] = [
-  // ─── R:R bucket (40 pts) ─────────────────────────────────────────────
-  { factor: 'R:R · 40 pts max', weight: null },
-  {
-    factor: 'Reward-to-Risk ratio',
-    weight: 40,
-    detail: '2.5 → 0 · 3.0 → 25 · 4.0 → 35 · ≥ 5.0 → 40 (piecewise-linear)',
-    definition: ': (target − trigger) / (trigger − stop). Trigger and stop are setup-specific and structural — breakout uses base_high / base_low, momentum uses EMA8 pullback, retest uses the reclaimed level, reversion uses current price with the swing-low stop. R:R reflects the trade you take at the **proper entry**, not at chase prices.',
-    why: ': Across thousands of swing trades, R:R is the strongest single predictor of profitability — more than entry quality. A 50% win rate at 3R still doubles equity; a 70% win rate at 1.5R barely breaks even. Computing it off the trigger (not the current close) prevents the screener from over-penalizing extended names that are otherwise well-formed.',
-    formula: 'trigger, stop = build_trigger(setup, features)\n\n# Target (v2.3): ATR projection is the credibility ceiling\natr_target = trigger + ATR_MULT[setup] × atr14\n             # breakout=3.0 · momentum=2.5 · reversion=2.0 · retest=3.5\nrr_floor   = trigger + R_MULT[setup] × risk\n             # breakout=3.0 · momentum=2.75 · reversion=2.5 · retest=3.25\ntarget     = min(atr_target, rr_floor)\n# If stop is wide, ATR can\'t support the R:R floor → R:R drops below gate → filtered out\n\nrr = (target - trigger) / (trigger - stop)\nrr_pts(2.5)  = 0\nrr_pts(3.0)  = 25\nrr_pts(4.0)  = 35\nrr_pts(5.0+) = 40\n# CHASING flag if current_price > trigger * 1.03',
-  },
-
-  // ─── Setup quality bucket (30 pts) ───────────────────────────────────
-  { factor: 'Setup quality · 30 pts max', weight: null },
-  {
-    factor: 'best_setup score',
-    weight: 30,
-    detail: 'max(breakout, momentum, reversion, retest) × 0.30',
-    definition: ': Each of four setup detectors scores the chart 0–100 by counting confirmed signals. The highest-scoring setup is the trade thesis; its raw 0–100 → 0–30 pts here.',
-    why: ': A trade only makes sense if the geometry is well-formed. A 90/100 momentum setup is qualitatively different from a 45/100 one — the second has fewer confirmations and fades faster.',
-    formula: 'setup_pts = min(30, best_setup_score * 0.30)\n# hard gate: best_setup_score >= 40 to be screened',
-  },
-  {
-    factor: '↳ Breakout signals',
-    weight: 0,
-    detail: 'tight base ≥ 7d (range ≤ 8%) · 1.5× volume surge · structure-high reclaim · BB squeeze < 25 pct',
-    definition: ': Consolidation-then-expansion pattern. Looks for a low-range base (recent N-day high vs low within 8%) that suddenly breaks higher on above-average volume.',
-    why: ': Volatility compresses before it expands. The squeeze + surge combo filters noise from real institutional accumulation breaking out.',
-    formula: 'base_range = (max(highs[-7:]) - min(lows[-7:])) / close\nvol_surge = volume[-1] / avg_volume(20)\nbb_squeeze = percentile_of(bb_width, lookback=120)\n# all three must trigger for max signal',
-  },
-  {
-    factor: '↳ Momentum signals',
-    weight: 0,
-    detail: 'EMA stack 8/21/50 aligned · ADX ≥ 22 with +DI > −DI · RS vs SPY > 1.1 · MACD ≥ 0',
-    definition: ': Trend-in-motion check. EMA alignment (price > 8 > 21 > 50) confirms structure; ADX confirms strength; +DI/−DI confirms direction; RS confirms outperformance.',
-    why: ': "Trend in motion stays in motion" only when all four agree. ADX without alignment = chop in a fake trend; alignment without ADX = drifting tape.',
-    formula: 'ema_stack = price > ema8 > ema21 > ema50\nadx14 >= 22 AND plus_di > minus_di\nrs = (stock_pct_chg_20d) / (spy_pct_chg_20d) > 1.1\nmacd_histogram >= 0',
-  },
-  {
-    factor: '↳ Reversion signals',
-    weight: 0,
-    detail: 'RSI < 30 · Stoch %K < 20 · bullish RSI divergence · 0.618 fib hold · close > EMA 200',
-    definition: ': Oversold-bounce-inside-uptrend pattern. The 200 EMA filter is critical — without it this becomes "catch a falling knife".',
-    why: ': Mean-reversion only edges in regimes where the long-term trend is intact. RSI divergence + fib hold provide a structural floor.',
-    formula: 'rsi14 < 30 AND stoch_k < 20\nrsi_div = price makes lower low AND rsi makes higher low\nfib_618 = retracement holds 0.618 of last impulse\nclose > ema200',
-  },
-  {
-    factor: '↳ Retest signals',
-    weight: 0,
-    detail: 'structure reclaim 5–20 bars ago · new base forming above the level · RS ≥ 1.0',
-    definition: ': Second-leg setup after a prior breakout cooled off. Price reclaims a former resistance, pulls back to it, and builds a tighter base — the "handle" after the cup.',
-    why: ': The cleanest entry in technical analysis. The prior level acts as confirmed support; risk is well-defined just below it.',
-    formula: 'reclaim_bar in [5..20] bars ago\ncurrent base_range < initial breakout base_range\nclose > reclaim_level AND rs >= 1.0',
-  },
-
-  // ─── Context bucket (20 pts) ─────────────────────────────────────────
-  { factor: 'Context · 20 pts max', weight: null },
-  {
-    factor: 'ADX trend strength',
-    weight: 10,
-    detail: '< 15 → 0 · 15–22 → linear 3–7 · 22–30 → linear 7–10 · ≥ 30 → 10',
-    definition: ': Average Directional Index (14-period). Measures the strength of any directional trend, regardless of direction. ADX below 20 = no real trend; above 25 = established; above 30 = strong.',
-    why: ': Setup detectors confirm pattern structure; ADX confirms the market is actually trending into that structure. A beautiful breakout in a 10-ADX chop zone typically fades. Not already scored inside any detector, so this is a genuinely orthogonal context signal.',
-    formula: 'tr = max(high-low, |high-prev_close|, |low-prev_close|)\natr = ema(tr, 14)\nplus_dm, minus_dm = directional movement\nadx = 100 * ema(|plus_di - minus_di| / (plus_di + minus_di), 14)\n# <15→0 | 15–22→linear 3–7 | 22–30→linear 7–10 | ≥30→10',
-  },
-  {
-    factor: 'A/D line slope',
-    weight: 10,
-    detail: '20-bar % slope · < 0 → 0 · 0–5% → linear 0–10 · ≥ 5% → 10',
-    definition: ': Accumulation/Distribution line is a cumulative volume-weighted closing-bias indicator. Up-slope = closes tending to bar highs on rising volume = institutional accumulation.',
-    why: ': Proxies for "is real money quietly buying". A flat or falling A/D slope behind a flashy price chart usually means the move is retail-driven and short-lived. Moved from the old institutional bucket to context at double weight (5→10 pts) because it measures market-level participation, not stock-level ownership.',
-    formula: 'mfm = ((close-low) - (high-close)) / (high-low)\nad = cumsum(mfm * volume)\nslope_pct = (ad[-1] - ad[-20]) / abs(ad[-20]) * 100\n# <0→0 | 0–5%→linear 0–10 | ≥5%→10',
-  },
-
-  // ─── Institutional bucket (10 pts) ───────────────────────────────────
-  { factor: 'Institutional · 10 pts max', weight: null },
-  {
-    factor: 'Consecutive higher lows',
-    weight: 5,
-    detail: '0 → 0 · 1 → 2 · 2 → 4 · ≥ 3 → 5',
-    definition: ': Counts the number of consecutive swing lows where each is above the previous (over the last 20 bars). Confirms that buyers are absorbing supply at successively higher prices.',
-    why: ': The cleanest hand of \u201caccumulation without fanfare\u201d. Three consecutive higher lows with no higher high means someone is quietly stepping in. Already scored in the momentum detector (where it fires directly); at 5 pts here it gives a small universal credit across all setup types without dominating.',
-    formula: 'lows = rolling_min(low, window=3)\nhigher_lows = count consecutive steps where lows[i] > lows[i-1]\n# 0→0 | 1→2 | 2→4 | ≥3→5',
-  },
-  {
-    factor: 'Institutional ownership %',
-    weight: 5,
-    detail: '< 40% → 0 · 40% → 0 · 70% → 5 (linear, then capped)',
-    definition: ': yfinance `heldPercentInstitutions` snapshot — share of float held by 13F filers. A coarse proxy in the absence of dark-pool prints.',
-    why: ': High institutional ownership = the name is on real radar screens. Below 40% it\'s either too small or retail-dominated; above 70% adds confidence the setup will see follow-through buyers.',
-    formula: 'inst = info.get("heldPercentInstitutions") * 100\n# <40→0, 70+→5, in between linear',
-  },
-
-  // ─── Cross-bucket multipliers (v2.0.0 — applied AFTER the additive sum) ─
-  { factor: 'Cross-bucket multipliers · final = raw × regime × earnings × extended', weight: null },
-  {
-    factor: 'Regime multiplier',
-    weight: 0,
-    detail: 'risk_on → 1.0 · neutral → ~0.76–0.86 · risk_off → 0.6–0.76',
-    definition: ': One global RegimeState computed per scan from SPY trend (35 wt), VIX 1y percentile (25 wt), universe breadth (25 wt), and IWM/SPY 20d RS (15 wt). Multiplier = 0.6 + 0.4 × risk_on_score / 100, clamped [0.6, 1.0].',
-    why: ': A 2.5 R:R breakout in a VIX-12 calm-bull tape is a different bet from the same setup in a VIX-30 risk-off tape. Multiplying instead of adding lets the environment override an otherwise-clean setup, but never erase it. In risk_off the dynamic gate rises to 3.0 and reversion is mechanically excluded.',
-    formula: 'index_score   = bull→100, neutral→65 or 35, bear→0\nvol_score     = calm→100, normal→70, elevated→30, shock→0\nbreadth_score = pct_above_ema50 (0–100)\nra_score      = IWM/SPY 20d return diff (arithmetic), mapped -5pp→0, 0pp→50, +5pp→100\nrisk_on_score = (35*idx + 25*vol + 25*brd + 15*ra) / 100\nmultiplier    = clamp(0.6 + 0.4 * risk_on_score / 100, 0.6, 1.0)\nrr_gate       = 2.5 if risk_on else 2.75 if neutral else 3.0',
-  },
-  {
-    factor: 'Earnings multiplier',
-    weight: 0,
-    detail: '≤ 3d → 0.50 · 4–7d → 0.75 · 8–14d → 0.90 · > 14d / unknown → 1.00',
-    definition: ': Graduated haircut on proximity to next earnings report (yfinance `earningsDate`). Applied alongside hard gates: ≤ 1 day to any setup is excluded outright; ≤ 7 days for reversion is excluded outright. Hold window is also trimmed to (days_to_earnings − 1) when it would otherwise span the event (`forced_short_hold` flag).',
-    why: ': IV crush + binary-outcome risk scale non-linearly with proximity. A T-2 setup is qualitatively different from T-7. Fixed 0.5 floor because some near-earnings trades genuinely work (post-results continuation), but they should never rank alongside clean-tape setups.',
-    formula: 'def earnings_factor(dte):\n    if dte is None or dte < 0: return 1.0\n    if dte <= 3:  return 0.50\n    if dte <= 7:  return 0.75\n    if dte <= 14: return 0.90\n    return 1.0',
-  },
-  {
-    factor: 'Extended (CHASING) multiplier',
-    weight: 0,
-    detail: 'current price > 3% past structural trigger → 0.85, else 1.00',
-    definition: ': Per-setup structural triggers (breakout=base_high, momentum=EMA8, retest=reclaim_level, reversion=current_price). When current price is more than 3% past the trigger, the setup is "extended" — a chase entry, not a proper one.',
-    why: ': R:R is computed off the *trigger*, not the current close, so a chase doesn\'t hurt R:R points. The extended multiplier penalises the chase directly. v2.4.0 raised from 0.70 → 0.85 after backtest analysis showed the 0.70 haircut had negative IC (ρ≈−0.23 on extended trades).',
-    formula: 'trigger = build_trigger(setup, features)\nextended = current_price > trigger * 1.03\nextended_factor = 0.85 if extended else 1.0  # v2.4.0',
+    signals: 'Broke out 5–20 days ago · pulled back to that level · now building a new base',
+    thesis: 'Second leg of a breakout. The prior level is now support. Risk is well-defined.',
   },
 ]
 
 const PLAYBOOK = [
-  { n: 1, q: 'What\'s the current regime?',          a: 'Check the banner above the table. risk_on → trade actively; neutral → be selective; risk_off → take only the best, and reversion is auto-blocked.' },
-  { n: 2, q: 'Score ≥ 52?', a: 'Yes → top-tier ("high" confidence). ≥37 → medium; <37 → speculative. Score is post-multiplier and ranges 10–67 in practice. A low score can reflect raw weakness OR a regime haircut — always check the breakdown. R:R is the most predictive component.' },
-  { n: 3, q: 'Do I agree with the setup_type?',     a: 'Read the drivers in the expanded row. Disagree → skip; the geometry only works if the thesis matches.' },
-  { n: 4, q: 'Is the stop tolerable in real $?',    a: '1.5 × ATR or recent swing low. If the dollar risk exceeds your per-trade budget, halve size or skip.' },
-  { n: 5, q: 'Earnings nearby? CHASING?',           a: 'Earnings ≤ 14d → expect a haircut multiplier (visible in expanded breakdown). CHASING flag → entry is more than 3% past the structural trigger; either wait for a pullback or size down.' },
-  { n: 6, q: 'Plan the exit before entry',          a: 'Stop hit → out, no negotiation. Target hit → out OR trail with 1× ATR. Max hold = upper hold-day band; trimmed automatically if it would span earnings.' },
+  { n: 1, q: 'Score ≥ 65?',               a: 'Yes → take it. 65–79 = solid (51% win). ≥ 80 = strong (63% win). 50–64 = reduce size. < 50 = skip.' },
+  { n: 2, q: 'Is the pattern clear?',     a: "Open the expanded row and read the drivers. If you can't see why it's a Breakout / Momentum / Bounce / Retest, skip it." },
+  { n: 3, q: 'Is entry price realistic?', a: 'Green dot = near entry now. Yellow = not yet — place a limit order. "LATE ENTRY" badge = price moved too far — wait for a pullback.' },
+  { n: 4, q: 'Can you afford the stop?',  a: 'Dollar risk = (Entry − Stop) × shares. Keep it under 1% of your account. Adjust share count — never widen the stop level.' },
 ]
 
-export function SwingInput({ onScan, onCustom, loading, scoringVersionV3 }: Props) {
+export function SwingInput({ onScan, onCustom, loading }: Props) {
   const [mode, setMode] = useState<'scan' | 'custom'>('scan')
-  const [topN, setTopN] = useState<number>(20)
   const [symbolsText, setSymbolsText] = useState<string>('')
   const [showLegend, setShowLegend] = useState<boolean>(false)
-  const [expandedFactor, setExpandedFactor] = useState<string | null>(null)
   const [bypassGates, setBypassGates] = useState<boolean>(true)
 
   function parseSymbols(): string[] {
@@ -223,7 +72,7 @@ export function SwingInput({ onScan, onCustom, loading, scoringVersionV3 }: Prop
   }
 
   function handleScan() {
-    onScan(topN, UNIVERSE_KEY)
+    onScan(UNIVERSE_KEY)
   }
 
   function handleCustom() {
@@ -247,14 +96,14 @@ export function SwingInput({ onScan, onCustom, loading, scoringVersionV3 }: Prop
           onClick={() => setMode('scan')}
           disabled={loading}
         >
-          ⚡ Auto Scan
+          Market Scan
         </button>
         <button
           className={`mode-btn${mode === 'custom' ? ' mode-btn-active' : ''}`}
           onClick={() => setMode('custom')}
           disabled={loading}
         >
-          Custom Symbols
+          My Symbols
         </button>
       </div>
 
@@ -265,31 +114,16 @@ export function SwingInput({ onScan, onCustom, loading, scoringVersionV3 }: Prop
               Scans <strong>{UNIVERSE_LABEL}</strong> — {UNIVERSE_HINT}
             </span>
             <span className="app-subtitle">
-              Ranked by calibrated probability P(target hit before stop).
-              Hard gates: R:R ≥ 2.5, setup score ≥ 40. Top 3 receive AI commentary.
+              Scans 200+ stocks and ranks by Signal Score. Quality filters applied automatically. Top results include AI commentary.
             </span>
           </div>
           <div className="momentum-scan-controls">
-            <label className="filter-item">
-              Top
-              <input
-                type="number"
-                className="filter-number"
-                value={topN}
-                min={5}
-                max={50}
-                step={5}
-                onChange={e => setTopN(Number(e.target.value))}
-                disabled={loading}
-              />
-              results
-            </label>
             <button
               className="btn btn-primary"
               onClick={handleScan}
               disabled={loading}
             >
-              {loading ? 'Scanning…' : '⚡ Scan Now'}
+              {loading ? 'Scanning…' : '⚡ Market Scan'}
             </button>
           </div>
         </div>
@@ -303,8 +137,8 @@ export function SwingInput({ onScan, onCustom, loading, scoringVersionV3 }: Prop
             </span>
             <span className="app-subtitle">
               {bypassGates
-                ? 'Strategy gates bypassed — all symbols with sufficient price history are returned.'
-                : 'Hard gates active — same filters as auto-scan (price, ADV, R:R, setup score).'
+                ? 'Quality filters off — all symbols shown. Use the Score column to judge quality.'
+                : 'Quality filters on — same standards as Market Scan (price, volume, R:R, pattern quality).'
               }
             </span>
           </div>
@@ -342,8 +176,8 @@ export function SwingInput({ onScan, onCustom, loading, scoringVersionV3 }: Prop
               onClick={() => setBypassGates(v => !v)}
               disabled={loading}
               title={bypassGates
-                ? 'Gates bypassed: click to enforce hard gates (price, ADV, R:R, setup score)'
-                : 'Gates enforced: click to bypass hard gates and show all symbols'
+                ? 'Filters off — all symbols shown. Click to turn quality filters on.'
+                : 'Filters on — same standards as Market Scan. Click to turn off.'
               }
               style={{
                 padding: '4px 10px',
@@ -357,40 +191,18 @@ export function SwingInput({ onScan, onCustom, loading, scoringVersionV3 }: Prop
                 transition: 'all 0.15s',
               }}
             >
-              {bypassGates ? '🔓 Gates Off' : '🔒 Gates On'}
+              {bypassGates ? '🔓 Filters Off' : '🔒 Filters On'}
             </button>
           </div>
         </div>
       )}
 
-      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-            Scorer
-          </span>
-          <span
-            className="mode-btn mode-btn-active"
-            style={{ padding: '6px 12px', fontSize: 12, cursor: 'default' }}
-            title="Lasso-regularized logistic regression + isotonic calibration. Returns a calibrated probability of target-before-stop."
-          >
-            Calibrated v3 · P(target)
-          </span>
-          <span style={{ fontSize: 10, color: '#64748b' }}>
-            {`v3 model: ${scoringVersionV3 ?? '3.0.0-lasso'}`}
-          </span>
-        </div>
+      {/* ── Score Guide toggle ── */}
+      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
         <button
           className="link-btn"
           onClick={() => setShowLegend(v => !v)}
-          title="How the Swing score is calculated"
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: '#94a3b8',
-            cursor: 'pointer',
-            fontSize: 12,
-            padding: '4px 6px',
-          }}
+          style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 12, padding: '4px 6px' }}
         >
           {showLegend ? '▲ Score Guide' : '▼ Score Guide'}
         </button>
@@ -398,52 +210,30 @@ export function SwingInput({ onScan, onCustom, loading, scoringVersionV3 }: Prop
 
       {showLegend && (
         <div className="score-legend">
+
+          {/* ── How the score works ── */}
           <div className="score-legend-factors" style={{ borderLeft: '3px solid #4338ca', paddingLeft: 10 }}>
-            <div className="score-legend-header" style={{ color: '#a5b4fc' }}>
-              Calibrated v3 (Lasso)
+            <div className="score-legend-header" style={{ color: '#a5b4fc' }}>How the score works</div>
+            <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.6 }}>
+              Each stock gets a <strong style={{ color: '#e2e8f0' }}>Signal Score from 0–100</strong> combining
+              two models: a rule-based scorer (Reward/Risk + pattern quality + momentum + strength + volume)
+              and a machine-learning model trained on 3,366 historical swing trades.
+              Scores are normalized so the best opportunities in today's scan rank near 100.
             </div>
-            <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.55, marginBottom: 8 }}>
-              <strong style={{ color: '#e2e8f0' }}>v3</strong> replaces the additive
-              bucket sum with an L1-regularized logistic regression trained on
-              ~3.3K historical swing trades (39 features → 24 kept after Lasso
-              shrinks weak factors to zero), then runs the raw probability through
-              an isotonic calibrator so the displayed number is a true{' '}
-              <em>P(target hit before stop)</em>. Score = round(P × 100).
-            </div>
-            <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.55, marginBottom: 8 }}>
-              <strong style={{ color: '#e2e8f0' }}>Why it&apos;s better than v2:</strong>{' '}
-              weights are learned, not assigned. Out-of-sample Brier 0.226 vs
-              0.250 baseline, monotonic Spearman ρ ≈ +1.0 (higher score → higher
-              realized hit-rate), and ~4× the usable signal at score ≥ 60.
-              Features it learned to lean on most: <code>rr_planned</code>,{' '}
-              <code>setup_score</code>, <code>adx</code>,{' '}
-              <code>dist_sma50</code>, <code>vix_vs_med20</code>,{' '}
-              <code>regime_label</code>, <code>institutional_ownership_pct</code>.
-              Features Lasso pruned to zero (no predictive value): MACD inflection,
-              RSI divergence, fib-618 hold, BB squeeze, several setup one-hots.
-            </div>
-            <div style={{ fontSize: 12, color: '#cbd5e1', lineHeight: 1.55, marginBottom: 8 }}>
-              <strong style={{ color: '#e2e8f0' }}>How to read v3:</strong>{' '}
-              treat the number as a probability percentage.{' '}
-              <span style={{ color: '#4ade80' }}>≥ 65</span> = high-conviction
-              (model expects the target ahead of the stop &gt;65% of the time);{' '}
-              <span style={{ color: '#fbbf24' }}>50–64</span> = medium;{' '}
-              <span style={{ color: '#fb923c' }}>&lt; 50</span> = speculative.
-              The expanded row shows the top-5 standardized contributions —
-              positive = setup is above the training-set mean on a feature the
-              model rewards, negative = the opposite.
-            </div>
-            <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
-              v2 and v3 are both still computed during scans for internal
-              monitoring, but the UI is intentionally locked to v3 so trading
-              decisions are made on calibrated probabilities.
+            <div style={{ marginTop: 6, fontSize: 12, color: '#cbd5e1', lineHeight: 1.6 }}>
+              <strong style={{ color: '#e2e8f0' }}>Three columns to focus on first:</strong>{' '}
+              <span style={{ color: '#4ade80' }}>Score</span> (overall quality),{' '}
+              <span style={{ color: '#60a5fa' }}>Momentum</span> (is buying pressure rising?), and{' '}
+              <span style={{ color: '#a78bfa' }}>Strength</span> (is price near the top of its range?).
+              A strong trade setup usually has all three positive.
             </div>
           </div>
 
+          {/* ── Score tiers ── */}
           <div className="score-legend-tiers">
             <div className="score-tier-table-header">
               <span>Score</span>
-              <span>Interpretation</span>
+              <span>What it means</span>
               <span>Action</span>
             </div>
             {SCORE_TIERS.map(t => (
@@ -455,105 +245,26 @@ export function SwingInput({ onScan, onCustom, loading, scoringVersionV3 }: Prop
             ))}
           </div>
 
+          {/* ── Pattern guide ── */}
           <div className="score-legend-factors">
-            <div className="score-legend-header">Setup taxonomy — best_setup wins</div>
+            <div className="score-legend-header">4 trade patterns</div>
             {SETUP_GUIDE.map(s => (
               <div key={s.name} className="score-factor-block">
                 <div className="score-factor-row">
-                  <span className="score-factor-name" style={{ color: s.color, fontWeight: 700 }}>
-                    {s.name}
-                  </span>
-                  <span className="score-factor-weight" style={{ color: '#94a3b8' }}>
-                    hold {s.hold}
-                  </span>
+                  <span className="score-factor-name" style={{ color: s.color, fontWeight: 700, minWidth: 82 }}>{s.name}</span>
+                  <span style={{ color: '#94a3b8', fontSize: 11, minWidth: 52 }}>hold {s.hold}</span>
                   <span className="score-factor-detail">{s.signals}</span>
                 </div>
-                <div
-                  style={{
-                    margin: '4px 0 6px 28px',
-                    fontSize: 11,
-                    color: '#64748b',
-                    fontStyle: 'italic',
-                  }}
-                >
+                <div style={{ margin: '3px 0 6px 28px', fontSize: 11, color: '#64748b', fontStyle: 'italic' }}>
                   {s.thesis}
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="score-legend-factors">
-            <div className="score-legend-header">
-              Score breakdown — Composite = R:R 40 + Setup 30 + Context 20 + Institutional 10 (max 100)
-            </div>
-            {SCORE_BREAKDOWN.map(f => (
-              f.weight === null ? (
-                <div key={f.factor} className="score-factor-section">{f.factor}</div>
-              ) : (
-                <div key={f.factor} className="score-factor-block">
-                  <div
-                    className="score-factor-row score-factor-row-clickable"
-                    onClick={() => setExpandedFactor(expandedFactor === f.factor ? null : f.factor)}
-                    title="Click to show calculation"
-                  >
-                    <span className="score-factor-expand">
-                      {expandedFactor === f.factor ? '▾' : '▸'}
-                    </span>
-                    <span className="score-factor-name">{f.factor}</span>
-                    <span
-                      className="score-factor-weight"
-                      style={{
-                        color:
-                          f.weight >= 20 ? '#4ade80' :
-                          f.weight >= 10 ? '#fbbf24' :
-                          f.weight > 0   ? '#94a3b8' :
-                                           '#64748b',
-                      }}
-                    >
-                      {f.weight > 0 ? `+${f.weight} pts` : 'signal'}
-                    </span>
-                    <div className="score-factor-bar-wrap">
-                      <div
-                        className="score-factor-bar"
-                        style={{
-                          width: f.weight <= 0 ? '0%' : `${Math.min(f.weight / 40 * 100, 100)}%`,
-                          background:
-                            f.weight >= 20 ? '#4ade80' :
-                            f.weight >= 10 ? '#fbbf24' : '#94a3b8',
-                        }}
-                      />
-                    </div>
-                    <span className="score-factor-detail">{f.detail}</span>
-                  </div>
-                  {expandedFactor === f.factor && (f.definition || f.why || f.formula) && (
-                    <div className="score-factor-expanded">
-                      {f.definition && <p className="score-factor-definition"><strong>What</strong>{f.definition}</p>}
-                      {f.why && <p className="score-factor-why"><strong>Why</strong>{f.why}</p>}
-                      {f.formula && <pre className="score-factor-formula">{f.formula}</pre>}
-                    </div>
-                  )}
-                </div>
-              )
-            ))}
-          </div>
-
-          <div className="score-legend-factors">
-            <div className="score-legend-header">Hard gates — applied before scoring</div>
-            {GATES.map(g => (
-              <div key={g.gate} className="score-factor-block">
-                <div className="score-factor-row">
-                  <span className="score-factor-name">{g.gate}</span>
-                  <span className="score-factor-weight" style={{ color: '#f87171' }}>
-                    {g.threshold}
-                  </span>
-                  <span className="score-factor-detail">{g.note}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-
+          {/* ── Pre-trade checklist ── */}
           <div className="decision-framework">
-            <div className="decision-framework-header">Playbook — run top-down per row</div>
+            <div className="decision-framework-header">Before you trade — 4 questions</div>
             <ol className="decision-steps">
               {PLAYBOOK.map(s => (
                 <li key={s.n} className="decision-step">
@@ -563,20 +274,8 @@ export function SwingInput({ onScan, onCustom, loading, scoringVersionV3 }: Prop
                 </li>
               ))}
             </ol>
-            <div
-              style={{
-                marginTop: 8,
-                padding: '6px 10px',
-                background: '#0f172a',
-                borderRadius: 5,
-                fontSize: 11,
-                color: '#64748b',
-                borderLeft: '3px solid #334155',
-              }}
-            >
-              <strong style={{ color: '#94a3b8' }}>Thumb rule</strong> — Risk is the
-              decision; reward is the outcome. The stop must be the price at which the
-              setup is structurally invalid, not a round-number comfort level.
+            <div style={{ marginTop: 8, padding: '6px 10px', background: '#0f172a', borderRadius: 5, fontSize: 11, color: '#64748b', borderLeft: '3px solid #334155' }}>
+              <strong style={{ color: '#94a3b8' }}>Key rule</strong> — Decide your stop before entering. If price hits your stop, the setup is invalid. Exit without negotiation.
             </div>
           </div>
         </div>

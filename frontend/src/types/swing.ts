@@ -46,6 +46,8 @@ export interface SwingResult {
   rsi_divergence: boolean
   fib_618_hold: boolean
   structure_reclaimed: boolean
+  macd_hist_val?: number | null
+  bb_position_val?: number | null
   setup_scores: Record<string, number>
   breakdown: Record<string, number>
   multipliers: Record<string, number>
@@ -63,6 +65,8 @@ export interface SwingResult {
   lasso_confidence?: SwingConfidence
   lasso_top_features?: SwingLassoFeature[]
   lasso_missing_features?: string[]
+  // --- composite: 30% v3.0 rank + 70% Lasso rank, 0-100 ---
+  composite_score?: number
 }
 
 export interface SwingLassoFeature {

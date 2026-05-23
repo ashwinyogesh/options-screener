@@ -186,9 +186,9 @@ async def _run_swing_async() -> tuple[dict[str, dict[str, Any]], dict[str, str]]
     logger.info("Swing scan starting — %d tickers", len(tickers))
 
     # run_scan is CPU+IO bound; run in a thread so we don't block the event loop.
-    # It returns (rows, regime) explicitly as of Phase-1 cleanup
-    # (was a process-global cache side-effect prior).
-    qualified, regime = await asyncio.to_thread(run_scan, tickers)
+    # bypass_gates=True: all tickers with sufficient data are stored; quality
+    # filtering (setup score, R:R, earnings blocks) is deferred to the frontend.
+    qualified, regime = await asyncio.to_thread(run_scan, tickers, bypass_gates=True)
 
     regime_dict: dict[str, Any] = {}
     if regime is not None:

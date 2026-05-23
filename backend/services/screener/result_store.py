@@ -447,13 +447,12 @@ def _ditm_from_dict(d: dict[str, Any]) -> DitmResult:
 
 def get_swing_results(
     tickers: list[str],
-    top_n: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str | None, float | None]:
     """Return precomputed swing results.
 
     Returns:
         (rows, regime_dict, last_updated_at, oldest_age_s)
-        rows         — qualified SwingResult dicts sorted by swing_score desc, sliced to top_n
+        rows         — all stored SwingResult dicts sorted by swing_score desc
         regime_dict  — RegimeState fields extracted from the freshest doc; empty dict if unavailable
         last_updated_at — ISO UTC of the newest doc, or None
         oldest_age_s    — seconds since oldest doc was written, or None
@@ -488,4 +487,4 @@ def get_swing_results(
         reverse=True,
     )
     last_updated, oldest_age = _timestamps(docs)
-    return rows[:top_n], regime_dict, last_updated, oldest_age
+    return rows, regime_dict, last_updated, oldest_age

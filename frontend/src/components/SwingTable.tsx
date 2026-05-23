@@ -39,26 +39,11 @@ const SETUP_COLOR: Record<string, string> = {
 }
 
 function scoreColor(s: number): string {
-  if (s >= 75) return '#4ade80'
+  if (s >= 80) return '#4ade80'
   if (s >= 65) return '#86efac'
-  if (s >= 55) return '#fbbf24'
-  if (s >= 45) return '#fb923c'
-  return '#f87171'
-}
-
-// v3 = calibrated probability (0–100). Thresholds match
-// backend/services/scoring/swing_lasso.confidence_label:
-//   p >= 0.65 → high, >= 0.50 → medium, else speculative.
-function scoreColorV3(s: number): string {
-  if (s >= 65) return '#4ade80'
   if (s >= 50) return '#fbbf24'
-  return '#fb923c'
-}
-
-function confidencePillColor(c: string | undefined): { bg: string; fg: string } {
-  if (c === 'high') return { bg: '#0f2d1a', fg: '#4ade80' }
-  if (c === 'medium') return { bg: '#2d2200', fg: '#fbbf24' }
-  return { bg: '#2a1810', fg: '#fb923c' }
+  if (s >= 35) return '#fb923c'
+  return '#f87171'
 }
 
 const TRIGGER_DESC: Record<string, string> = {
@@ -113,14 +98,12 @@ interface Props {
 }
 
 export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }: Props) {
-  const initialSortId = scorerVersion === 'v3' ? 'swing_score_v3' : 'swing_score'
-  const [sorting, setSorting] = useState<SortingState>([{ id: initialSortId, desc: true }])
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'composite_score', desc: true }])
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
 
-  // When the user flips the scorer toggle, re-default the sort to the active scorer
-  // so the top of the table reflects the rankings users are looking at.
+  // When the user flips the scorer toggle, keep composite as default sort
   useEffect(() => {
-    setSorting([{ id: scorerVersion === 'v3' ? 'swing_score_v3' : 'swing_score', desc: true }])
+    setSorting([{ id: 'composite_score', desc: true }])
   }, [scorerVersion])
 
   function readinessRank(row: SwingResult): number {
@@ -130,295 +113,183 @@ export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }
   }
 
   const columns = [
-    col.accessor('symbol', {
-      header: 'Symbol',
-      cell: info => (
-        <span style={{ fontWeight: 600 }}>
-          {info.getValue()}
-          {info.row.original.earnings_warning && (
-            <span title="Earnings within 10 days" style={{ marginLeft: 4, color: '#fbbf24' }}>⚠</span>
-          )}
-          {gatesBypassed && (
-            <span
-              title="Custom search — strategy gates bypassed. Results shown regardless of price, ADV, setup score, R:R, or earnings filters."
-              style={{
-                marginLeft: 5,
-                padding: '1px 5px',
-                background: '#1e1b4b',
-                color: '#a5b4fc',
-                border: '1px solid #4338ca',
-                borderRadius: 3,
-                fontSize: 9,
-                fontWeight: 700,
-                letterSpacing: 0.4,
-                cursor: 'help',
-                verticalAlign: 'middle',
-              }}
-            >
-              CUSTOM
-            </span>
-          )}
-        </span>
-      ),
-    }),
-    col.accessor('price', { header: 'Price', cell: i => `$${fmt2(i.getValue())}` }),
-    col.accessor('setup_type', {
-      header: () => <span title="Breakout: base consolidation + volume surge. Momentum: aligned EMAs + strong ADX. Reversion: oversold bounce above EMA 200. Retest: prior resistance retested as support.">Setup</span>,
-      cell: info => {
-        const v = info.getValue()
-        const color = SETUP_COLOR[v] ?? '#94a3b8'
-        const bg: Record<string, string> = {
-          breakout:  '#0f2744',
-          momentum:  '#0f2d1a',
-          reversion: '#2d2200',
-          retest:    '#1e1040',
-        }
-        return (
-          <span style={{
-            color, background: bg[v] ?? '#1e2235',
-            padding: '2px 9px', borderRadius: 4,
-            fontSize: 11, fontWeight: 700, letterSpacing: 0.4,
-            textTransform: 'capitalize', border: `1px solid ${color}30`,
-          }}>
-            {v || '—'}
-          </span>
-        )
-      },
-    }),
-    scorerVersion === 'v3'
-      ? col.accessor(row => row.swing_score_v3 ?? 0, {
-          id: 'swing_score_v3',
-          header: () => (
-            <span title="Calibrated probability that price reaches target before stop. This is the headline metric for v3.">
-              Chance To Hit
-            </span>
-          ),
-          cell: info => {
-            const v = info.getValue() as number
-            const r = info.row.original
-            // If the doc was scored before v3 shipped, it carries neither
-            // swing_score_v3 nor p_target. Show "not scored" instead of a
-            // misleading 0% / speculative pill.
-            const hasV3 = r.swing_score_v3 != null && (r.p_target != null || r.lasso_top_features?.length)
-            if (!hasV3) {
-              return (
-                <span
-                  title="This row was scored before v3 shipped. Re-scan (or wait for the next screener-worker run) to populate the calibrated probability."
-                  style={{
-                    fontSize: 10, color: '#64748b', fontStyle: 'italic',
-                    display: 'inline-flex', flexDirection: 'column', gap: 2,
-                  }}
-                >
-                  <span style={{ color: '#94a3b8' }}>v3 pending</span>
-                  <span>re-scan needed</span>
-                </span>
-              )
-            }
-            const p = r.p_target ?? v / 100
-            const pill = confidencePillColor(r.lasso_confidence)
-            return (
-              <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ color: scoreColorV3(v), fontWeight: 700, minWidth: 34, textAlign: 'right' }}>
-                    {(p * 100).toFixed(0)}%
-                  </span>
-                  <span style={{
-                    display: 'inline-block', width: 44, height: 5,
-                    background: '#1e2235', borderRadius: 3, overflow: 'hidden',
-                  }}>
-                    <span style={{
-                      display: 'block', width: `${Math.min(100, v)}%`, height: '100%',
-                      background: scoreColorV3(v), borderRadius: 3,
-                    }} />
-                  </span>
-                </span>
-                <span
-                  title={`Calibrated confidence based on P(target). high \u2265 65%, medium \u2265 50%, else speculative.`}
-                  style={{
-                    fontSize: 10, padding: '1px 5px', borderRadius: 3,
-                    background: pill.bg, color: pill.fg,
-                    fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
-                    alignSelf: 'flex-start',
-                  }}
-                >
-                  {r.lasso_confidence ?? 'speculative'}
-                </span>
-              </span>
-            )
-          },
-        })
-      : col.accessor('swing_score', {
-      header: () => (
-        <span title="Composite swing score 0\u2013100 from setup quality, reward/risk, trend context, and institutional confirmation.">
-          Composite Score
-        </span>
-      ),
-      cell: info => {
-        const v = info.getValue()
-        const bd = info.row.original.breakdown
-        return (
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {/* score number + bar */}
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ color: scoreColor(v), fontWeight: 700, minWidth: 34, textAlign: 'right' }}>
-                {v.toFixed(1)}
-              </span>
-              <span style={{
-                display: 'inline-block', width: 44, height: 5,
-                background: '#1e2235', borderRadius: 3, overflow: 'hidden',
-              }}>
-                <span style={{
-                  display: 'block', width: `${Math.min(100, v)}%`, height: '100%',
-                  background: scoreColor(v), borderRadius: 3,
-                }} />
-              </span>
-            </span>
-            {/* bucket pills */}
-            {bd && (
-              <span style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3 }}>
-                {([
-                  { label: 'R:R',   pts: bd.rr,            max: 40, color: '#60a5fa' },
-                  { label: 'Setup', pts: bd.setup,          max: 30, color: '#4ade80' },
-                  { label: 'Ctx',   pts: bd.context,        max: 20, color: '#fbbf24' },
-                  { label: 'Inst',  pts: bd.institutional,  max: 10, color: '#a78bfa' },
-                ] as const).map(({ label, pts, max, color }) => (
-                  <span
-                    key={label}
-                    title={`${label}: ${pts?.toFixed(1)} / ${max} pts`}
-                    style={{
-                      fontSize: 11, padding: '1px 4px', borderRadius: 3,
-                      background: '#1e2235', color,
-                      fontWeight: 600, letterSpacing: 0.2,
-                    }}
-                  >
-                    {pts != null ? `${label} ${pts.toFixed(0)}/${max}` : '—'}
-                  </span>
-                ))}
-              </span>
-            )}
-          </span>
-        )
-      },
-    }),
-    ...(scorerVersion === 'v3'
-      ? [
-          col.display({
-            id: 'ev_per_share',
-            header: () => <span title="Expected value per share = P(target) × reward per share − (1 − P(target)) × risk per share.">EV / Share</span>,
-            cell: info => {
-              const ev = expectedValuePerShare(info.row.original)
-              if (ev == null) return <span style={{ color: '#64748b' }}>—</span>
-              const color = ev >= 0 ? '#4ade80' : '#f87171'
-              return <span style={{ color, fontWeight: 600 }}>${fmt2(ev)}</span>
-            },
-          }),
-        ]
-      : []),
-    col.accessor('rr', {
-      header: () => <span title="Reward-to-Risk: (target − entry) ÷ (entry − stop). Higher means more upside for each dollar risked.">Reward / Risk</span>,
-      cell: info => {
-        const v = info.getValue()
-        const color = v >= 3.5 ? '#4ade80' : v >= 2.75 ? '#86efac' : v >= 2.5 ? '#fbbf24' : '#f87171'
-        return <span style={{ color, fontWeight: 600 }}>{fmt1(v)}</span>
-      },
-    }),    col.display({
-      id: 'risk_pct',
-      header: () => <span title="Maximum loss from trigger to stop, as a percentage of trigger price.">Max Loss %</span>,
+    // ── 1. STOCK — ticker + price + badges ────────────────────────────────────
+    col.display({
+      size: 160,
+      id: 'symbol',
+      header: 'Stock',
       cell: info => {
         const r = info.row.original
-        if (!r.entry || !r.stop || r.entry <= 0) return <span>\u2014</span>
-        const pct = ((r.entry - r.stop) / r.entry) * 100
-        const color = pct > 5 ? '#f87171' : pct > 3 ? '#fb923c' : '#fbbf24'
-        return <span style={{ color, fontWeight: 500 }}>{pct.toFixed(1)}%</span>
+        return (
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ fontWeight: 700, fontSize: 14 }}>{r.symbol}</span>
+              {r.earnings_warning && (
+                <span title="Earnings within 10 days — score already reduced" style={{ color: '#fbbf24', fontSize: 12 }}>⚠</span>
+              )}
+              {gatesBypassed && (
+                <span title="Custom — quality filters off" style={{
+                  padding: '1px 4px', background: '#1e1b4b', color: '#a5b4fc',
+                  border: '1px solid #4338ca', borderRadius: 3, fontSize: 9, fontWeight: 700,
+                }}>CUSTOM</span>
+              )}
+            </span>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>${fmt2(r.price)}</span>
+          </span>
+        )
       },
-    }),    col.accessor('entry', {
-      header: () => <span title="Trigger price for the setup. Readiness dot: green = near trigger, yellow = waiting, red = extended/chasing.">Trigger Price</span>,
+    }),
+
+    // ── 2. SETUP — pattern + score stacked ───────────────────────────────────
+    col.accessor(row => row.composite_score ?? 0, {
+      size: 220,
+      id: 'composite_score',
+      header: 'Setup & Score',
+      cell: info => {
+        const score = info.getValue() as number
+        const r = info.row.original
+        const v = r.setup_type ?? ''
+        const DISPLAY: Record<string, string> = {
+          breakout: 'Breakout', momentum: 'Momentum', reversion: 'Bounce', retest: 'Retest',
+        }
+        return (
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {/* Pattern pill */}
+            <span style={{
+              alignSelf: 'flex-start',
+              color: SETUP_COLOR[v] ?? '#94a3b8',
+              background: v === 'breakout' ? '#0f2744' : v === 'momentum' ? '#0f2d1a' : v === 'reversion' ? '#2d2200' : '#1e1040',
+              padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700,
+              border: `1px solid ${(SETUP_COLOR[v] ?? '#94a3b8')}30`,
+            }}>
+              {DISPLAY[v] ?? v}
+            </span>
+            {/* Score row */}
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: scoreColor(score), fontWeight: 700, fontSize: 16, minWidth: 28 }}>{score}</span>
+              <span style={{ display: 'inline-block', width: 48, height: 5, background: '#1e2235', borderRadius: 3, overflow: 'hidden' }}>
+                <span style={{ display: 'block', width: `${Math.min(100, score)}%`, height: '100%', background: scoreColor(score), borderRadius: 3 }} />
+              </span>
+            </span>
+          </span>
+        )
+      },
+    }),
+
+    // ── 3. SIGNALS — momentum + price position from breakdown pts (always populated) ──
+    col.display({
+      size: 180,
+      id: 'signals',
+      header: () => <span title="Momentum: is buying pressure rising? Position: where is price in its recent range? Both come from the scoring model — higher bars = stronger signal.">Signals</span>,
+      cell: info => {
+        const r = info.row.original
+        const macdPts = (r.breakdown?.macd ?? 0) as number
+        const bbPts   = (r.breakdown?.bb ?? 0) as number
+        const mColor = macdPts >= 18 ? '#4ade80' : macdPts >= 10 ? '#86efac' : macdPts >= 4 ? '#fbbf24' : '#475569'
+        const bColor = bbPts >= 15 ? '#4ade80' : bbPts >= 8 ? '#86efac' : bbPts >= 4 ? '#fbbf24' : '#475569'
+        const mLabel = macdPts >= 18 ? 'Strong ↑' : macdPts >= 10 ? 'Rising ↑' : macdPts >= 4 ? 'Building' : 'Flat'
+        const bLabel = bbPts >= 15 ? 'Near high' : bbPts >= 8 ? 'Upper half' : bbPts >= 4 ? 'Midrange' : 'Near low'
+        const raw_macd = r.macd_hist_val
+        const raw_bb = r.bb_position_val
+        return (
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <span style={{ fontSize: 10, color: '#475569' }}>Momentum</span>
+              <span style={{ fontSize: 12, color: mColor, fontWeight: 600 }}>
+                {mLabel}
+                {raw_macd != null && <span style={{ color: '#475569', fontWeight: 400 }}> ({raw_macd >= 0 ? '+' : ''}{raw_macd.toFixed(2)})</span>}
+              </span>
+            </span>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <span style={{ fontSize: 10, color: '#475569' }}>Position</span>
+              <span style={{ fontSize: 12, color: bColor, fontWeight: 600 }}>
+                {bLabel}
+                {raw_bb != null && <span style={{ color: '#475569', fontWeight: 400 }}> ({(raw_bb * 100).toFixed(0)}%)</span>}
+              </span>
+            </span>
+          </span>
+        )
+      },
+    }),
+
+    // ── 4. TRADE PLAN — entry + stop + target + R:R as one execution unit ─────
+    col.accessor('entry', {
+      size: 260,
+      header: () => <span title="The complete trade plan: when to enter, where to cut the loss (stop), and what to aim for (target). R:R = reward ÷ risk.">Trade Plan</span>,
       sortingFn: (a, b) => readinessRank(a.original) - readinessRank(b.original),
       cell: info => {
         const row = info.row.original
         const entry = info.getValue() as number
         const trig = row.trigger_kind
         const kindLabel: Record<string, string> = {
-          break_above: 'break ↑',
-          pullback_to_ema8: '↩ EMA8',
-          reclaim_confirm: 'confirm',
-          retest_of: 'retest',
-          market_close: 'at close',
+          break_above: 'break ↑', pullback_to_ema8: '↩ EMA8',
+          reclaim_confirm: 'confirm', retest_of: 'retest', market_close: 'at close',
         }
         const triggerTitle: Record<string, string> = {
-          break_above:      `Wait for price to break above $${fmt2(entry)} on above-average volume. Place a limit order at that level — do not buy before the break.`,
-          pullback_to_ema8: `Wait for price to pull back to the 8-day EMA near $${fmt2(entry)}. Enter on the touch or the first green candle off it.`,
-          reclaim_confirm:  `Wait for price to reclaim $${fmt2(entry)} and close above it. Enter after the confirmed close, not on the initial poke.`,
-          retest_of:        `Price already broke out. Wait for it to come back and retest $${fmt2(entry)} as support, then enter on the bounce.`,
-          market_close:     `Enter near today's close around $${fmt2(entry)}. No intraday trigger — just a position into the close.`,
+          break_above:      `Wait for price to break above $${fmt2(entry)} on above-average volume.`,
+          pullback_to_ema8: `Wait for price to pull back to the 8-day EMA near $${fmt2(entry)}.`,
+          reclaim_confirm:  `Wait for price to reclaim $${fmt2(entry)} and close above it.`,
+          retest_of:        `Wait for price to retest $${fmt2(entry)} as support, then enter on the bounce.`,
+          market_close:     `Enter near today's close around $${fmt2(entry)}.`,
         }
-        // Readiness dot: green = within 1% of trigger, red = extended >3%, yellow = waiting
         const nearTrigger = !row.extended && Math.abs((row.price - entry) / entry) <= 0.01
         const dotColor = row.extended ? '#f87171' : nearTrigger ? '#4ade80' : '#fbbf24'
-        const dotTitle = row.extended
-          ? `Extended — current price ($${fmt2(row.price)}) is >3% past the trigger. Wait for a pullback or skip; your real R:R is already degraded.`
-          : nearTrigger
-          ? `Near trigger — price ($${fmt2(row.price)}) is within 1% of the entry level. Good zone to place your limit order.`
-          : `Not yet triggered — price ($${fmt2(row.price)}) hasn't reached $${fmt2(entry)} yet. Set an alert and wait.`
+        const dotTitle = row.extended ? `Extended — price is >3% past trigger` : nearTrigger ? `Near trigger — good zone to place order` : `Not yet — price hasn't reached entry level`
+        const stopPct = ((entry - row.stop) / entry * 100)
+        const rrColor = row.rr >= 3.5 ? '#4ade80' : row.rr >= 2.75 ? '#86efac' : '#fbbf24'
         return (
-          <span>
-            <span title={dotTitle} style={{ marginRight: 5, color: dotColor, cursor: 'default', fontSize: 10 }}>●</span>
-            <span style={{ fontWeight: 600 }}>${fmt2(entry)}</span>
-            {trig && trig in kindLabel && (
-              <span
-                title={triggerTitle[trig] ?? ''}
-                style={{
-                  marginLeft: 6,
-                  fontSize: 11,
-                  color: '#94a3b8',
-                  background: '#1e2235',
-                  padding: '1px 5px',
-                  borderRadius: 3,
-                  letterSpacing: 0.3,
-                  cursor: 'help',
-                }}>
-                {kindLabel[trig]}
-              </span>
-            )}
-            {row.extended && (
-              <span title="Current price is more than 3% past the trigger — chasing entry"
-                style={{
-                  marginLeft: 4,
-                  fontSize: 11,
-                  color: '#fbbf24',
-                  background: '#3a2e0a',
-                  padding: '1px 5px',
-                  borderRadius: 3,
-                  fontWeight: 700,
-                  letterSpacing: 0.3,
-                }}>
-                CHASING
-              </span>
-            )}
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 180 }}>
+            {/* Entry row */}
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span title={dotTitle} style={{ color: dotColor, fontSize: 9, cursor: 'default' }}>●</span>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>Enter ${fmt2(entry)}</span>
+              {trig && trig in kindLabel && (
+                <span title={triggerTitle[trig] ?? ''} style={{ fontSize: 10, color: '#94a3b8', background: '#1e2235', padding: '1px 5px', borderRadius: 3, cursor: 'help' }}>
+                  {kindLabel[trig]}
+                </span>
+              )}
+              {row.extended && (
+                <span title="Price moved past the ideal entry — wait for pullback" style={{ fontSize: 10, color: '#fbbf24', background: '#3a2e0a', padding: '1px 5px', borderRadius: 3, fontWeight: 700 }}>
+                  LATE
+                </span>
+              )}
+            </span>
+            {/* Stop row */}
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ color: '#475569', fontSize: 10, minWidth: 8 }}>▼</span>
+              <span style={{ color: '#f87171', fontWeight: 600 }}>Stop ${fmt2(row.stop)}</span>
+              <span style={{ fontSize: 10, color: '#64748b' }}>−{stopPct.toFixed(1)}%</span>
+            </span>
+            {/* Target row */}
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ color: '#475569', fontSize: 10, minWidth: 8 }}>→</span>
+              <span style={{ color: '#4ade80', fontWeight: 600 }}>Target ${fmt2(row.target)}</span>
+              <span style={{ fontSize: 11, color: rrColor, fontWeight: 700 }}>{fmt1(row.rr)}R</span>
+            </span>
           </span>
         )
       },
     }),
-    col.accessor('stop', { header: 'Stop Loss', cell: i => (
-      <span style={{ color: '#f87171' }}>${fmt2(i.getValue())}</span>
-    ) }),
-    col.accessor('target', { header: 'Take Profit', cell: i => (
-      <span style={{ color: '#4ade80' }}>${fmt2(i.getValue())}</span>
-    ) }),
+
+    // ── 5. HOLD ───────────────────────────────────────────────────────────────
     col.accessor(row => `${row.hold_min_days}–${row.hold_max_days}d`, {
+      size: 90,
       id: 'hold',
-      header: () => <span title="Planned holding window. Auto-trimmed when it would cross earnings.">Planned Hold</span>,
-      cell: info => <span style={{ fontSize: 11 }}>{info.getValue()}</span>,
+      header: () => <span title="How many trading days to hold the position before taking profit or reassessing.">Hold</span>,
+      cell: info => <span style={{ fontSize: 11, color: '#94a3b8' }}>{info.getValue()}</span>,
     }),
+
+    // ── 6. EARNINGS ───────────────────────────────────────────────────────────
     col.display({
+      size: 100,
       id: 'earnings',
-      header: () => <span title="Days until next earnings report. Lower values increase event risk.">Days To Earnings</span>,
+      header: () => <span title="Days until next earnings report. Within 10 days = elevated risk. Score is already reduced for nearby earnings.">Earnings</span>,
       cell: info => {
         const r = info.row.original
         const dte = r.days_to_earnings
-        if (dte == null || dte < 0) return <span style={{ color: '#475569', fontSize: 11 }}>{'—'}</span>
+        if (dte == null || dte < 0) return <span style={{ color: '#475569', fontSize: 11 }}>—</span>
         const color = dte <= 7 ? '#f97316' : dte <= 14 ? '#fbbf24' : '#64748b'
-        return <span style={{ color, fontSize: 11, fontWeight: dte <= 14 ? 600 : 400 }}>{dte}d</span>
+        return <span style={{ color, fontSize: 11, fontWeight: dte <= 14 ? 600 : 400 }}>{dte <= 7 ? `${dte}d ⚠` : `${dte}d`}</span>
       },
     }),
   ]
@@ -434,32 +305,9 @@ export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }
 
   if (data.length === 0) return null
 
-  // Detect the "showing v3 but cached docs predate v3" case so we can warn the
-  // user instead of silently showing 0% for every row.
-  const v3Missing = scorerVersion === 'v3' &&
-    data.every(r => r.swing_score_v3 == null || (r.p_target == null && !r.lasso_top_features?.length))
-
   return (
     <div className="table-wrapper">
-      {v3Missing && (
-        <div style={{
-          margin: '0 0 10px',
-          padding: '8px 12px',
-          background: '#1e1b4b',
-          border: '1px solid #4338ca',
-          borderRadius: 4,
-          fontSize: 12,
-          color: '#cbd5e1',
-          lineHeight: 1.5,
-        }}>
-          <strong style={{ color: '#a5b4fc' }}>v3 not in these results.</strong>{' '}
-          The cached scan was produced before the v3 Lasso scorer shipped, so the
-          rows below only have legacy v2 scores. Re-run the scan (or wait for the
-          next screener-worker run) to populate calibrated P(target) values.
-          Switch the toggle to <strong>v2</strong> to see the ranks the cache was sorted by.
-        </div>
-      )}
-      <table className="screener-table">
+      <table className="screener-table" style={{ tableLayout: 'fixed' }}>
         <thead>
           {table.getHeaderGroups().map(hg => (
             <tr key={hg.id}>
@@ -467,6 +315,7 @@ export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }
                 <th
                   key={h.id}
                   className="sortable"
+                  style={{ width: h.column.getSize() }}
                   onClick={h.column.getToggleSortingHandler()}
                 >
                   {flexRender(h.column.columnDef.header, h.getContext())}
@@ -488,7 +337,7 @@ export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }
                   style={{ cursor: 'pointer' }}
                 >
                   {row.getVisibleCells().map(c => (
-                    <td key={c.id}>{flexRender(c.column.columnDef.cell, c.getContext())}</td>
+                    <td key={c.id} style={{ width: c.column.getSize() }}>{flexRender(c.column.columnDef.cell, c.getContext())}</td>
                   ))}
                 </tr>
                 {isExpanded && (
@@ -614,23 +463,26 @@ export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }
                             <h4 style={{ margin: '0 0 6px', fontSize: 13 }}>Score Breakdown</h4>
                           )}
                           <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: '#1e2235', marginBottom: 4 }}>
-                            <div title={`R:R: ${r.breakdown.rr?.toFixed(1)} / 40 pts`}         style={{ width: `${r.breakdown.rr        || 0}%`, background: '#60a5fa', transition: 'width 0.3s' }} />
-                            <div title={`Setup: ${r.breakdown.setup?.toFixed(1)} / 30 pts`}     style={{ width: `${r.breakdown.setup      || 0}%`, background: '#4ade80', transition: 'width 0.3s' }} />
-                            <div title={`Context: ${r.breakdown.context?.toFixed(1)} / 20 pts`} style={{ width: `${r.breakdown.context    || 0}%`, background: '#fbbf24', transition: 'width 0.3s' }} />
-                            <div title={`Inst: ${r.breakdown.institutional?.toFixed(1)} / 10 pts`} style={{ width: `${r.breakdown.institutional || 0}%`, background: '#a78bfa', transition: 'width 0.3s' }} />
+                            <div title={`R:R: ${r.breakdown.rr?.toFixed(1)} / 40 pts`}   style={{ width: `${((r.breakdown.rr   || 0) / 125 * 100).toFixed(1)}%`, background: '#60a5fa', transition: 'width 0.3s' }} />
+                            <div title={`Setup: ${r.breakdown.setup?.toFixed(1)} / 30 pts`} style={{ width: `${((r.breakdown.setup || 0) / 125 * 100).toFixed(1)}%`, background: '#4ade80', transition: 'width 0.3s' }} />
+                            <div title={`MACD: ${r.breakdown.macd?.toFixed(1)} / 25 pts`} style={{ width: `${((r.breakdown.macd  || 0) / 125 * 100).toFixed(1)}%`, background: '#fbbf24', transition: 'width 0.3s' }} />
+                            <div title={`BB pos: ${r.breakdown.bb?.toFixed(1)} / 20 pts`}  style={{ width: `${((r.breakdown.bb    || 0) / 125 * 100).toFixed(1)}%`, background: '#a78bfa', transition: 'width 0.3s' }} />
+                            <div title={`Vol: ${r.breakdown.vol?.toFixed(1)} / 10 pts`}   style={{ width: `${((r.breakdown.vol   || 0) / 125 * 100).toFixed(1)}%`, background: '#f97316', transition: 'width 0.3s' }} />
                           </div>
-                          <div style={{ display: 'flex', gap: 10, fontSize: 11, color: '#64748b', marginBottom: 8 }}>
+                          <div style={{ display: 'flex', gap: 10, fontSize: 11, color: '#64748b', marginBottom: 8, flexWrap: 'wrap' }}>
                             <span><span style={{ color: '#60a5fa' }}>■</span> R:R /40</span>
                             <span><span style={{ color: '#4ade80' }}>■</span> Setup /30</span>
-                            <span><span style={{ color: '#fbbf24' }}>■</span> Context /20</span>
-                            <span><span style={{ color: '#a78bfa' }}>■</span> Inst /10</span>
+                            <span><span style={{ color: '#fbbf24' }}>■</span> MACD /25</span>
+                            <span><span style={{ color: '#a78bfa' }}>■</span> BB /20</span>
+                            <span><span style={{ color: '#f97316' }}>■</span> Vol /10</span>
                           </div>
                           <table style={{ fontSize: 11, width: '100%' }}>
                             <tbody>
                               <tr><td>R:R</td><td style={{ textAlign: 'right' }}>{r.breakdown.rr?.toFixed(1)} / 40</td></tr>
                               <tr><td>Setup</td><td style={{ textAlign: 'right' }}>{r.breakdown.setup?.toFixed(1)} / 30</td></tr>
-                              <tr><td>Context (ADX + A/D)</td><td style={{ textAlign: 'right' }}>{r.breakdown.context?.toFixed(1)} / 20</td></tr>
-                              <tr><td>Institutional</td><td style={{ textAlign: 'right' }}>{r.breakdown.institutional?.toFixed(1)} / 10</td></tr>
+                              <tr><td>MACD histogram</td><td style={{ textAlign: 'right' }}>{r.breakdown.macd?.toFixed(1)} / 25</td></tr>
+                              <tr><td>BB position</td><td style={{ textAlign: 'right' }}>{r.breakdown.bb?.toFixed(1)} / 20</td></tr>
+                              <tr><td>Volume surge</td><td style={{ textAlign: 'right' }}>{r.breakdown.vol?.toFixed(1)} / 10</td></tr>
                               <tr style={{ borderTop: '1px solid #334155' }}>
                                 <td style={{ paddingTop: 4 }}>Raw subtotal</td>
                                 <td style={{ textAlign: 'right', paddingTop: 4 }}>{r.raw_score.toFixed(1)} / 100</td>
@@ -643,26 +495,20 @@ export function SwingTable({ data, gatesBypassed = false, scorerVersion = 'v3' }
                               <table style={{ fontSize: 11, width: '100%' }}>
                                 <tbody>
                                   <tr>
-                                    <td>Regime ({r.regime_label || 'baseline'})</td>
-                                    <td style={{ textAlign: 'right', color: r.multipliers.regime < 1 ? '#fbbf24' : '#94a3b8' }}>
-                                      ×{r.multipliers.regime?.toFixed(2)}
-                                    </td>
-                                  </tr>
-                                  <tr>
                                     <td>
                                       Earnings
                                       {r.days_to_earnings != null && ` (${r.days_to_earnings}d)`}
                                     </td>
-                                    <td style={{ textAlign: 'right', color: r.multipliers.earnings < 1 ? '#fbbf24' : '#94a3b8' }}>
+                                    <td style={{ textAlign: 'right', color: (r.multipliers.earnings ?? 1) < 1 ? '#fbbf24' : '#94a3b8' }}>
                                       ×{r.multipliers.earnings?.toFixed(2)}
                                     </td>
                                   </tr>
-                                  <tr>
-                                    <td>Extended {r.extended ? '(chasing)' : ''}</td>
-                                    <td style={{ textAlign: 'right', color: r.multipliers.extended < 1 ? '#fbbf24' : '#94a3b8' }}>
-                                      ×{r.multipliers.extended?.toFixed(2)}
-                                    </td>
-                                  </tr>
+                                  {r.extended && (
+                                    <tr>
+                                      <td>Extended (flag only — no penalty)</td>
+                                      <td style={{ textAlign: 'right', color: '#94a3b8' }}>×1.00</td>
+                                    </tr>
+                                  )}
                                   <tr style={{ borderTop: '1px solid #334155' }}>
                                     <td style={{ paddingTop: 4, fontWeight: 600 }}>Final score</td>
                                     <td style={{ textAlign: 'right', paddingTop: 4, fontWeight: 700 }}>

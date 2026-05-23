@@ -83,6 +83,8 @@ class SwingResultOut(BaseModel):
     rsi_divergence: bool = False
     fib_618_hold: bool = False
     structure_reclaimed: bool = False
+    macd_hist_val: float | None = None
+    bb_position_val: float | None = None
     setup_scores: dict[str, float] = {}
     breakdown: dict[str, float] = {}
     multipliers: dict[str, float] = {}
@@ -100,6 +102,8 @@ class SwingResultOut(BaseModel):
     lasso_confidence: str = "speculative"
     lasso_top_features: list[dict] = []
     lasso_missing_features: list[str] = []
+    # --- composite: 30% v3.0 rank + 70% Lasso rank, scaled 0-100 ---
+    composite_score: int = 0
 
 
 class SwingResponse(BaseModel):
@@ -172,6 +176,53 @@ def _regime_from_dict(d: dict[str, Any]) -> RegimeOut:
     )
 
 
+def _pct_rank(vals: list[float]) -> list[float]:
+    """Percentile ranks in [0, 1] with average-rank tie-breaking."""
+    n = len(vals)
+    if n <= 1:
+        return [1.0] * n
+    order = sorted(range(n), key=lambda i: vals[i])
+    ranks: list[float] = [0.0] * n
+    i = 0
+    while i < n:
+        j = i + 1
+        while j < n and vals[order[j]] == vals[order[i]]:
+            j += 1
+        avg = (i + j - 1) / 2.0 / (n - 1)
+        for k in range(i, j):
+            ranks[order[k]] = avg
+        i = j
+    return ranks
+
+
+def _inject_composite(rows: list[dict]) -> None:
+    """Add composite_score key to each raw result dict (before SwingResultOut construction).
+
+    composite = 30% v3.0 additive rank + 70% Lasso P(target) rank, scaled 0-100.
+    Rank-normalisation removes the Lasso's score-distribution skew (53% of
+    trades cluster at P≈32-35%) and combines both models' discriminative power.
+    IC on 3,366-trade backtest: rho = +0.353 vs +0.250 (v3.0) and +0.344 (Lasso).
+
+    For n < 10 results (custom scans, near-empty universes) percentile ranks are
+    meaningless — a single stock is trivially rank-1 → composite=100 regardless of
+    quality.  Fall back to absolute weighted average in that case.
+    """
+    n = len(rows)
+    if n == 0:
+        return
+    v3_vals    = [float(r.get("swing_score") or 0)          for r in rows]
+    lasso_vals = [float(r.get("p_target") or 0) * 100       for r in rows]
+    if n >= 10:
+        v3_r    = _pct_rank(v3_vals)
+        lasso_r = _pct_rank(lasso_vals)
+        for i, r in enumerate(rows):
+            r["composite_score"] = round((0.30 * v3_r[i] + 0.70 * lasso_r[i]) * 100)
+    else:
+        # Absolute weighted average: swing_score and p_target*100 are both 0–100.
+        for i, r in enumerate(rows):
+            r["composite_score"] = round(0.30 * v3_vals[i] + 0.70 * lasso_vals[i])
+
+
 def _compute_swing_regime(spy_df=None, universe_ohlc=None) -> RegimeState:
     """Compute the market regime for the swing screener.
 
@@ -205,14 +256,15 @@ async def get_swing_regime() -> RegimeOut:
 
 @router.get("/swing/scan", response_model=SwingResponse)
 async def run_swing_scan(
-    top_n: int = Query(default=20, ge=1, le=50),
     universe: str = Query(
         default="swing_eligible",
         description=f"Universe key: one of {sorted(UNIVERSES)}",
     ),
 ) -> SwingResponse:
     """
-    Returns precomputed swing universe scan results. Results are updated every
+    Returns precomputed swing universe scan results. All stored symbols are
+    returned (no server-side quality filtering); the frontend applies score,
+    setup-type, R:R, and confidence filters. Results are updated every
     15 min during market hours and every 4 h outside market hours by a
     background Container Apps Job (ADR-0025). Custom symbol lists use POST /swing.
     """
@@ -220,7 +272,7 @@ async def run_swing_scan(
 
     try:
         rows, regime_dict, last_updated_at, _oldest_age = await asyncio.to_thread(
-            get_swing_results, symbols, top_n
+            get_swing_results, symbols
         )
     except ScreenerStoreEmpty as exc:
         logger.warning("Swing precomputed store empty: %s", exc)
@@ -232,6 +284,7 @@ async def run_swing_scan(
             ),
         ) from exc
 
+    _inject_composite(rows)
     results = [SwingResultOut(**r) for r in rows]
     regime_out = _regime_from_dict(regime_dict) if regime_dict else None
 
@@ -254,6 +307,7 @@ async def run_swing(req: SwingRequest) -> SwingResponse:
         raise HTTPException(status_code=422, detail="symbols list is empty")
 
     raw, regime_state = await asyncio.to_thread(run_scan, req.symbols, 4, req.bypass_gates)
+    _inject_composite(raw)
     results = [SwingResultOut(**r) for r in raw]
     return SwingResponse(
         results=results,

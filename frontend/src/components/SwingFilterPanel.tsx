@@ -1,27 +1,26 @@
-import type { SwingFilterState, SwingSetupType, SwingConfidence, SwingScorerVersion } from '../types/swing'
+import type { SwingFilterState, SwingSetupType, SwingConfidence } from '../types/swing'
 
 interface Props {
   filters: SwingFilterState
   onChange: (f: SwingFilterState) => void
-  scorerVersion?: SwingScorerVersion
 }
 
 const SETUP_OPTIONS: { value: SwingSetupType | 'all'; label: string }[] = [
-  { value: 'all', label: 'All setups' },
+  { value: 'all', label: 'All patterns' },
   { value: 'breakout', label: 'Breakout' },
   { value: 'momentum', label: 'Momentum' },
-  { value: 'reversion', label: 'Reversion' },
+  { value: 'reversion', label: 'Bounce' },
   { value: 'retest', label: 'Retest' },
 ]
 
 const CONFIDENCE_OPTIONS: { value: SwingConfidence | 'all'; label: string }[] = [
-  { value: 'all', label: 'Any confidence' },
-  { value: 'high', label: 'High only' },
+  { value: 'all', label: 'Any quality' },
+  { value: 'high', label: 'Strong only' },
   { value: 'medium', label: 'Medium+' },
-  { value: 'speculative', label: 'Speculative+' },
+  { value: 'speculative', label: 'All' },
 ]
 
-export function SwingFilterPanel({ filters, onChange, scorerVersion = 'v3' }: Props) {
+export function SwingFilterPanel({ filters, onChange }: Props) {
   function set<K extends keyof SwingFilterState>(key: K, value: SwingFilterState[K]) {
     onChange({ ...filters, [key]: value })
   }
@@ -31,7 +30,7 @@ export function SwingFilterPanel({ filters, onChange, scorerVersion = 'v3' }: Pr
       <span className="filter-label">Filters:</span>
 
       <label className="filter-item">
-        Setup:
+        Pattern:
         <select
           value={filters.setupType}
           onChange={e => set('setupType', e.target.value as SwingSetupType | 'all')}
@@ -42,7 +41,7 @@ export function SwingFilterPanel({ filters, onChange, scorerVersion = 'v3' }: Pr
       </label>
 
       <label className="filter-item">
-        Min R:R ≥
+        Min Reward/Risk ≥
         <input
           type="number"
           className="filter-number"
@@ -56,7 +55,7 @@ export function SwingFilterPanel({ filters, onChange, scorerVersion = 'v3' }: Pr
       </label>
 
       <label className="filter-item">
-        {scorerVersion === 'v3' ? 'Min chance ≥' : 'Min score ≥'}
+        Min Score ≥
         <input
           type="number"
           className="filter-number"
@@ -66,13 +65,11 @@ export function SwingFilterPanel({ filters, onChange, scorerVersion = 'v3' }: Pr
           step={5}
           onChange={e => set('minScore', Number(e.target.value))}
         />
-        <span className="filter-hint">
-          {scorerVersion === 'v3' ? '(P(target) %, 0 = off)' : '(0 = off)'}
-        </span>
+        <span className="filter-hint">(0 = off, 65 recommended)</span>
       </label>
 
       <label className="filter-item">
-        Confidence:
+        Quality:
         <select
           value={filters.minConfidence}
           onChange={e => set('minConfidence', e.target.value as SwingConfidence | 'all')}
@@ -88,7 +85,7 @@ export function SwingFilterPanel({ filters, onChange, scorerVersion = 'v3' }: Pr
           checked={filters.excludeEarningsWarning}
           onChange={e => set('excludeEarningsWarning', e.target.checked)}
         />
-        Exclude earnings ≤ 10d
+        Hide earnings risk
       </label>
     </div>
   )

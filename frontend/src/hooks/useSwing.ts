@@ -17,7 +17,7 @@ interface UseSwingReturn {
   lastUpdatedAt: string | null
   scorerVersion: SwingScorerVersion
   setScorerVersion: (v: SwingScorerVersion) => void
-  scan: (topN?: number, universe?: string) => Promise<void>
+  scan: (universe?: string) => Promise<void>
   run: (symbols: string[], bypassGates?: boolean) => Promise<void>
 }
 
@@ -70,7 +70,7 @@ export function useSwing(): UseSwingReturn {
     setCachedAt(Date.now())
   }
 
-  async function scan(topN: number = 20, universe: string = 'swing_eligible') {
+  async function scan(universe: string = 'swing_eligible') {
     setLoading(true)
     setIsScanMode(true)
     setErrorMessage(null)
@@ -78,7 +78,7 @@ export function useSwing(): UseSwingReturn {
     setResults([])
     clearResultCache('swing')
     try {
-      const url = `${API_BASE}/api/screener/swing/scan?top_n=${topN}&universe=${encodeURIComponent(universe)}`
+      const url = `${API_BASE}/api/screener/swing/scan?universe=${encodeURIComponent(universe)}`
       await handleResponse(await fetch(url, { method: 'GET' }))
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Network error — is the backend running?'

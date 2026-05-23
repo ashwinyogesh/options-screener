@@ -59,19 +59,14 @@ const DEFAULT_SWING_FILTERS: SwingFilterState = {
 function applySwingFilters(
   results: SwingResult[],
   filters: SwingFilterState,
-  scorerVersion: 'v2' | 'v3' = 'v3',
 ): SwingResult[] {
   return results.filter(r => {
     if (filters.setupType !== 'all' && r.setup_type !== filters.setupType) return false
     if (filters.minRR > 0 && r.rr < filters.minRR) return false
-    if (filters.minScore > 0) {
-      const activeScore = scorerVersion === 'v3' ? (r.swing_score_v3 ?? 0) : r.swing_score
-      if (activeScore < filters.minScore) return false
-    }
+    if (filters.minScore > 0 && (r.composite_score ?? 0) < filters.minScore) return false
     if (filters.minConfidence !== 'all') {
       const order: Record<string, number> = { speculative: 0, medium: 1, high: 2 }
-      const activeConfidence = scorerVersion === 'v3' ? (r.lasso_confidence ?? 'speculative') : r.confidence
-      if (order[activeConfidence] < order[filters.minConfidence]) return false
+      if (order[r.confidence] < order[filters.minConfidence]) return false
     }
     if (filters.excludeEarningsWarning && r.earnings_warning) return false
     return true
@@ -173,7 +168,7 @@ export default function App() {
   // Swing state
   const { results: swingResults, regime: swingRegime, loading: swingLoading, isScanMode: swingIsScanMode, gatesBypassed: swingGatesBypassed, errorMessage: swingErrorMessage, cachedAt: swingCachedAt, lastUpdatedAt: swingLastUpdatedAt, scoringVersion: swingScoringVersion, scoringVersionV3: swingScoringVersionV3, scorerVersion: swingScorerVersion, setScorerVersion: setSwingScorerVersion, scan: scanSwing, run: runSwing } = useSwing()
   const [swingFilters, setSwingFilters] = useState<SwingFilterState>(DEFAULT_SWING_FILTERS)
-  const filteredSwing = useMemo(() => applySwingFilters(swingResults, swingFilters, swingScorerVersion), [swingResults, swingFilters, swingScorerVersion])
+  const filteredSwing = useMemo(() => applySwingFilters(swingResults, swingFilters), [swingResults, swingFilters])
 
   return (
     <div className="app">
@@ -449,16 +444,14 @@ export default function App() {
         {activeTab === 'swing' && (
           <>
             <SwingInput
-              onScan={(topN, universe) => scanSwing(topN, universe)}
+              onScan={(universe) => scanSwing(universe)}
               onCustom={(symbols, bypassGates) => runSwing(symbols, bypassGates)}
               loading={swingLoading}
-              scoringVersionV3={swingScoringVersionV3}
             />
             {swingResults.length > 0 && (
               <SwingFilterPanel
                 filters={swingFilters}
                 onChange={setSwingFilters}
-                scorerVersion={swingScorerVersion}
               />
             )}
             {swingLoading && (

@@ -41,6 +41,7 @@ from services.swing.indicators import (
     compute_adx,
     compute_atr,
     compute_avg_daily_volume,
+    compute_bb_position,
     compute_bb_squeeze_percentile,
     compute_consolidation_base,
     compute_ema_alignment,
@@ -48,6 +49,7 @@ from services.swing.indicators import (
     compute_gap_fill_candidate,
     compute_higher_lows,
     compute_macd_histogram_inflection,
+    compute_macd_histogram_value,
     compute_rs_vs_spy,
     compute_rsi_divergence,
     compute_stochastic,
@@ -105,6 +107,8 @@ class SwingResult:
     rsi_divergence: bool
     fib_618_hold: bool
     structure_reclaimed: bool
+    macd_hist_val: float | None = None
+    bb_position_val: float | None = None
     setup_scores: dict[str, float] = field(default_factory=dict)
     breakdown: dict[str, float] = field(default_factory=dict)
     multipliers: dict[str, float] = field(default_factory=dict)
@@ -244,6 +248,8 @@ def process_symbol(
         rsi_val = compute_rsi(df)
         rsi_div = compute_rsi_divergence(df)
         macd_inf = compute_macd_histogram_inflection(df)
+        macd_hist_val = compute_macd_histogram_value(df)
+        bb_pos_val = compute_bb_position(df)
         base = compute_consolidation_base(df)
         surge = compute_volume_surge(df)
         fib_hold = compute_fib_retracement_hold(df)
@@ -337,11 +343,9 @@ def process_symbol(
         scored = compute_swing_score(
             rr=plan.rr,
             setup_score=cls["best_score"],
-            adx_value=adx.get("adx"),
-            ad_line_slope_pct=ad_slope,
-            higher_lows=hl,
-            institutional_ownership_pct=inst_own,
-            regime_factor=regime_factor,
+            macd_hist_val=macd_hist_val,
+            bb_position=bb_pos_val,
+            vol_surge_ratio=surge.get("ratio"),
             days_to_earnings=dte,
             extended=plan.extended,
         )
@@ -409,6 +413,8 @@ def process_symbol(
             rsi_divergence=rsi_div,
             fib_618_hold=fib_hold,
             structure_reclaimed=reclaim.get("reclaimed", False),
+            macd_hist_val=macd_hist_val if macd_hist_val == macd_hist_val else None,
+            bb_position_val=bb_pos_val if bb_pos_val == bb_pos_val else None,
             setup_scores=cls["scores"],
             breakdown=scored["breakdown"],
             multipliers=scored["multipliers"],
