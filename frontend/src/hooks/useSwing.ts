@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { RegimeState, SwingResponse, SwingResult, SwingScorerVersion } from '../types/swing'
+import type { RegimeState, SwingResponse, SwingResult } from '../types/swing'
 import { loadResultCache, saveResultCache, clearResultCache } from '../utils/resultCache'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
@@ -13,10 +13,7 @@ interface UseSwingReturn {
   errorMessage: string | null
   cachedAt: number | null
   scoringVersion: string | null
-  scoringVersionV3: string | null
   lastUpdatedAt: string | null
-  scorerVersion: SwingScorerVersion
-  setScorerVersion: (v: SwingScorerVersion) => void
   scan: (universe?: string) => Promise<void>
   run: (symbols: string[], bypassGates?: boolean) => Promise<void>
 }
@@ -30,13 +27,7 @@ export function useSwing(): UseSwingReturn {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [cachedAt, setCachedAt] = useState<number | null>(null)
   const [scoringVersion, setScoringVersion] = useState<string | null>(null)
-  const [scoringVersionV3, setScoringVersionV3] = useState<string | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
-  const scorerVersion: SwingScorerVersion = 'v3'
-
-  function setScorerVersion(_: SwingScorerVersion): void {
-    // v2 is intentionally deprecated in the UI; keep signature stable for callers.
-  }
 
   useEffect(() => {
     const entry = loadResultCache<{ results: SwingResult[]; scoringVersion: string | null; regime: RegimeState | null }>('swing')
@@ -63,7 +54,6 @@ export function useSwing(): UseSwingReturn {
     const data: SwingResponse = await response.json()
     setResults(data.results)
     setScoringVersion(data.scoring_version)
-    setScoringVersionV3(data.scoring_version_v3 ?? null)
     setRegime(data.regime ?? null)
     setLastUpdatedAt(data.last_updated_at ?? null)
     saveResultCache('swing', { results: data.results, scoringVersion: data.scoring_version, regime: data.regime ?? null })
@@ -111,5 +101,5 @@ export function useSwing(): UseSwingReturn {
     }
   }
 
-  return { results, regime, loading, isScanMode, gatesBypassed, errorMessage, cachedAt, scoringVersion, scoringVersionV3, lastUpdatedAt, scorerVersion, setScorerVersion, scan, run }
+  return { results, regime, loading, isScanMode, gatesBypassed, errorMessage, cachedAt, scoringVersion, lastUpdatedAt, scan, run }
 }

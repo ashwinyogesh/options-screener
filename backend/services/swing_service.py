@@ -564,11 +564,3 @@ def run_scan(
         key=lambda r: max(r.swing_score, float(r.swing_score_v3)), reverse=True,
     )
     return [asdict(r) for r in qualified], regime
-
-
-def get_version() -> str:
-    return SWING_SCORER_VERSION
-
-
-def get_lasso_version() -> str:
-    return SWING_LASSO_VERSION

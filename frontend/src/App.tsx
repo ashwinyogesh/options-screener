@@ -166,7 +166,7 @@ export default function App() {
   const { results: emResults, errors: emErrors, loading: emLoading, symbolCount: emSymbolCount, isScanMode: emIsScanMode, errorMessage: emErrorMessage, cachedAt: emCachedAt, run: runEm, scan: scanEm } = useEmScan()
 
   // Swing state
-  const { results: swingResults, regime: swingRegime, loading: swingLoading, isScanMode: swingIsScanMode, gatesBypassed: swingGatesBypassed, errorMessage: swingErrorMessage, cachedAt: swingCachedAt, lastUpdatedAt: swingLastUpdatedAt, scoringVersion: swingScoringVersion, scoringVersionV3: swingScoringVersionV3, scorerVersion: swingScorerVersion, setScorerVersion: setSwingScorerVersion, scan: scanSwing, run: runSwing } = useSwing()
+  const { results: swingResults, regime: swingRegime, loading: swingLoading, isScanMode: swingIsScanMode, gatesBypassed: swingGatesBypassed, errorMessage: swingErrorMessage, cachedAt: swingCachedAt, lastUpdatedAt: swingLastUpdatedAt, scan: scanSwing, run: runSwing } = useSwing()
   const [swingFilters, setSwingFilters] = useState<SwingFilterState>(DEFAULT_SWING_FILTERS)
   const filteredSwing = useMemo(() => applySwingFilters(swingResults, swingFilters), [swingResults, swingFilters])
 
@@ -536,7 +536,7 @@ export default function App() {
                 )}
               </div>
             )}
-            <SwingTable data={filteredSwing} gatesBypassed={swingGatesBypassed} scorerVersion={swingScorerVersion} />
+            <SwingTable data={filteredSwing} gatesBypassed={swingGatesBypassed} />
             {!swingLoading && swingResults.length === 0 && !swingErrorMessage && (
               <div className="empty-state">
                 <p>Click <strong>🚀 Run</strong> to scan the swing-eligible universe for Breakout, Momentum, Reversion, and Retest setups. Hard gates: R:R ≥ 2.5, setup score ≥ 40. Top 3 receive AI commentary.</p>

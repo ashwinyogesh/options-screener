@@ -24,13 +24,6 @@ function fmtPct(n: number | null | undefined): string {
   return n.toFixed(1) + '%'
 }
 
-function expectedValuePerShare(row: SwingResult): number | null {
-  const p = row.p_target ?? (row.swing_score_v3 != null ? row.swing_score_v3 / 100 : null)
-  if (p == null) return null
-  if (!Number.isFinite(row.reward_per_share) || !Number.isFinite(row.risk_per_share)) return null
-  return (p * row.reward_per_share) - ((1 - p) * row.risk_per_share)
-}
-
 const SETUP_COLOR: Record<string, string> = {
   breakout: '#60a5fa',
   momentum: '#4ade80',

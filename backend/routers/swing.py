@@ -6,18 +6,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, field_validator
 
-from services.scan_cache import swing_scan_cache
 from services.scoring.swing import SWING_SCORER_VERSION
 from services.scoring.swing_lasso import SWING_LASSO_VERSION
 from services.screener.result_store import ScreenerStoreEmpty, get_swing_results
 from services.swing.regime import RegimeState, compute_regime
-from services.swing_insight_service import get_batch_commentary
-from services.swing_service import process_symbol, run_scan
+from services.swing_service import run_scan
 from services.universe import UNIVERSES, get_universe
 
 logger = logging.getLogger(__name__)
@@ -111,7 +109,7 @@ class SwingResponse(BaseModel):
     scoring_version: str = SWING_SCORER_VERSION
     scoring_version_v3: str = SWING_LASSO_VERSION
     regime: RegimeOut | None = None
-    last_updated_at: Optional[str] = None
+    last_updated_at: str | None = None
 
 
 class RegimeOut(BaseModel):
