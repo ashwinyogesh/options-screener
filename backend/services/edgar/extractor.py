@@ -347,3 +347,88 @@ def latest_filing_lag_days(facts: dict[str, Any], asof: date) -> int | None:
     if latest is None:
         return None
     return (asof - latest).days
+
+
+# Raw TTM line items that callers (e.g. ETV grounding supplement) want
+# verbatim — not ratios. Keep the keys aligned with EtvGrounding field names
+# so callers can fill `None` slots directly.
+RAW_TTM_FIELDS: tuple[str, ...] = (
+    "revenue_ttm",
+    "operating_income",
+    "operating_margin",
+    "ebitda",
+    "ebitda_margin",
+    "net_income",
+    "ni_margin",
+    "free_cash_flow",
+    "capex",
+    "cash",
+    "total_debt",
+    "net_debt",
+    "shares_out",
+    "roic",
+)
+
+
+def compute_raw_ttm_fundamentals(
+    facts: dict[str, Any],
+    asof: date,
+) -> dict[str, float | None]:
+    """Return raw TTM line items + latest balance-sheet stocks.
+
+    Sibling to :func:`compute_pit_factors`; this one exposes the underlying
+    accounting values rather than the derived ratios. Used by the ETV
+    grounding supplement to fill yfinance gaps from primary-source XBRL.
+
+    Keys mirror :class:`services.etv.grounding.EtvGrounding` field names.
+    Missing values are returned as ``None``.
+
+    `capex` is returned as a *positive* number (matches SEC's
+    PaymentsToAcquirePropertyPlantAndEquipment convention and yfinance's
+    `capitalExpenditures` sign for free-cash-flow downstream math).
+    """
+    flow_recs = {k: _records_for(facts, aliases) for k, aliases in _TAGS_FLOW.items()}
+    flow_recs["revenue"] = _records_for_largest(facts, _TAGS_FLOW["revenue"], asof)
+    stock_recs = {k: _records_for(facts, aliases) for k, aliases in _TAGS_STOCK.items()}
+
+    rev = _value_flow_ttm(flow_recs["revenue"], asof)
+    op_income = _value_flow_ttm(flow_recs["op_income"], asof)
+    da = _value_flow_ttm(flow_recs["depr_amort"], asof) or 0.0
+    ni = _value_flow_ttm(flow_recs["net_income"], asof)
+    op_cf = _value_flow_ttm(flow_recs["op_cf"], asof)
+    capex = _value_flow_ttm(flow_recs["capex"], asof)
+    fcf = (op_cf - (capex or 0.0)) if op_cf is not None else None
+    ebitda = (op_income + da) if op_income is not None else None
+
+    lt_debt = _value_stock(stock_recs["lt_debt"], asof) or 0.0
+    lt_debt_curr = _value_stock(stock_recs["lt_debt_curr"], asof) or 0.0
+    st_debt = _value_stock(stock_recs["st_debt"], asof) or 0.0
+    total_debt = lt_debt + lt_debt_curr + st_debt
+    cash = _value_stock(stock_recs["cash"], asof)
+    net_debt = (total_debt - (cash or 0.0)) if total_debt or cash is not None else None
+
+    equity = _value_stock(stock_recs["equity"], asof)
+    shares = _value_stock(stock_recs["shares"], asof)
+    invested_cap = (total_debt + equity) if equity is not None else None
+    roic = (
+        (op_income * 0.79) / invested_cap
+        if (op_income is not None and invested_cap and invested_cap > 0)
+        else None
+    )
+
+    return {
+        "revenue_ttm": rev,
+        "operating_income": op_income,
+        "operating_margin": _safe_div(op_income, rev) if (rev and rev > 0) else None,
+        "ebitda": ebitda,
+        "ebitda_margin": _safe_div(ebitda, rev) if (ebitda is not None and rev and rev > 0) else None,
+        "net_income": ni,
+        "ni_margin": _safe_div(ni, rev) if (rev and rev > 0) else None,
+        "free_cash_flow": fcf,
+        "capex": capex,
+        "cash": cash,
+        "total_debt": total_debt if (lt_debt or lt_debt_curr or st_debt) else None,
+        "net_debt": net_debt,
+        "shares_out": shares,
+        "roic": roic,
+    }

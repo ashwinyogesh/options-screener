@@ -28,7 +28,9 @@ from services.edgar import (
     EdgarUnavailable,
     FundamentalsCache,
     PIT_FACTORS,
+    RAW_TTM_FIELDS,
     compute_pit_factors,
+    compute_raw_ttm_fundamentals,
 )
 from services.edgar.extractor import latest_filing_lag_days
 
@@ -36,9 +38,11 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "PIT_FACTORS",
+    "RAW_TTM_FIELDS",
     "configure",
     "get_pit_factors",
     "get_pit_factors_with_lag",
+    "get_raw_fundamentals",
     "prefetch",
 ]
 
@@ -193,6 +197,22 @@ def get_pit_factors_with_lag(
     factors = compute_pit_factors(facts, asof, spot_price=spot_price)
     lag = latest_filing_lag_days(facts, asof)
     return factors, lag
+
+
+def get_raw_fundamentals(
+    ticker: str,
+    asof: date,
+) -> dict[str, float | None]:
+    """Return raw TTM line items (revenue, op_income, FCF, debt, ...) from EDGAR.
+
+    Keys mirror :class:`services.etv.grounding.EtvGrounding` field names so
+    callers can fill `None` slots directly. Missing values are returned as
+    None; absent companyfacts payload returns an all-None dict.
+    """
+    facts = _get_companyfacts(ticker)
+    if not facts:
+        return {k: None for k in RAW_TTM_FIELDS}
+    return compute_raw_ttm_fundamentals(facts, asof)
 
 
 def prefetch(tickers: list[str]) -> dict[str, str]:

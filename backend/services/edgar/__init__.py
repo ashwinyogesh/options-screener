@@ -11,7 +11,12 @@ External callers should use `services.fundamentals_service` rather than
 importing from this package directly.
 """
 from services.edgar.cache import DiskFundamentalsCache, FundamentalsCache
-from services.edgar.extractor import PIT_FACTORS, compute_pit_factors
+from services.edgar.extractor import (
+    PIT_FACTORS,
+    RAW_TTM_FIELDS,
+    compute_pit_factors,
+    compute_raw_ttm_fundamentals,
+)
 from services.edgar.fetcher import EdgarFetcher, EdgarUnavailable
 
 __all__ = [
@@ -20,5 +25,7 @@ __all__ = [
     "EdgarUnavailable",
     "FundamentalsCache",
     "PIT_FACTORS",
+    "RAW_TTM_FIELDS",
     "compute_pit_factors",
+    "compute_raw_ttm_fundamentals",
 ]

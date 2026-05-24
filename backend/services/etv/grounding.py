@@ -1,17 +1,23 @@
 """Grounding-data fetch for ETV.
 
-Pure yfinance adapter. No LLM calls. Anything unavailable is set to
-``None`` so downstream stages can flag it as an explicit assumption.
+yfinance is the primary adapter; SEC EDGAR (XBRL companyfacts) is a
+best-effort supplement that fills `None` slots on the resulting
+:class:`EtvGrounding` from primary-source filings. Anything still
+unavailable is left as ``None`` so downstream stages can flag it as an
+explicit assumption.
 """
 from __future__ import annotations
 
 import logging
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
+from datetime import date
 from typing import Optional
 
 import yfinance as yf
+
+from services import fundamentals_service
 
 logger = logging.getLogger(__name__)
 
@@ -161,11 +167,19 @@ def fetch_grounding(ticker: str) -> EtvGrounding:
     shares_out = _safe_float(info.get("sharesOutstanding")) or (
         market_cap / price if market_cap else None
     )
-    total_debt = _safe_float(info.get("totalDebt")) or 0.0
-    cash = _safe_float(info.get("totalCash")) or 0.0
+    # Leave debt/cash as None when yfinance omits them so the EDGAR supplement
+    # can fill from primary-source XBRL. The previous `or 0.0` defaults made
+    # the slots permanently look populated.
+    total_debt = _safe_float(info.get("totalDebt"))
+    cash = _safe_float(info.get("totalCash"))
     ev = _safe_float(info.get("enterpriseValue"))
-    if ev is None and market_cap is not None:
-        ev = market_cap + (total_debt or 0) - (cash or 0)
+    if ev is None and market_cap is not None and total_debt is not None and cash is not None:
+        ev = market_cap + total_debt - cash
+    net_debt = (
+        (total_debt or 0.0) - (cash or 0.0)
+        if (total_debt is not None or cash is not None)
+        else None
+    )
 
     iv = _atm_iv(t, price)
     sma50, sma200, rsi14 = _sma_rsi(t)
@@ -173,7 +187,7 @@ def fetch_grounding(ticker: str) -> EtvGrounding:
     fcf = _safe_float(info.get("freeCashflow"))
     p_to_fcf = (market_cap / fcf) if (market_cap and fcf and fcf > 0) else None
 
-    return EtvGrounding(
+    grounding = EtvGrounding(
         ticker=ticker.upper(),
         company_name=info.get("longName") or info.get("shortName") or ticker.upper(),
         sector=info.get("sector"),
@@ -206,7 +220,7 @@ def fetch_grounding(ticker: str) -> EtvGrounding:
         eps_ttm=_safe_float(info.get("trailingEps")),
         free_cash_flow=fcf,
         total_debt=total_debt,
-        net_debt=(total_debt - cash) if (total_debt is not None and cash is not None) else None,
+        net_debt=net_debt,
         cash=cash,
         capex=_safe_float(info.get("capitalExpenditures")),
         roic=_safe_float(info.get("returnOnInvestedCapital")),
@@ -225,3 +239,66 @@ def fetch_grounding(ticker: str) -> EtvGrounding:
         rsi_14=rsi14,
         as_of=time.strftime("%Y-%m-%d"),
     )
+    return _supplement_from_edgar(grounding)
+
+
+# Fields the EDGAR supplement is allowed to fill. Kept narrow on purpose:
+# yfinance gives ratios (PE, EV/EBITDA) for free and they're spot-priced;
+# EDGAR is for raw accounting line items that yfinance often returns None.
+_EDGAR_SUPPLEMENT_FIELDS: frozenset[str] = frozenset({
+    "revenue_ttm",
+    "operating_income",
+    "operating_margin",
+    "ebitda",
+    "ebitda_margin",
+    "net_income",
+    "free_cash_flow",
+    "capex",
+    "cash",
+    "total_debt",
+    "net_debt",
+    "shares_out",
+    "roic",
+})
+
+
+def _supplement_from_edgar(g: "EtvGrounding") -> "EtvGrounding":
+    """Fill `None` slots on `g` with raw TTM line items from SEC companyfacts.
+
+    Best-effort: any failure (no CIK, network, parse error) is logged and
+    the original grounding is returned unchanged. Yfinance values always win
+    when both sources are present.
+    """
+    try:
+        asof = date.fromisoformat(g.as_of)
+    except ValueError:
+        asof = date.today()
+
+    try:
+        edgar = fundamentals_service.get_raw_fundamentals(g.ticker, asof)
+    except Exception as exc:  # noqa: BLE001 — supplement must never break grounding
+        logger.warning("EDGAR supplement failed for %s: %s", g.ticker, exc)
+        return g
+
+    if not edgar or all(v is None for v in edgar.values()):
+        return g
+
+    valid_names = {f.name for f in fields(g)}
+    overrides: dict[str, float] = {}
+    for key, value in edgar.items():
+        if key not in valid_names or key not in _EDGAR_SUPPLEMENT_FIELDS:
+            continue
+        if value is None:
+            continue
+        if getattr(g, key) is None:
+            overrides[key] = float(value)
+
+    if not overrides:
+        return g
+
+    logger.info(
+        "EDGAR supplemented %s: filled %s",
+        g.ticker,
+        sorted(overrides.keys()),
+    )
+    return replace(g, **overrides)
