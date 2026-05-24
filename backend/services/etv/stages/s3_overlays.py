@@ -110,7 +110,6 @@ def run(
         user=_build_user(g, s1_output, s2_output, horizon, risk_tolerance,
                          critic_feedback),
         schema=S3_OVERLAYS_SCHEMA,
-        temperature=0.2,
     )
     latency_ms = int((time.perf_counter() - t0) * 1000)
 

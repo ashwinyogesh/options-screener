@@ -71,7 +71,6 @@ def run(g: EtvGrounding, s1_output: dict,
         system=S2_SYSTEM,
         user=_build_user(g, s1_output, critic_feedback),
         schema=S2_INTRINSIC_SCHEMA,
-        temperature=0.2,
     )
     latency_ms = int((time.perf_counter() - t0) * 1000)
 

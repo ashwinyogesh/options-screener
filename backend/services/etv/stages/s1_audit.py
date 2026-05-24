@@ -29,7 +29,6 @@ def run(g: EtvGrounding) -> StageResult:
         system=S1_SYSTEM,
         user=_build_user(g),
         schema=S1_AUDIT_SCHEMA,
-        temperature=0.1,
     )
     latency_ms = int((time.perf_counter() - t0) * 1000)
     return StageResult(

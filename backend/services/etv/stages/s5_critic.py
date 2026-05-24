@@ -86,7 +86,6 @@ def run(
         user=_build_user(g, s1_output, s2_output, s3_output, s4_output,
                         s2_guard, s3_guard, s4_guard),
         schema=S5_CRITIC_SCHEMA,
-        temperature=0.1,
     )
     latency_ms = int((time.perf_counter() - t0) * 1000)
 

@@ -26,6 +26,14 @@ AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1")
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-01-01-preview")
 
+# Determinism knobs for the ETV pipeline. Pinned here (not per-stage) so every
+# S1..S5 call shares the same sampling settings. `seed` is a best-effort hint to
+# Azure OpenAI — identical inputs + same seed mostly produce identical outputs,
+# but the provider does not guarantee bit-exact reproducibility.
+ETV_LLM_TEMPERATURE = float(os.getenv("ETV_LLM_TEMPERATURE", "0.0"))
+_raw_seed = os.getenv("ETV_LLM_SEED", "7").strip()
+ETV_LLM_SEED: int | None = int(_raw_seed) if _raw_seed else None
+
 
 Horizon = Literal["short", "medium", "long"]
 RiskTolerance = Literal["conservative", "moderate", "aggressive"]
@@ -60,13 +68,25 @@ def call_json(
     system: str,
     user: str,
     schema: dict,
-    temperature: float = 0.2,
+    temperature: float | None = None,
+    seed: int | None = None,
 ) -> dict:
     """Generic single-call helper used by per-stage callers.
 
     Tries strict ``json_schema`` first; on any failure falls back to
     ``json_object`` with a trailing instruction.
+
+    ``temperature`` and ``seed`` default to the module-level pins
+    (`ETV_LLM_TEMPERATURE`, `ETV_LLM_SEED`) so the whole pipeline shares one
+    determinism profile. Callers may still override per-call if needed.
     """
+    if temperature is None:
+        temperature = ETV_LLM_TEMPERATURE
+    if seed is None:
+        seed = ETV_LLM_SEED
+    extra: dict = {}
+    if seed is not None:
+        extra["seed"] = seed
     client = _get_client()
     try:
         resp = client.chat.completions.create(
@@ -77,6 +97,7 @@ def call_json(
             ],
             temperature=temperature,
             response_format={"type": "json_schema", "json_schema": schema},
+            **extra,
         )
     except Exception as exc:
         logger.warning("json_schema failed (%s); falling back to json_object", exc)
@@ -89,6 +110,7 @@ def call_json(
             ],
             temperature=temperature,
             response_format={"type": "json_object"},
+            **extra,
         )
     raw = resp.choices[0].message.content or "{}"
     return json.loads(raw)
