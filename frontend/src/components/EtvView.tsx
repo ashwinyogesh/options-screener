@@ -500,8 +500,6 @@ function ScenarioRow({
         <Stat label={intrinsicOnly ? 'Intrinsic price' : 'Price / ETV'} value={fmtCur(sc.price)} />
         {!intrinsicOnly && (
           <>
-            <Stat label="Econ value" value={fmtCur(sc.economic_value)} />
-            <Stat label="Optionality" value={fmtCur(sc.optionality_value)} />
             <Stat label="Regime mult" value={sc.regime_multiplier ?? '—'} />
             <Stat label="Behavior" value={sc.behavior_impact ?? '—'} />
           </>
@@ -1155,13 +1153,16 @@ function CatalystsSection({ r }: { r: EtvReport }) {
 function ShowWorkPanel({ d }: { d: EtvData }) {
   const [open, setOpen] = useState(false)
   const log = d.pipeline_log ?? []
-  if (!d.pipeline_enabled || log.length === 0) return null
 
   const totalMs = log.reduce((s, e) => s + (e.latency_ms ?? 0), 0)
   const totalRetries = log.reduce((s, e) => s + (e.retries ?? 0), 0)
   const s5 = log.find((e) => e.stage === 'S5_critic')
   const verdict =
     (s5?.extra?.overall_verdict as string | undefined) ?? '—'
+  const summary =
+    log.length === 0
+      ? 'monolithic run — no staged log'
+      : `${log.length} stages · ${(totalMs / 1000).toFixed(1)}s · ${totalRetries > 0 ? `${totalRetries} retry` : 'no retries'} · critic=${verdict}`
 
   const scenarios: Array<{ key: 'bear' | 'base' | 'bull'; s: EtvScenario }> = [
     { key: 'bear', s: d.report.economic_value.bear },
@@ -1202,14 +1203,16 @@ function ShowWorkPanel({ d }: { d: EtvData }) {
         }}
       >
         <span>{open ? '▾' : '▸'} Show work</span>
-        <span style={{ color: '#94a3b8', fontWeight: 500 }}>
-          {log.length} stages · {(totalMs / 1000).toFixed(1)}s ·{' '}
-          {totalRetries > 0 ? `${totalRetries} retry` : 'no retries'} ·
-          critic={verdict}
-        </span>
+        <span style={{ color: '#94a3b8', fontWeight: 500 }}>{summary}</span>
       </button>
 
-      {open && (
+      {open && log.length === 0 && (
+        <div style={{ marginTop: 12, color: '#94a3b8' }}>
+          Staged pipeline did not run for this report (monolithic fallback).
+        </div>
+      )}
+
+      {open && log.length > 0 && (
         <div style={{ marginTop: 12 }}>
           <Label>Pipeline log</Label>
           <table

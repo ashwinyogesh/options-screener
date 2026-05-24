@@ -34,7 +34,7 @@ _CACHE_TTL_SEC = 6 * 60 * 60  # 6h
 
 
 def _staged_enabled() -> bool:
-    return os.getenv("ETV_PIPELINE_STAGED", "0").lower() in {"1", "true", "yes", "on"}
+    return os.getenv("ETV_PIPELINE_STAGED", "1").lower() in {"1", "true", "yes", "on"}
 
 
 def _splice_staged(report: dict, s1: dict, s2: dict,

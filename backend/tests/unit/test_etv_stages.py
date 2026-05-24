@@ -329,9 +329,9 @@ class TestOrchestratorSplicing:
             "s1_assumption", "s2_assumption", "existing",
         ]
 
-    def test_flag_default_off(self, monkeypatch):
+    def test_flag_default_on(self, monkeypatch):
         monkeypatch.delenv("ETV_PIPELINE_STAGED", raising=False)
-        assert orchestrator._staged_enabled() is False
+        assert orchestrator._staged_enabled() is True
 
     def test_flag_recognised_values(self, monkeypatch):
         for v in ("1", "true", "TRUE", "Yes", "on"):
