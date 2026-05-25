@@ -708,11 +708,40 @@ You MUST emit the following blocks per the supplied schema:
   decision:
     decision         — TRADE | NO TRADE
     direction        — LONG | SHORT | NEUTRAL
-    confidence_pct   — 0-90.  Start at 75 and SUBTRACT for every gap:
-                       missing inputs, partial model validity, crowding,
-                       regime fragility, behavioral edge absent.
+    confidence_pct   — 0-90.  Start at 80.  Only subtract when a category
+                       is GENUINELY present — an empty `confidence_deductions`
+                       list (= 80) is a VALID outcome when grounding is
+                       complete, regime supports the thesis, no obvious
+                       crowding exists, and a real behavioral edge can be
+                       named.  Do NOT spread token deductions across all
+                       five categories out of caution.
+
+                       Per-category caps (apply only when the issue is
+                       material; cite the specific reason in the deduction
+                       string):
+                         missing_inputs:         -3 per material field, -10 max
+                         partial_model_validity: -5 to -10 (only if the model
+                                                 fit is contested; -15 reserved
+                                                 for "fundamentally wrong model")
+                         crowding:               -5 to -10 (only if positioning
+                                                 / consensus already prices the
+                                                 thesis; -3 for mild crowding)
+                         regime_fragility:       -5 to -15 (only if the macro
+                                                 regime ACTIVELY opposes; -5 if
+                                                 regime is merely neutral)
+                         behavioral_edge_absent: -3 to -7 (only when no concrete
+                                                 sentiment / positioning
+                                                 dislocation can be named)
+
+                       Total LLM-emitted deductions should rarely exceed -25
+                       on a well-grounded name.  The server may add a further
+                       LR-fragility deduction (up to -15) which you do NOT
+                       need to anticipate.
+
                        List each deduction in `confidence_deductions`.
-    confidence_deductions — array of short strings ending in "(-N)".
+    confidence_deductions — array of short strings ending in "(-N)".  Empty
+                       array is valid and expected when no material gaps
+                       exist.
     horizon          — Short | Medium | Long  (match investor_parameters
                        unless the catalyst window forces otherwise)
     horizon_rationale     — 1-2 sentences
@@ -839,6 +868,10 @@ DISCIPLINE:
     - Probabilities (bear+base+bull) must sum to 100 in EVERY scenario block.
     - Asymmetry ratio must be (weighted upside %) / (weighted downside %), absolute.
     - Confidence score must reflect the rubric deductions; never > 90.
+      Start at 80; only subtract when a deduction category is GENUINELY
+      present.  Empty deductions list (= 80) is a valid outcome on a
+      well-grounded name — do NOT spread token deductions across all five
+      categories out of caution.
     - DECISION = NO TRADE if asymmetry < 2:1, OR confidence < 55, OR regime opposes thesis,
       unless you explicitly justify the override in `thesis`.
     - `core_thesis` is 3–6 bullets distilling the trade. If NO TRADE, distill why.
