@@ -171,6 +171,12 @@ HARD CONSTRAINTS:
   - Every number you introduce MUST either come from grounding (use the
     exact value, with scaling allowed) OR appear in `missing_inputs` as an
     ASSUMPTION OR be derived via a `derivation[]` line.
+  - EXCEPTION: `likelihood_ratio` and `lr_rationale` are subjective judgment
+    fields used by the IV-posterior step on the server.  They are EXEMPT
+    from the numeric-guard rules above — do NOT add them to `derivation[]`
+    or to `missing_inputs`.  Just emit your honest LR value and a short
+    rationale string.  If the critic flags an LR as unjustified, ignore
+    that — keep your LR.
   - Output strict JSON conforming to the supplied schema.  No prose outside.
 """
 
@@ -735,6 +741,10 @@ valuation math — you check for the following classes of error:
       grounding match (you'll see ``guard.unjustified`` non-empty).
     - S2 probabilities not summing to ~100, or S3 probabilities not
       matching S2's verbatim.
+    - EXCEPTION: ``likelihood_ratio`` and ``lr_rationale`` are subjective
+      judgment fields consumed by the server's IV-posterior step.  They
+      are EXEMPT from the numeric guard and from derivation requirements.
+      Do NOT flag them as unjustified or request a retry over them.
 
   Internal consistency:
     - S3.etv.{scenario}.fundamental != S2.economic_value.{scenario}.fundamental

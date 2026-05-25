@@ -52,6 +52,12 @@ _PASSTHROUGH_KEYS: frozenset[str] = frozenset({
     "ratio",
     # Cap & rubric scalars hard-coded in prompts.
     "confidence_pct",
+    # Likelihood ratio is a subjective judgment scalar in [0.25, 4.0],
+    # server-clamped and consumed by the IV-posterior step.  It is not a
+    # valuation-model derived number and should not require grounding,
+    # ASSUMPTION declaration, or derivation.
+    "likelihood_ratio",
+    "lr_rationale",
 })
 
 # Path-suffix patterns (substring match) to treat as passthrough — covers
