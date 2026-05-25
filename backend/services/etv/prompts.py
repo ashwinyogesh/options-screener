@@ -103,7 +103,35 @@ the STRICT INTRINSIC value (fundamental only) under three scenarios:
 
 For EACH scenario you MUST emit:
 
-  probability_pct       — your probability for this scenario
+  probability_pct       — your standalone probability for this scenario
+                          (informational only — see note below; bear+base+bull
+                          MUST sum to 100).
+  likelihood_ratio      — your DISAGREEMENT with the market's lognormal cone
+                          for this scenario.  Range: 0.25 to 4.0.  Semantics:
+                            1.0  = "the market's IV-implied cone is right"
+                            2.0  = "I think this scenario is 2x more likely
+                                   than the cone suggests"
+                            0.5  = "I think this scenario is half as likely
+                                   as the cone suggests"
+                          The server computes the IV-implied prior over your
+                          three scenario PRICES under the 30-day ATM implied
+                          vol from grounding, multiplies it element-wise by
+                          your three LRs, and renormalises to obtain the
+                          posterior probability used in the asymmetry gate.
+                          Values outside [0.25, 4.0] are silently clamped.
+                          When iv30 is missing from grounding the server
+                          falls back to ``probability_pct`` and the LR is
+                          ignored — emit your honest LR anyway.
+                          IMPORTANT: large disagreement should usually be
+                          expressed by MOVING THE SCENARIO PRICE, not by an
+                          extreme LR.  Reserve LR ≥ 3 / ≤ 0.33 for cases
+                          where you can name a specific catalyst the market
+                          is mis-pricing in `lr_rationale`.
+  lr_rationale          — 1-2 sentence justification for the likelihood_ratio
+                          you chose (especially when |LR − 1| > 0.5).
+                          State the catalyst, asymmetry, or structural factor
+                          you believe the lognormal cone is missing.  When
+                          LR == 1.0 you may write "I agree with the cone."
   fundamental           — $/share intrinsic value under this scenario
   price                 — MUST equal `fundamental` (intrinsic = fundamental)
   value_decomposition   — five components; ONLY `fundamental` is non-zero:
@@ -133,7 +161,10 @@ Block-level fields:
   key_sensitivities     — 3-5 short bullets of inputs the model is sensitive to
 
 HARD CONSTRAINTS:
-  - Probabilities (bear+base+bull) MUST sum to 100.
+  - Probabilities (bear+base+bull) MUST sum to 100 (legacy fallback path).
+  - Likelihood ratios are in [0.25, 4.0]; values outside are clamped.
+    DO NOT use LR as a backdoor to express scenario prices you already
+    captured — moving the price is the right channel.
   - The four overlay components MUST be 0 in every scenario.
   - `price` MUST equal `fundamental` in every scenario.
   - `central_estimate` MUST equal Σ(probability_pct/100 × price) within ±$1.

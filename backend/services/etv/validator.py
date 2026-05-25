@@ -6,6 +6,8 @@ tradable separation, weighted ETV, asymmetry, decision gates.
 """
 from __future__ import annotations
 
+from .iv_prior import compute_posterior
+
 _DECOMP_KEYS = (
     "fundamental",
     "regime_adjustment",
@@ -15,7 +17,13 @@ _DECOMP_KEYS = (
 )
 
 
-def validate_report(report: dict, spot: float | None) -> dict:
+def validate_report(
+    report: dict,
+    spot: float | None,
+    *,
+    iv_annual: float | None = None,
+    horizon_days: int | None = None,
+) -> dict:
     """Deterministic post-validation.
 
     Enforces:
@@ -28,11 +36,20 @@ def validate_report(report: dict, spot: float | None) -> dict:
       * `decision.confidence_pct` ≤ 90
       * Decision = NO TRADE if asymmetry < 2 OR confidence < 55
 
-    Emits a `validation` block with corrections applied and warnings raised.
-    Mutates `report` in place; returns it.
+    When ``iv_annual`` and ``horizon_days`` are provided, scenario
+    probabilities are computed as a **Bayesian posterior**: lognormal
+    IV prior over the LLM's scenario prices, multiplied element-wise
+    by the LLM's clamped likelihood ratios, and renormalised.  This
+    replaces the LLM's raw ``probability_pct`` for the asymmetry gate
+    while keeping the original values surfaced under
+    ``validation.probability_check.llm_pct`` for diagnostics.
+
+    Emits a `validation` block with corrections applied and warnings
+    raised.  Mutates `report` in place; returns it.
     """
     warnings: list[str] = []
     corrections: list[str] = []
+    prob_check: dict | None = None
 
     def _fix_scenarios(block_name: str) -> tuple[float, dict, dict, dict]:
         block = report.get(block_name) or {}
@@ -121,6 +138,54 @@ def validate_report(report: dict, spot: float | None) -> dict:
                 f"etv.{s}.probability_pct: {old_p} → {ev['probability_pct']} (match econ)"
             )
 
+    # ----- IV-implied Bayesian posterior (Option 1 + Option 4) -----------
+    # Replace the LLM's hand-picked probabilities with a posterior built
+    # from a lognormal cone over the (now-final) scenario prices and the
+    # LLM's clamped likelihood ratios.  Falls back silently to the LLM's
+    # ``probability_pct`` when iv30 / horizon are missing.
+    posterior = compute_posterior(
+        spot=spot,
+        iv_annual=iv_annual,
+        horizon_days=horizon_days,
+        scenarios={
+            "bear": econ_scns["bear"], "base": econ_scns["base"],
+            "bull": econ_scns["bull"],
+        },
+    )
+    if posterior is not None:
+        llm_pct = {
+            s: float(econ_scns[s].get("probability_pct") or 0)
+            for s in ("bear", "base", "bull")
+        }
+        for s in ("bear", "base", "bull"):
+            new_pct = round(posterior["posterior"][s] * 100.0, 1)
+            old_pct = econ_scns[s].get("probability_pct")
+            econ_scns[s]["probability_pct"] = new_pct
+            etv_scns[s]["probability_pct"] = new_pct
+            corrections.append(
+                f"{s}.probability_pct: {old_pct} → {new_pct} (IV-posterior)"
+            )
+        prob_check = {
+            "method": "iv_posterior",
+            "iv_annual": posterior["iv_annual"],
+            "horizon_days": posterior["horizon_days"],
+            "lr_provided": posterior["lr_provided"],
+            "prior_pct": {k: round(v * 100.0, 1)
+                          for k, v in posterior["prior"].items()},
+            "lr_llm": posterior["lr_llm"],
+            "lr_clamped": posterior["lr_clamped"],
+            "posterior_pct": {k: round(v * 100.0, 1)
+                              for k, v in posterior["posterior"].items()},
+            "llm_pct": llm_pct,
+        }
+    else:
+        if iv_annual is None or horizon_days is None:
+            prob_check = {"method": "llm_only",
+                          "reason": "iv_annual or horizon_days not provided"}
+        else:
+            prob_check = {"method": "llm_only",
+                          "reason": "invalid scenario prices or grounding"}
+
     # Recompute weighted sums AFTER identity enforcement
     etv_w = sum(float(etv_scns[s].get("probability_pct") or 0)
                 * float(etv_scns[s].get("price") or 0)
@@ -185,6 +250,58 @@ def validate_report(report: dict, spot: float | None) -> dict:
             f"asymmetry: upside={up:.1f}%, downside={dn:.1f}%, ratio={ratio:.2f}"
         )
 
+        # ----- Counterfactual ratios for the probability_check block -----
+        # ratio_llm: what the ratio WOULD have been with the LLM's raw
+        # probability_pct (before IV-posterior overwrite).
+        # ratio_prior: what the ratio WOULD have been under the pure IV
+        # lognormal cone (LR == 1 for every scenario).
+        if prob_check and prob_check.get("method") == "iv_posterior":
+            def _ratio_from_pct(pct_by_label: dict) -> float | None:
+                up_x = 0.0
+                dn_x = 0.0
+                for s, sc in (("bear", eb), ("base", ebase), ("bull", ebull)):
+                    p_x = float(pct_by_label.get(s) or 0) / 100.0
+                    px_x = float(sc.get("price") or 0)
+                    ret_x = (px_x - spot) / spot * 100.0
+                    if ret_x >= 0:
+                        up_x += p_x * ret_x
+                    else:
+                        dn_x += p_x * abs(ret_x)
+                if dn_x <= 1e-6:
+                    return None
+                return round(up_x / dn_x, 2)
+
+            r_llm = _ratio_from_pct(prob_check.get("llm_pct", {}))
+            r_prior = _ratio_from_pct(prob_check.get("prior_pct", {}))
+            r_post = asym_block.get("ratio")
+            prob_check["ratio_llm"] = r_llm
+            prob_check["ratio_prior"] = r_prior
+            prob_check["ratio_posterior"] = r_post
+            # Decision under pure IV prior (LR=1).  Used to flag trades
+            # whose only support comes from the LLM's LR view.
+            prob_check["decision_under_prior"] = (
+                "TRADE" if isinstance(r_prior, (int, float)) and r_prior >= 2.0
+                else "NO TRADE"
+            )
+            prob_check["decision_under_posterior"] = (
+                "TRADE" if isinstance(r_post, (int, float)) and r_post >= 2.0
+                else "NO TRADE"
+            )
+            prob_check["decision_relies_on_llm_view"] = (
+                prob_check["decision_under_prior"]
+                != prob_check["decision_under_posterior"]
+            )
+            # Gap between LLM-raw and posterior ratios → fragility flag.
+            if isinstance(r_llm, (int, float)) and isinstance(r_post, (int, float)):
+                prob_check["ratio_gap_llm_vs_posterior"] = round(
+                    abs(r_llm - r_post), 2
+                )
+                prob_check["decision_fragile"] = (
+                    abs(r_llm - r_post) > 0.5
+                )
+            else:
+                prob_check["decision_fragile"] = False
+
     # Decision rule enforcement
     dec_block = report.get("decision") or {}
     conf = float(dec_block.get("confidence_pct") or 0)
@@ -192,6 +309,23 @@ def validate_report(report: dict, spot: float | None) -> dict:
         dec_block["confidence_pct"] = 90
         corrections.append(f"decision.confidence_pct: {conf} → 90 (cap)")
         conf = 90
+    # Fragility deduction: when the LLM's LRs swung the ratio by > 0.5
+    # away from the IV-prior decision, dock 15 from confidence.
+    if prob_check and prob_check.get("decision_fragile"):
+        deduction = 15
+        new_conf = max(0.0, conf - deduction)
+        if new_conf != conf:
+            dec_block["confidence_pct"] = new_conf
+            deductions = list(dec_block.get("confidence_deductions") or [])
+            deductions.append(
+                f"-{deduction}: posterior-vs-llm ratio gap "
+                f"{prob_check.get('ratio_gap_llm_vs_posterior')} > 0.5"
+            )
+            dec_block["confidence_deductions"] = deductions
+            corrections.append(
+                f"decision.confidence_pct: {conf} → {new_conf} (LR-fragility)"
+            )
+            conf = new_conf
     ratio = asym_block.get("ratio")
     no_trade_reasons: list[str] = []
     if isinstance(ratio, (int, float)) and ratio < 2:
@@ -208,4 +342,6 @@ def validate_report(report: dict, spot: float | None) -> dict:
         "corrections": corrections,
         "passed": len(warnings) == 0,
     }
+    if prob_check is not None:
+        report["validation"]["probability_check"] = prob_check
     return report

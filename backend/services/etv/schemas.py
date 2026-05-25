@@ -336,12 +336,20 @@ def s2_intrinsic_schema() -> dict:
         "additionalProperties": False,
         "required": [
             "probability_pct", "price", "fundamental",
+            "likelihood_ratio", "lr_rationale",
             "value_decomposition", "derivation", "conditions", "rationale",
         ],
         "properties": {
             "probability_pct": n,
             "price": n,
             "fundamental": n,
+            # Bayesian update vs. the lognormal IV prior.  Range
+            # ``[0.25, 4.0]`` enforced server-side via clamping.  An LR
+            # of 1.0 means "I agree with the market's cone."  Required
+            # by strict mode; nullable so the LLM may emit ``null`` when
+            # IV is missing from grounding.
+            "likelihood_ratio": n,
+            "lr_rationale": s,
             "value_decomposition": value_decomposition,
             "derivation": {"type": "array", "items": {"type": "string"},
                            "minItems": 1, "maxItems": 12},

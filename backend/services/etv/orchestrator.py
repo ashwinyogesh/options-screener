@@ -14,6 +14,7 @@ import time
 from dataclasses import asdict
 
 from .grounding import fetch_grounding
+from .iv_prior import horizon_to_days
 from .llm import AZURE_OPENAI_DEPLOYMENT, Horizon, RiskTolerance, call_monolithic
 from .stages import (
     critic_feedback,
@@ -270,7 +271,12 @@ def get_etv(
     else:
         report = call_monolithic(g, horizon, risk_tolerance)
 
-    report = validate_report(report, spot=g.current_price)
+    report = validate_report(
+        report,
+        spot=g.current_price,
+        iv_annual=g.implied_vol_30d,
+        horizon_days=horizon_to_days(horizon),
+    )
 
     payload = {
         "ticker": g.ticker,
