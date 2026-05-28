@@ -1385,6 +1385,43 @@ body {
 }
 .acs-pill-zero .acs-pill-value { color: #64748b; font-weight: 400; }
 
+/* ACS component legend — compact key for the A/B/C/D pills, shown above
+   the Top by ACS table so users don't have to hover each pill to learn
+   what the letters mean. */
+.acs-component-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 4px 14px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: #161a26;
+  border: 1px solid #262a3c;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+.acs-component-legend > div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.acs-component-legend dt {
+  flex: 0 0 auto;
+  color: #93c5fd;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  width: 12px;
+  text-align: center;
+}
+.acs-component-legend dd {
+  margin: 0;
+  min-width: 0;
+}
+
 /* ADR-0023 — continuity filter chips and slope colors. */
 .continuity-filters {
   display: flex;

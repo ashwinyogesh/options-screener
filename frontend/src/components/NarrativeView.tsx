@@ -140,6 +140,12 @@ export function NarrativeView() {
           <div className="narrative-grid">
             <section>
               <h3>Top by ACS</h3>
+              <dl className="acs-component-legend" aria-label="ACS component legend">
+                <div><dt>A</dt><dd>Daily activity — how consistently the ticker is discussed over 14d (max 30)</dd></div>
+                <div><dt>B</dt><dd>Post diversity — many distinct authors, not one account dominating (max 25)</dd></div>
+                <div><dt>C</dt><dd>Narrative coherence — posts share a common thesis (max 25)</dd></div>
+                <div><dt>D</dt><dd>Analytical depth — fraction of posts with real research, not just hype (max 20)</dd></div>
+              </dl>
               <NarrativeTickerTable
                 rows={top}
                 emptyMessage="No ACS scores yet."
