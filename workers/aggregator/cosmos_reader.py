@@ -95,6 +95,7 @@ class CosmosReader:
                 "rationale": doc.get("rationale", ""),
                 "author_hash": doc.get("authorHash", ""),
                 "created_utc": int(doc.get("createdUtc", 0)),
+                "subreddit": doc.get("subreddit"),
                 "flair": doc.get("flair"),
                 "conviction_direction": doc.get("conviction_direction"),
                 "conviction_substance": doc.get("conviction_substance"),
