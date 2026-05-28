@@ -1054,7 +1054,7 @@
                 "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]",
                 "configuration": {
                   "triggerType": "Schedule",
-                  "replicaTimeout": 120,
+                  "replicaTimeout": 1800,
                   "scheduleTriggerConfig": {
                     "cronExpression": "*/15 * * * *",
                     "parallelism": 1,

@@ -241,7 +241,7 @@ resource aggregatorJob 'Microsoft.App/jobs@2024-03-01' = {
     environmentId: env.id
     configuration: {
       triggerType: 'Schedule'
-      replicaTimeout: 120
+      replicaTimeout: 1800  // 30 min — full 14d signal scan across universe is yfinance/Cosmos-bound; 120s consistently timed out
       scheduleTriggerConfig: {
         cronExpression: '*/15 * * * *'
         parallelism: 1
