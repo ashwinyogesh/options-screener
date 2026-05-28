@@ -32,16 +32,19 @@ class CosmosTimelineWriter:
         "acs_components", "acs_flags", "acs_scored_at",
         "lifecycle_stage", "stage_confidence",
         "dominant_signal",
-        "tier1_pct", "tier2_pct", "tier3_pct",
         # ADR-0023 continuity fields written by job-acs-scorer. Must be
         # preserved so the streak / slope do not reset on every aggregator
         # re-upsert between scorer runs.
         "stage_streak_days", "first_emerged_at", "acs_slope_14d",
-        # Conviction shares are written by the aggregator itself on every run,
-        # so they do not need to be preserved here — they're provided in the
-        # incoming snapshot. Legacy conviction_*_ratio fields (ADR-0021
-        # retired) are intentionally NOT preserved: stale docs shed them on
-        # the next aggregator run.
+        # Conviction shares AND tier_pct (tier1/tier2/tier3) are written by
+        # the aggregator itself on every run and are NOT preserved — they
+        # must reflect the latest 14d signal distribution. Preserving them
+        # caused them to stay pinned at the first daily run's (often-zero)
+        # value, which zeroed the detector's breadth_score, kept every
+        # ticker at lifecycle_stage=0, and consequently zeroed Component C
+        # and emptied the Emerging tab. Legacy conviction_*_ratio fields
+        # (ADR-0021 retired) are also intentionally NOT preserved: stale
+        # docs shed them on the next aggregator run.
     })
 
     @retry(
