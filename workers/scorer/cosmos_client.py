@@ -191,15 +191,21 @@ class ScorerCosmosClient:
         falls back to the cross-partition scan gracefully.
         """
         now_iso = datetime.now(tz=timezone.utc).isoformat()
-        top = sorted(entries, key=lambda d: d.get("acs", 0.0), reverse=True)
+        # Sort key: (-acs, ticker). The ticker tiebreak is deterministic so
+        # tied rows do not shuffle between runs based on asyncio.gather
+        # completion order — the dominant source of perceived ranking
+        # "finickiness" in the Emerging / Top tabs.
+        def _sort_key(d: dict) -> tuple[float, str]:
+            return (-float(d.get("acs", 0.0)), str(d.get("ticker", "")))
+
+        top = sorted(entries, key=_sort_key)
         emerging = sorted(
             [
                 d for d in entries
                 if isinstance(d.get("lifecycle_stage"), int)
                 and 1 <= d["lifecycle_stage"] <= 3
             ],
-            key=lambda d: d.get("acs", 0.0),
-            reverse=True,
+            key=_sort_key,
         )
         doc = {
             "id": "scoreboard_v1",

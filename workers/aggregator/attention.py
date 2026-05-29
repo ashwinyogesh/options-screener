@@ -72,22 +72,48 @@ _DD_TERMS: frozenset[str] = frozenset({
     "writeup", "write-up", "bull case", "bear case",
 })
 
-# Subreddit tier map — mirror of workers/ingestion/config.py SUBREDDIT_TIERS.
+# Subreddit tier map — MUST mirror workers/ingestion/config.py SUBREDDIT_TIERS.
 # Kept inline here because aggregator and ingestion are independent Docker
-# images and can't share Python imports. If you edit one, edit the other.
-# Comparison is case-insensitive on the subreddit name.
+# images and can't share Python imports. Names stored lowercase; the lookup
+# in compute_tier_pcts lowercases the incoming subreddit before matching.
+# If you change tier membership, update both files together — drift means
+# posts silently fall into the "unknown" branch of compute_tier_pcts and
+# get dropped from both numerator and denominator of tier1_pct, which
+# directly miscomputes stage assignment.
 _TIER1_SUBS: frozenset[str] = frozenset({
-    "investing", "stocks", "securityanalysis", "valueinvesting",
-    # bogleheads REMOVED from Tier 1: passive-index community; individual
-    # stock signals from there are non-representative outliers.
+    # Broad investing / analysis
+    "investing", "stocks", "securityanalysis", "valueinvesting", "bogleheads",
+    # Options premium sellers — CSP/CC/wheel setups with explicit ticker + strike thesis
+    "thetagang",
+    # Systematic / quant traders — cite specific tickers and setups
+    "algotrading",
+    # Macro context that drives sector rotations
+    "economics",
 })
 _TIER2_SUBS: frozenset[str] = frozenset({
+    # Retail momentum
     "wallstreetbets", "options", "smallstreetbets", "pennystocks",
     "theraceto10million", "swingtrading",
+    # Space stocks — RKLB, ASTS, LUNR, RDW, SPCE
+    "spacestocks", "spacexlounge",
+    # AI Chips — NVDA-specific community, high volume
+    "nvidia",
+    # AI Models — most active LLM community; discusses NVDA, MSFT, GOOG, META model bets
+    "localllama",
+    # AI Applications — PLTR-specific; enterprise AI plays
+    "palantir",
 })
 _TIER3_SUBS: frozenset[str] = frozenset({
+    # Existing thematic
     "artificial", "semiconductors", "energy", "biotech", "space", "geopolitics",
-    "bogleheads",  # passive-investing; individual-stock mentions rare + non-representative
+    # AI Energy layer — nuclear renaissance plays: CEG, VST, NuScale, Oklo, SMR
+    "nuclear",
+    # AI Infra layer — cloud hyperscaler sentiment: AMZN/AWS, MSFT/Azure, GOOG
+    "cloudcomputing",
+    # AI Models layer (academic/practitioner) — leading indicator for model company sentiment
+    "machinelearning",
+    # AI Applications layer — SaaS companies benefiting from AI integration
+    "saas",
 })
 
 

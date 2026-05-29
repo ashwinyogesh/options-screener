@@ -253,49 +253,65 @@ class TestAssignStage:
         assert new_state.smoothed_inputs["tier1_pct"] == pytest.approx(0.18, abs=1e-6)
 
     def test_confidence_scales_with_dominant_fraction(self) -> None:
-        """Higher cluster dominance → higher confidence (above the floor)."""
+        """Higher cluster dominance → higher confidence (above the floor).
+
+        Coherence is now a linear remap of dominant_fraction into
+        [COHERENCE_FLOOR, 1.0], so a higher dom_frac strictly increases the
+        contribution.
+        """
         timeline = {"tier1_pct": 0.05, "financial_term_density": 0.20}
         _, conf_high, _ = assign_stage(timeline, _cluster(dominant_fraction=1.0))
         _, conf_mid, _ = assign_stage(timeline, _cluster(dominant_fraction=0.5))
-        # 0.5 and 1.0 are both above the 0.3 coherence floor, so they pass
-        # through proportionally.
         assert conf_mid < conf_high
-        assert conf_mid == pytest.approx(conf_high * 0.5, rel=0.05)
+        assert conf_mid > 0.0
 
-    def test_coherence_floor_lifts_polysemic_confidence(self) -> None:
-        """dominant_fraction below COHERENCE_FLOOR (0.3) is clamped up.
+    def test_coherence_remap_lifts_polysemic_confidence(self) -> None:
+        """Polysemic clusters (dom_frac=0) still produce non-zero confidence,
+        but a higher dom_frac now strictly increases it (no hard clamp).
 
-        Without the floor, a polysemic cluster (dom_frac=0.0) would land at
-        zero confidence and effectively disappear from the screener.  The
-        floor ensures it's still ranked, just at lower confidence than a
-        coherent cluster.
+        Previously dominant_fraction was max()-clamped at COHERENCE_FLOOR,
+        which collapsed every polysemic ticker onto the same value and
+        produced visible quantisation in the UI's C column. The remap keeps
+        the "never disappears" property while restoring discrimination.
         """
         timeline = {"tier1_pct": 0.05, "financial_term_density": 0.20}
         _, conf_zero, _ = assign_stage(timeline, _cluster(dominant_fraction=0.0))
-        _, conf_floor, _ = assign_stage(timeline, _cluster(dominant_fraction=0.3))
-        # Both are clamped to the same 0.3 floor → equal confidence.
-        assert conf_zero == pytest.approx(conf_floor, rel=1e-3)
+        _, conf_partial, _ = assign_stage(timeline, _cluster(dominant_fraction=0.3))
         assert conf_zero > 0.0
+        assert conf_zero < conf_partial
 
-    def test_volume_factor_dampens_thin_clusters(self) -> None:
-        """Confidence at n_embedded=5 should be exactly half of n_embedded=10."""
+    def test_volume_factor_grows_with_n_embedded(self) -> None:
+        """Confidence grows monotonically with n_embedded under the
+        continuous saturating curve (1 - exp(-n/N_VOLUME_FULL)).
+
+        The prior linear-with-hard-knee formula made every cluster with
+        n_embedded >= 10 land on exactly the same volume weighting (1.0),
+        producing the C-column pile-up at 20.0 the user reported.
+        """
         timeline = {"tier1_pct": 0.05, "financial_term_density": 0.20}
-        _, conf_full, _ = assign_stage(
-            timeline, _cluster(dominant_fraction=1.0, n_embedded=10),
-        )
         _, conf_thin, _ = assign_stage(
             timeline, _cluster(dominant_fraction=1.0, n_embedded=5),
         )
-        # Linear ramp: 5/10 = 0.5x.  Above 10 the factor saturates.
-        assert conf_thin == pytest.approx(conf_full * 0.5, rel=1e-3)
-
-    def test_volume_factor_saturates_above_threshold(self) -> None:
-        """Confidence does not keep rising past n_embedded == N_VOLUME_FULL."""
-        timeline = {"tier1_pct": 0.05, "financial_term_density": 0.20}
-        _, conf_10, _ = assign_stage(
+        _, conf_full, _ = assign_stage(
             timeline, _cluster(dominant_fraction=1.0, n_embedded=10),
         )
+        _, conf_large, _ = assign_stage(
+            timeline, _cluster(dominant_fraction=1.0, n_embedded=30),
+        )
+        assert conf_thin < conf_full < conf_large
+
+    def test_volume_factor_asymptotes_at_one(self) -> None:
+        """Confidence approaches but never exceeds the full coherence-weighted
+        value as n_embedded grows large."""
+        timeline = {"tier1_pct": 0.05, "financial_term_density": 0.20}
         _, conf_100, _ = assign_stage(
             timeline, _cluster(dominant_fraction=1.0, n_embedded=100),
         )
-        assert conf_10 == pytest.approx(conf_100, rel=1e-3)
+        _, conf_1000, _ = assign_stage(
+            timeline, _cluster(dominant_fraction=1.0, n_embedded=1000),
+        )
+        # Both should be very close to the asymptote (1 - e^{-10} ≈ 0.99995
+        # at n=100), and 1000 must be at least as high as 100.
+        assert conf_100 > 0.0
+        assert conf_1000 >= conf_100
+        assert conf_1000 - conf_100 < 0.01

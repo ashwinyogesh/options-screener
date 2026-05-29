@@ -25,6 +25,7 @@ Why the change from HDBSCAN:
 from __future__ import annotations
 
 import logging
+import math
 from collections import Counter
 from dataclasses import dataclass
 
@@ -199,6 +200,13 @@ N_VOLUME_FULL: int = 10
 # polysemic narratives (multiple low-coherence sub-themes — common for
 # megacaps like GOOGL where posts span cloud / AI / antitrust / Waymo) still
 # receive a non-zero confidence rather than silently disappearing.
+#
+# The floor is applied as a *linear remap* (not a hard clamp):
+#     coherence = COHERENCE_FLOOR + (1 - COHERENCE_FLOOR) * dominant_fraction
+# so dominant_fraction in [0, 1] maps continuously to [floor, 1.0]. The hard
+# clamp version collapsed every polysemic ticker onto the exact same value,
+# which (combined with a saturated volume_factor) produced the observed
+# pile-up of tickers at C = 20.0 in the UI.
 COHERENCE_FLOOR: float = 0.3
 
 
@@ -271,10 +279,24 @@ def assign_stage(
     )
     committed, new_state = apply_hysteresis(target_stage, prev_stage, interim_state)
 
-    # Step 6 — Confidence.  Coherence floored so polysemic clusters still
-    # produce a usable signal; volume factor dampens thin clusters.
-    coherence = max(cluster_result.dominant_fraction, COHERENCE_FLOOR)
-    volume_factor = min(cluster_result.n_embedded / N_VOLUME_FULL, 1.0)
+    # Step 6 — Confidence.
+    #
+    # Coherence is a *linear remap* of dominant_fraction into [floor, 1.0]
+    # (see COHERENCE_FLOOR docstring): a hard floor would collapse every
+    # polysemic ticker onto the same value and prevent the C column from
+    # discriminating between them.
+    #
+    # Volume factor uses a continuous saturating curve (1 - exp(-n/N_VOLUME_FULL))
+    # instead of the prior linear-with-hard-knee min(n/N_VOLUME_FULL, 1.0).
+    # The exponential curve never has a discontinuity at n_embedded = 10,
+    # so a cluster that grows from 9 → 11 signals no longer sees its volume
+    # weighting jump to a permanent 1.0 plateau; instead it keeps moving
+    # smoothly (0.593 → 0.667 → ... → 0.95 around n=30). Combined with the
+    # coherence remap above, this removes the quantisation that was clumping
+    # the UI's confidence values onto a discrete lattice.
+    dom_frac = cluster_result.dominant_fraction
+    coherence = COHERENCE_FLOOR + (1.0 - COHERENCE_FLOOR) * dom_frac
+    volume_factor = 1.0 - math.exp(-cluster_result.n_embedded / N_VOLUME_FULL)
     base_confidence = compute_confidence(
         score=score,
         target_stage=target_stage,

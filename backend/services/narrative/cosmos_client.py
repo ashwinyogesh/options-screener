@@ -167,7 +167,8 @@ def query_top_acs(limit: int) -> list[dict]:
         return sb.get("top", [])[:limit]
     logger.debug("query_top_acs: cache miss — falling back to cross-partition scan")
     latest = _latest_per_ticker(_fetch_all_scored())
-    latest.sort(key=lambda d: d.get("acs", 0.0), reverse=True)
+    # Tiebreak on ticker so tied-ACS rows have a stable order across runs.
+    latest.sort(key=lambda d: (-float(d.get("acs", 0.0)), str(d.get("ticker", ""))))
     return latest[:limit]
 
 
@@ -194,7 +195,8 @@ def query_emerging(limit: int) -> list[dict]:
         if isinstance(d.get("lifecycle_stage"), int)
         and 1 <= d["lifecycle_stage"] <= 3
     ]
-    emerging.sort(key=lambda d: d.get("acs", 0.0), reverse=True)
+    # Tiebreak on ticker so tied-ACS rows have a stable order across runs.
+    emerging.sort(key=lambda d: (-float(d.get("acs", 0.0)), str(d.get("ticker", ""))))
     return emerging[:limit]
 
 
