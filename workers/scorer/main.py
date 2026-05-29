@@ -162,6 +162,13 @@ async def _score_one(
                     if continuity.acs_slope_14d is not None
                     else None
                 ),
+                # market_cap is fetched above and lives on the
+                # ticker_timeline doc. The frontend Emerging table's default
+                # 'sub10b' filter discards rows with market_cap == None, so
+                # omitting this here makes the Emerging UI render empty even
+                # when the API has rows. Same failure mode the ADR-0028
+                # follow-up comment above warns about for the score fields.
+                "market_cap": doc.get("market_cap"),
                 "bucket_date": doc.get("bucket_date", today),
             }
             return 1, 0, cache_entry
