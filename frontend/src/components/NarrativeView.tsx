@@ -161,7 +161,6 @@ export function NarrativeView() {
                 loading={loading}
                 onSelect={(t) => void loadDetail(t)}
                 showContinuity
-                defaultMarketCapFilter="sub10b"
               />
             </section>
           </div>

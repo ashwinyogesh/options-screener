@@ -18,15 +18,6 @@ function acsDirectionClass(signal: string): 'acs-direction-bull' | 'acs-directio
   return null
 }
 
-type MarketCapFilter = 'all' | 'sub50b' | 'sub10b' | 'sub2b'
-
-const _CAP_FILTERS: { value: MarketCapFilter; label: string; threshold: number | null }[] = [
-  { value: 'all',    label: 'All caps',  threshold: null },
-  { value: 'sub50b', label: '< $50B',   threshold: 50_000_000_000 },
-  { value: 'sub10b', label: '< $10B',   threshold: 10_000_000_000 },
-  { value: 'sub2b',  label: '< $2B',    threshold: 2_000_000_000 },
-]
-
 interface NarrativeTickerTableProps {
   rows: AcsScore[]
   emptyMessage: string
@@ -38,11 +29,6 @@ interface NarrativeTickerTableProps {
    * Top-ACS panel (continuity is most useful for the Emerging view).
    */
   showContinuity?: boolean
-  /**
-   * Default market-cap bucket filter. Emerging defaults to 'sub10b' to
-   * suppress mega-caps; Top-ACS defaults to 'all'.
-   */
-  defaultMarketCapFilter?: MarketCapFilter
 }
 
 type SortKey = 'ticker' | 'acs' | 'decay_acs' | 'stage' | 'flags' | 'streak' | 'slope' | 'signal'
@@ -139,7 +125,7 @@ function ComponentPill({ letter, value, title }: { letter: string; value: number
   )
 }
 
-export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect, showContinuity = false, defaultMarketCapFilter = 'all' }: NarrativeTickerTableProps) {
+export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect, showContinuity = false }: NarrativeTickerTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('acs')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   // ADR-0023 — orthogonal continuity filter. Default 'all' so Emerging still
@@ -147,7 +133,6 @@ export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect, sh
   type ContinuityFilter = 'all' | 'new' | 'sustaining' | 'declining'
   const [continuityFilter, setContinuityFilter] = useState<ContinuityFilter>('all')
   const [signalFilter, setSignalFilter] = useState<SignalFilter>('all')
-  const [capFilter, setCapFilter] = useState<MarketCapFilter>(defaultMarketCapFilter)
 
   const visibleColumns = useMemo(
     () => COLUMNS.filter((c) => showContinuity || !c.continuityOnly),
@@ -155,13 +140,8 @@ export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect, sh
   )
 
   const filtered = useMemo(() => {
-    const capThreshold = _CAP_FILTERS.find((f) => f.value === capFilter)?.threshold ?? null
     return rows.filter((r) => {
       if (signalFilter !== 'all' && !matchesSignal(r.dominant_signal, signalFilter)) return false
-      if (capThreshold !== null) {
-        if (r.market_cap == null) return false
-        if (r.market_cap >= capThreshold) return false
-      }
       if (!showContinuity || continuityFilter === 'all') return true
       const streak = r.stage_streak_days ?? 0
       const slope = r.acs_slope_14d
@@ -170,7 +150,7 @@ export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect, sh
       if (continuityFilter === 'declining')  return slope != null && slope < 0
       return true
     })
-  }, [rows, showContinuity, continuityFilter, signalFilter, capFilter])
+  }, [rows, showContinuity, continuityFilter, signalFilter])
 
   const sorted = useMemo(() => {
     const copy = [...filtered]
@@ -246,24 +226,6 @@ export function NarrativeTickerTable({ rows, emptyMessage, loading, onSelect, sh
             }
           >
             {f === 'all' ? 'All signals' : f.charAt(0).toUpperCase() + f.slice(1)}
-          </button>
-        ))}
-      </div>
-      <div className="continuity-filters" role="group" aria-label="Market cap filters">
-        {_CAP_FILTERS.map(({ value, label }) => (
-          <button
-            key={value}
-            type="button"
-            className={`continuity-chip${capFilter === value ? ' active' : ''}`}
-            onClick={() => setCapFilter(value)}
-            title={
-              value === 'all'    ? 'Show all market caps' :
-              value === 'sub50b' ? 'Exclude mega-caps \u2014 hide market cap \u2265 $50B' :
-              value === 'sub10b' ? 'Mid + small caps only \u2014 hide market cap \u2265 $10B' :
-                                   'Small caps only \u2014 hide market cap \u2265 $2B'
-            }
-          >
-            {label}
           </button>
         ))}
       </div>
