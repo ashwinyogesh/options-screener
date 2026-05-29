@@ -46,11 +46,6 @@ export function NarrativeReadingGuide() {
                   <td className="rg-posture rg-posture--entry">Good entry window · premium elevated</td>
                 </tr>
                 <tr>
-                  <td><span className="rg-stage rg-stage--4">4 — Maturing</span></td>
-                  <td>Institutional attention appearing, late for new entries</td>
-                  <td className="rg-posture rg-posture--trim">Trim · avoid</td>
-                </tr>
-                <tr>
                   <td><span className="rg-stage rg-stage--5">5 — Crowded</span></td>
                   <td>Mainstream coverage, most upside priced in</td>
                   <td className="rg-posture rg-posture--skip">Skip</td>
@@ -73,7 +68,7 @@ export function NarrativeReadingGuide() {
                   <th></th>
                   <th>Stage 2 (Forming)</th>
                   <th>Stage 3 (Growing)</th>
-                  <th>Stage 4+</th>
+                  <th>Stage 5+</th>
                 </tr>
               </thead>
               <tbody>
@@ -106,7 +101,7 @@ export function NarrativeReadingGuide() {
           </span>
           <span className="rg-rule-sep">·</span>
           <span className="rg-rule-item rg-rule--avoid">
-            Stage 4+ at any ACS → don't open new positions.
+            Stage 5+ at any ACS → don't open new positions.
           </span>
         </div>
       </div>

@@ -82,7 +82,7 @@ const ADJUSTMENTS: AdjustmentDef[] = [
   {
     condition: 'Lifecycle stage > 3',
     multiplier: '× 0.5',
-    why: 'Narrative has already peaked. Stages 4–6 = maturing → fading. Too late for a clean entry.',
+    why: 'Narrative has already peaked. Stages 5–6 = crowded → fading. Too late for a clean entry.',
   },
   {
     condition: 'Market cap between $0 and $100M',
