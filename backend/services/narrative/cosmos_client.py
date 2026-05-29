@@ -85,12 +85,27 @@ def _get_signal_events():  # type: ignore[return]
     return _signal_events_container
 
 
-# Scoreboard cache is stale after this many minutes — fall back to live scan.
-_CACHE_STALE_MINUTES: int = 30
+# Scoreboard cache is logged as suspicious past this many minutes (scorer
+# runs every ~20 min; comfortably wider than cadence + jitter so a single
+# missed run does not flip the UI into the slower fallback regime).
+_CACHE_WARN_MINUTES: int = 90
 
 
 def _read_scoreboard() -> dict | None:
-    """Point-read the pre-computed scoreboard doc, or None if absent/stale."""
+    """Point-read the pre-computed scoreboard doc, or None if absent.
+
+    Staleness is intentionally **not** a fallback trigger. The cross-partition
+    fallback path uses a different dedup/sort code path than the scorer's
+    pre-computed cache; switching between them on a staleness boundary
+    produces a visible row reshuffle in the UI even when the underlying
+    signal hasn't moved. We therefore always prefer the cache as long as it
+    exists, and only fall back on true absence (cold start, before the
+    scorer has ever written the doc).
+
+    The age of the cache is logged but does not gate the return; the router
+    layer is free to surface ``computed_at`` to the client so a stale
+    scoreboard is labelled rather than silently replaced.
+    """
     try:
         doc = _get_cache().read_item(
             item="scoreboard_v1",
@@ -99,9 +114,13 @@ def _read_scoreboard() -> dict | None:
         computed_at = doc.get("computed_at", "")
         if computed_at:
             age = datetime.now(tz=timezone.utc) - datetime.fromisoformat(computed_at)
-            if age.total_seconds() < _CACHE_STALE_MINUTES * 60:
-                return doc
-        return None  # doc present but stale
+            age_minutes = age.total_seconds() / 60.0
+            if age_minutes > _CACHE_WARN_MINUTES:
+                logger.warning(
+                    "narrative scoreboard is %.0f min old (>%d min) — scorer may be stalled",
+                    age_minutes, _CACHE_WARN_MINUTES,
+                )
+        return doc
     except CosmosResourceNotFoundError:
         return None  # cold start — scorer hasn't written the cache yet
     except Exception:
