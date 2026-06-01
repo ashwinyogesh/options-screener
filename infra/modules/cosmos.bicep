@@ -418,6 +418,45 @@ resource icSnapshotsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabase
   }
 }
 
+// dd_entries: DD Coach journal entries (V1, single-user).
+// One doc per DD session: draft (in-progress wizard state) or completed
+// (immutable post-save). Doc shape — see backend/services/dd_coach/models.py
+// (DDEntryDoc). Partition key /ticker: list-by-ticker is the common pattern
+// and single-user volume keeps per-partition skew irrelevant.
+//
+// No TTL — entries are the user's permanent decision record.
+//
+// Indexed paths kept narrow: only fields actually filtered/sorted server-side
+// (status filter on list, created_at sort). Free-text answers and nested
+// JSON (data_card_snapshot, valuation) are excluded from the index to keep
+// RU cost low on writes.
+resource ddEntriesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'dd_entries'
+  properties: {
+    resource: {
+      id: 'dd_entries'
+      partitionKey: {
+        paths: ['/ticker']
+        kind: 'Hash'
+        version: 2
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          { path: '/ticker/?' }
+          { path: '/user_id/?' }
+          { path: '/status/?' }
+          { path: '/created_at/?' }
+          { path: '/updated_at/?' }
+        ]
+        excludedPaths: [{ path: '/*' }]
+      }
+    }
+  }
+}
+
 // Grant Cosmos DB Built-in Data Contributor to provided principal IDs.
 // Built-in role definition ID is fixed across all accounts.
 var cosmosDataContributorRoleId = '00000000-0000-0000-0000-000000000002'

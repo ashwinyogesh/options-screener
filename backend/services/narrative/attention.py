@@ -35,6 +35,15 @@ _WINDOW_7D: int = 7
 _WINDOW_14D: int = 14
 _WINDOW_30D: int = 30
 
+# Path C — Anomaly baseline window (90 days = trailing 12 weeks). The 7-day
+# current window is excluded from the baseline so the metric isn't self-
+# referential. Baseline is considered reliable when we have >=30 distinct
+# days of history; below that the z-score is suppressed to None.
+# WARNING: keep in sync with workers/aggregator/attention.py — same module
+# exists in two places (backend + aggregator Docker image). See TODO at end.
+_ANOMALY_WINDOW_DAYS: int = 90
+_ANOMALY_MIN_HISTORY_DAYS: int = 30
+
 # Terms that indicate a financially substantive post (§2.4).
 # Deliberately conservative — false positives (calling a shallow post deep)
 # are worse than false negatives.
@@ -358,6 +367,68 @@ def compute_axis_distributions(
 
 
 # ---------------------------------------------------------------------------
+# Path C — Anomaly metrics (Emerging tab)
+# ---------------------------------------------------------------------------
+
+def compute_anomaly_metrics(
+    counts_by_day_90d: dict[date, int],
+    bucket_date: date,
+    mentions_7d: int,
+) -> tuple[float, float, float | None, float]:
+    """Return (mean, stdev, zscore, ratio_4w) of rolling weekly mentions.
+
+    Both stats compare the current 7-day mention count against the prior
+    trailing baseline computed from the same per-day series:
+
+    - **mean / stdev** are computed over per-day counts from t-90d up to
+      (but not including) t-7d, then scaled to a *weekly* basis (×7) so
+      the comparison to ``mentions_7d`` is apples-to-apples.
+    - **zscore** is (mentions_7d - mean) / stdev. Returned as ``None`` when
+      stdev is zero or fewer than ``_ANOMALY_MIN_HISTORY_DAYS`` distinct
+      days of baseline history exist (insufficient confidence).
+    - **ratio_4w** is mentions_7d / max(trailing_4w_weekly_mean, 1.0). Always
+      defined; cheap fallback when the z-score is suppressed.
+
+    The 7-day current window is excluded from the baseline so the metric
+    cannot be self-referential.
+    """
+    cutoff_current = bucket_date - timedelta(days=_WINDOW_7D)        # baseline end (exclusive)
+    cutoff_baseline = bucket_date - timedelta(days=_ANOMALY_WINDOW_DAYS)
+    cutoff_4w = bucket_date - timedelta(days=_WINDOW_7D + 28)        # 4w prior to current
+
+    baseline_daily: list[int] = []
+    four_week_daily: list[int] = []
+    for d, c in counts_by_day_90d.items():
+        if d < cutoff_baseline or d >= cutoff_current:
+            continue
+        baseline_daily.append(c)
+        if d >= cutoff_4w:
+            four_week_daily.append(c)
+
+    if four_week_daily:
+        four_week_weekly_mean = (sum(four_week_daily) / len(four_week_daily)) * 7.0
+    else:
+        four_week_weekly_mean = 0.0
+    ratio_4w = mentions_7d / max(four_week_weekly_mean, 1.0)
+
+    n = len(baseline_daily)
+    if n < _ANOMALY_MIN_HISTORY_DAYS:
+        return 0.0, 0.0, None, ratio_4w
+
+    daily_mean = sum(baseline_daily) / n
+    weekly_mean = daily_mean * 7.0
+    daily_variance = sum((c - daily_mean) ** 2 for c in baseline_daily) / n
+    # A weekly count is the sum of 7 i.i.d. daily counts ⇒ variance scales ×7.
+    weekly_stdev = math.sqrt(daily_variance * 7.0)
+
+    if weekly_stdev == 0.0:
+        return weekly_mean, 0.0, None, ratio_4w
+
+    zscore = (mentions_7d - weekly_mean) / weekly_stdev
+    return weekly_mean, weekly_stdev, zscore, ratio_4w
+
+
+# ---------------------------------------------------------------------------
 # Main builder — called by the Phase 3 aggregator
 # ---------------------------------------------------------------------------
 
@@ -400,11 +471,21 @@ def build_snapshot(
 
     cutoff_30d = bucket_date - timedelta(days=_WINDOW_30D)
     cutoff_14d = bucket_date - timedelta(days=_WINDOW_14D)
+    cutoff_90d = bucket_date - timedelta(days=_ANOMALY_WINDOW_DAYS)
+
+    # Path C — per-day mention counts over the full 90-day baseline window.
+    # Populated for every signal; consumed only by ``compute_anomaly_metrics``.
+    counts_by_day_90d: dict[date, int] = defaultdict(int)
 
     for sig in signals:
         ts = sig.get("created_utc", 0)
         sig_date = datetime.fromtimestamp(ts, tz=timezone.utc).date() if ts else bucket_date
-        if sig_date < cutoff_30d or sig_date > bucket_date:
+        if sig_date < cutoff_90d or sig_date > bucket_date:
+            continue
+
+        counts_by_day_90d[sig_date] += 1
+
+        if sig_date < cutoff_30d:
             continue
 
         counts_by_day[sig_date] += 1
@@ -495,6 +576,11 @@ def build_snapshot(
         acceleration=accel_n,
     )
 
+    # --- Path C — Anomaly metrics (Emerging tab) ---
+    anomaly_mean, anomaly_stdev, anomaly_z, anomaly_ratio = compute_anomaly_metrics(
+        counts_by_day_90d, bucket_date, mentions_7d,
+    )
+
     return TickerTimelineSnapshot(
         id=f"{ticker}_{bucket_str}",
         ticker=ticker,
@@ -525,4 +611,8 @@ def build_snapshot(
         conviction_driver_top=driver_top,
         conviction_bull_researched_share=bull_researched_share,
         conviction_bear_researched_share=bear_researched_share,
+        mentions_90d_mean=anomaly_mean,
+        mentions_90d_stdev=anomaly_stdev,
+        anomaly_zscore=anomaly_z,
+        anomaly_ratio_4w=anomaly_ratio,
     )

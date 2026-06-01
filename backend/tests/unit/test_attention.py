@@ -22,6 +22,7 @@ import pytest
 from services.narrative.attention import (
     build_snapshot,
     compute_acceleration,
+    compute_anomaly_metrics,
     compute_attention_quality,
     compute_dd_post_ratio,
     compute_financial_term_density,
@@ -489,3 +490,110 @@ class TestBuildSnapshot:
         # 3 out of 9 signals within 14d window should have DD flair.
         # (signals within 14d = first 9, all within window)
         assert snap.dd_post_ratio > 0.0
+
+
+# ---------------------------------------------------------------------------
+# Path C — compute_anomaly_metrics
+# ---------------------------------------------------------------------------
+
+class TestAnomalyMetrics:
+    """compute_anomaly_metrics — Emerging tab z-score and 4w ratio."""
+
+    @staticmethod
+    def _flat_baseline(bucket_date: date, daily_count: int, days: int = 60) -> dict[date, int]:
+        """A baseline of `daily_count` mentions on each of the prior `days` days,
+        ending one day before the current 7d window starts.
+        """
+        baseline: dict[date, int] = {}
+        # Baseline excludes the last 7 days (the "current" window).
+        start = bucket_date - timedelta(days=7 + days)
+        for i in range(days):
+            baseline[start + timedelta(days=i)] = daily_count
+        return baseline
+
+    def test_returns_none_zscore_when_history_too_short(self) -> None:
+        """<30 distinct days of baseline ⇒ zscore=None; ratio still defined."""
+        bucket = date(2026, 5, 1)
+        # 10 days of history — below _ANOMALY_MIN_HISTORY_DAYS (30).
+        counts = self._flat_baseline(bucket, daily_count=1, days=10)
+        mean, stdev, z, ratio = compute_anomaly_metrics(counts, bucket, mentions_7d=5)
+        assert z is None
+        assert mean == 0.0
+        assert stdev == 0.0
+        # 4-week ratio uses any baseline data it has: 10 days × 1/day → 7-day weekly_mean=7.
+        # mentions_7d=5 ÷ 7 = ~0.71.
+        assert ratio == pytest.approx(5.0 / 7.0, rel=1e-3)
+
+    def test_returns_none_zscore_when_baseline_is_flat(self) -> None:
+        """Zero-variance baseline ⇒ z-score undefined ⇒ None."""
+        bucket = date(2026, 5, 1)
+        # 60 days of exactly 0 mentions/day. weekly_mean=0, stdev=0.
+        counts = self._flat_baseline(bucket, daily_count=0, days=60)
+        mean, stdev, z, ratio = compute_anomaly_metrics(counts, bucket, mentions_7d=5)
+        assert mean == 0.0
+        assert stdev == 0.0
+        assert z is None
+        # mentions_7d=5, four_week_mean=0 ⇒ ratio = 5 / max(0,1) = 5.0
+        assert ratio == 5.0
+
+    def test_zscore_positive_on_volume_spike(self) -> None:
+        """Sustained baseline + sudden current spike ⇒ positive z-score."""
+        bucket = date(2026, 5, 1)
+        # 60 days @ 1 mention/day ⇒ weekly_mean=7, daily_variance=0.
+        # Variance is 0 because flat, so we add noise to make variance nonzero.
+        counts = self._flat_baseline(bucket, daily_count=1, days=60)
+        # Inject one busy day in the baseline so variance > 0.
+        spike_day = bucket - timedelta(days=20)
+        counts[spike_day] = 3
+        mean, stdev, z, ratio = compute_anomaly_metrics(counts, bucket, mentions_7d=20)
+        assert z is not None
+        assert z > 2.0  # 20 is clearly an outlier vs a baseline averaging ~7/week.
+        assert mean > 0.0
+        assert stdev > 0.0
+        assert ratio > 1.0
+
+    def test_zscore_negative_when_attention_collapses(self) -> None:
+        """Sustained baseline + zero current ⇒ negative z-score."""
+        bucket = date(2026, 5, 1)
+        counts = self._flat_baseline(bucket, daily_count=2, days=60)
+        # Add variance to baseline.
+        counts[bucket - timedelta(days=15)] = 0
+        mean, stdev, z, ratio = compute_anomaly_metrics(counts, bucket, mentions_7d=0)
+        assert z is not None
+        assert z < 0.0
+        assert ratio == 0.0
+
+    def test_excludes_current_7d_window_from_baseline(self) -> None:
+        """Mentions in the last 7 days must NOT be folded into the baseline."""
+        bucket = date(2026, 5, 1)
+        counts = self._flat_baseline(bucket, daily_count=1, days=60)
+        # Add huge spikes inside the current 7d window. They should be ignored.
+        for i in range(7):
+            counts[bucket - timedelta(days=i)] = 100
+        # Add a touch of variance to baseline.
+        counts[bucket - timedelta(days=30)] = 2
+        mean_with_spike, _, z_with_spike, _ = compute_anomaly_metrics(
+            counts, bucket, mentions_7d=0,
+        )
+        # Without the spikes, baseline weekly mean ≈ 7 ⇒ z for mentions_7d=0 is ~negative.
+        # If the function leaked current-window counts into baseline, mean would be much higher.
+        assert mean_with_spike == pytest.approx(7.0, rel=0.1)
+        assert z_with_spike is not None
+        assert z_with_spike < 0.0
+
+    def test_ratio_uses_four_week_window(self) -> None:
+        """ratio_4w should be derived from the trailing 4 weeks only."""
+        bucket = date(2026, 5, 1)
+        counts: dict[date, int] = {}
+        # 4-week window in compute_anomaly_metrics is offsets 8..35 inclusive
+        # (28 days, ending one day before the current 7d window).
+        for offset in range(8, 36):
+            counts[bucket - timedelta(days=offset)] = 1
+        # Older history at offsets 36..89 must NOT affect ratio_4w.
+        for offset in range(36, 90):
+            counts[bucket - timedelta(days=offset)] = 50
+        _, _, _, ratio = compute_anomaly_metrics(counts, bucket, mentions_7d=14)
+        # 4w daily_mean=1 ⇒ weekly_mean=7. ratio = 14/7 = 2.0.
+        assert ratio == pytest.approx(2.0, rel=1e-3)
+
+

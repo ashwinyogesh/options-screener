@@ -13,6 +13,7 @@ import { EmRankTable } from './components/EmRankTable'
 import { SupplyChainView } from './components/SupplyChainView'
 import { DcfView } from './components/DcfView'
 import { EtvView } from './components/EtvView'
+import { DdCoachView } from './components/DdCoach/DdCoachView'
 import { SwingInput } from './components/SwingInput'
 import { SwingFilterPanel } from './components/SwingFilterPanel'
 import { SwingTable } from './components/SwingTable'
@@ -145,7 +146,7 @@ function _formatPrecomputedAge(isoTimestamp: string): { label: string; className
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'csp' | 'cc' | 'ditm' | 'swing' | 'em-rank' | 'supply' | 'dcf' | 'etv' | 'narrative'>('csp')
+  const [activeTab, setActiveTab] = useState<'csp' | 'cc' | 'ditm' | 'swing' | 'em-rank' | 'supply' | 'dcf' | 'etv' | 'narrative' | 'dd-coach'>('csp')
 
   // CSP state
   const { results: cspResults, errors: cspErrors, loading: cspLoading, symbolCount: cspSymbolCount, isScanMode: cspIsScanMode, errorMessage: cspErrorMessage, cachedAt: cspCachedAt, lastUpdatedAt: cspLastUpdatedAt, vixLevel: cspVixLevel, vixPercentile: cspVixPercentile, volRegime: cspVolRegime, run: runCsp, scan: scanCsp } = useCsp()
@@ -230,6 +231,12 @@ export default function App() {
             onClick={() => setActiveTab('etv')}
           >
             ETV — Expected Tradable Value
+          </button>
+          <button
+            className={`tab-btn${activeTab === 'dd-coach' ? ' tab-btn-active' : ''}`}
+            onClick={() => setActiveTab('dd-coach')}
+          >
+            DD Coach
           </button>
         </div>
       </header>
@@ -445,6 +452,7 @@ export default function App() {
         {activeTab === 'dcf' && <DcfView />}
         {activeTab === 'etv' && <EtvView />}
         {activeTab === 'narrative' && NARRATIVE_ENABLED && <NarrativeView />}
+        {activeTab === 'dd-coach' && <DdCoachView />}
 
         {activeTab === 'swing' && (
           <>

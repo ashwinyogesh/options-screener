@@ -112,6 +112,23 @@ class TickerTimelineSnapshot:
     conviction_bear_researched_share: float | None = None
     conviction_classified_14d: int | None = None
 
+    # --- Path C — Anomaly metrics (Emerging tab) -----------------------------
+    # Both compare current attention to its own trailing baseline. A small-cap
+    # going from ~0 mentions/week to 5+ is loud even though absolute volume
+    # stays tiny — neither tier1_pct nor mentions_7d alone catches that.
+    #
+    # mentions_90d_mean / mentions_90d_stdev: trailing weekly-mention baseline
+    #   computed over per-day counts from t-90d to t-7d (the prior 12 weeks,
+    #   excluding the current 7d window so the metric isn't self-referential).
+    # anomaly_zscore: (mentions_7d - mean) / stdev. None when stdev==0 or
+    #   when we have <30 distinct days of history (low-confidence baseline).
+    # anomaly_ratio_4w: mentions_7d / max(trailing_4w_weekly_mean, 1.0).
+    #   Always defined; cheap fallback when z-score is None.
+    mentions_90d_mean: float = 0.0
+    mentions_90d_stdev: float = 0.0
+    anomaly_zscore: float | None = None
+    anomaly_ratio_4w: float = 0.0
+
     # --- Phase 5+ fields (None until narrative detector runs) ---
     # lifecycle_stage: int | None = None        # 1..6
     # stage_confidence: float | None = None

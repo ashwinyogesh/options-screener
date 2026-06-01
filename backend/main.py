@@ -18,6 +18,7 @@ from limiter import limiter
 from routers.cc import router as cc_router
 from routers.csp import router as csp_router
 from routers.dcf import router as dcf_router
+from routers.dd_coach import router as dd_coach_router
 from routers.ditm import router as ditm_router
 from routers.etv import router as etv_router
 from routers.narrative import router as narrative_router
@@ -72,6 +73,7 @@ app.include_router(dcf_router)
 app.include_router(etv_router)
 app.include_router(swing_router)
 app.include_router(narrative_router)
+app.include_router(dd_coach_router)
 
 
 @app.get("/health", tags=["meta"])
