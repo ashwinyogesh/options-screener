@@ -326,6 +326,34 @@ def validate_report(
                 f"decision.confidence_pct: {conf} → {new_conf} (LR-fragility)"
             )
             conf = new_conf
+    # Anti-anchoring guard: base-case intrinsic within 5% of spot
+    # strongly suggests the LLM rediscovered spot via a current-company
+    # multiple.  Flag intrinsic.anchored_to_spot and clamp confidence
+    # to 60.  See _S2_GLOBAL_RULES section I.
+    if spot and spot > 0:
+        base_fund = float((ebase or {}).get("fundamental") or 0)
+        if base_fund > 0:
+            spot_gap = abs(base_fund - spot) / spot
+            if spot_gap < 0.05:
+                report.setdefault("intrinsic", {})["anchored_to_spot"] = True
+                report["intrinsic"]["anchored_to_spot_gap_pct"] = round(
+                    spot_gap * 100, 2
+                )
+                if conf > 60:
+                    new_conf = 60.0
+                    deductions = list(dec_block.get("confidence_deductions") or [])
+                    deductions.append(
+                        f"clamp_to_60: base intrinsic ${base_fund:.2f} within "
+                        f"{spot_gap*100:.1f}% of spot ${spot:.2f} "
+                        f"— anchoring suspected"
+                    )
+                    dec_block["confidence_deductions"] = deductions
+                    dec_block["confidence_pct"] = new_conf
+                    corrections.append(
+                        f"decision.confidence_pct: {conf} → {new_conf} "
+                        f"(anchored-to-spot)"
+                    )
+                    conf = new_conf
     ratio = asym_block.get("ratio")
     no_trade_reasons: list[str] = []
     if isinstance(ratio, (int, float)) and ratio < 2:

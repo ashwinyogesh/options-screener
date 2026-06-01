@@ -331,6 +331,60 @@ H. Final-line discipline.
      fundamental = <expression with at least one operator OR a
                     previously-named symbol> = <number>
    A bare "fundamental = <number>" with no algebra is rejected.
+
+I. Multiple-anchoring prophylactic (multiples-based models only).
+   The grounding payload exposes the company's OWN CURRENT multiples:
+   `trailing_pe`, `forward_pe`, `ev_ebitda`, `ev_revenue`.  These are
+   spot price divided by a fundamental — using one as `chosen_multiple`
+   re-derives spot price by identity (fair_value ≈ current_price).
+   This is the dominant silent failure mode in S2.
+
+   Grounding ALSO exposes 5-year historical bands for this ticker's
+   own trading multiples:
+     historical_pe_p25 / historical_pe_p50 / historical_pe_p75
+     historical_ev_ebitda_p25 / historical_ev_ebitda_p50 / historical_ev_ebitda_p75
+   These are computed offline from quarterly TTM fundamentals × daily
+   prices and are INDEPENDENT of today's spot.  Prefer them as the
+   primary anchor.
+
+   Anchoring hierarchy (use in this order):
+     1. historical_p50 for this ticker (when available)        ← STRONGLY PREFERRED for base
+     2. sector_median (if you can defend the sector classification)
+     3. explicit_thesis_recipe (Damodaran identity, through-cycle P/E)
+     4. current_company_multiple                               ← FORBIDDEN for base
+
+   Mandatory provenance.  Every chosen multiple MUST be accompanied
+   by a literal derivation line of the form:
+
+     multiple_provenance = "<source>"
+
+   where <source> is EXACTLY ONE of:
+     "historical_p50"             — this ticker's own 5y median multiple
+     "sector_median"              — sector-wide median multiple
+     "explicit_thesis_recipe"     — multiple derived from named drivers
+                                    (e.g. Damodaran identity in EV/Sales,
+                                    through-cycle P/E in cyclicals)
+     "current_company_multiple"   — the company's own CURRENT multiple
+                                    from grounding (forbidden for base)
+
+   Base / bear / bull recipe when historical bands are present:
+     bear  multiple = historical_p25
+     base  multiple = historical_p50
+     bull  multiple = historical_p75
+   Departures from historical bands MUST be justified in the scenario
+   `rationale` (e.g. "AI server cycle structurally lifts steady-state
+   multiple above 5y norm — bull uses 1.3× historical_p75").
+
+   When historical bands are null (insufficient quarterly coverage),
+   fall back to sector_median or explicit_thesis_recipe.  Do NOT
+   silently substitute the current multiple.
+
+   Server-side check.  When base-case fundamental lands within 5% of
+   `current_price` the server flags `intrinsic.anchored_to_spot = true`
+   and clamps final confidence to 60.  Anchoring on historical_p50
+   makes this flag fire only when the historical multiple truly does
+   imply fair-value-at-spot, which is informative rather than a
+   failure signal.
 ====================================================================
 """
 
@@ -360,11 +414,15 @@ _MODEL_INSTRUCTIONS: dict[str, str] = {
     "EV/EBITDA multiple": (
         "Recipe — EV/EBITDA multiple:\n"
         "1. Declare direction: forward × forward_ebitda, OR trailing × ebitda_ttm.\n"
-        "2. Choose multiple anchored to sector_median_ev_ebitda from grounding.\n"
-        "   If absent, assume from these 2026 bands and list in missing_inputs:\n"
+        "2. Choose multiple per RULE I hierarchy:\n"
+        "     PREFERRED: bear=historical_ev_ebitda_p25, base=historical_ev_ebitda_p50,\n"
+        "     bull=historical_ev_ebitda_p75 (5y own-ticker bands from grounding).\n"
+        "     If historical bands are null, fall back to sector_median (declare):\n"
         "     industrials/consumer mature: 8-14x | software/growth: 15-30x\n"
         "     telecom: 5-9x | autos/airlines/retail: 5-10x\n"
         "     banks/insurance/REITs: NOT APPLICABLE — invoke RULE G.\n"
+        "   NEVER use the current `ev_ebitda` field for the base case.\n"
+        "   Emit `multiple_provenance = \"historical_p50\"` etc.\n"
         "3. Adjust ebitda for SBC per RULE C before applying multiple.\n"
         "4. fair_ev = adjusted_ebitda * chosen_multiple = <number>\n"
         "5. Apply RULE A (net_debt + equity bridge) and RULE D (diluted shares).\n"
@@ -397,7 +455,12 @@ _MODEL_INSTRUCTIONS: dict[str, str] = {
         "   - Cyclical: revenue * through_cycle_operating_margin\n"
         "               * (1 - tax_rate) / shares_out_diluted = <number>.\n"
         "     Use >=5 years to compute through-cycle margin; do NOT average raw EPS.\n"
-        "2. Choose forward P/E anchored to sector_median_pe; otherwise assume + list.\n"
+        "2. Choose P/E per RULE I hierarchy:\n"
+        "     PREFERRED: bear=historical_pe_p25, base=historical_pe_p50,\n"
+        "     bull=historical_pe_p75 (5y own-ticker bands from grounding).\n"
+        "     If historical bands are null, fall back to sector_median_pe.\n"
+        "     NEVER use current `trailing_pe` or `forward_pe` for the base case.\n"
+        "   Emit `multiple_provenance = \"historical_p50\"` etc.\n"
         "3. fundamental = normalised_eps * chosen_pe = <number>\n"
         "Inapplicability per RULE G: normalised_eps <= 0.\n"
         "Do NOT mix with EV math; this is an equity-level multiple."
@@ -876,6 +939,16 @@ DISCIPLINE:
       unless you explicitly justify the override in `thesis`.
     - `core_thesis` is 3–6 bullets distilling the trade. If NO TRADE, distill why.
     - Use prices in the GROUNDING `current_price` currency.
+    - ANTI-ANCHORING.  Grounding exposes the company's OWN current multiples
+      (`trailing_pe`, `forward_pe`, `ev_ebitda`, `ev_revenue`).  These are
+      spot price divided by a fundamental — using one as your chosen
+      multiple re-derives spot price by identity.  For the BASE scenario,
+      anchor every multiple on `sector_median`, this ticker's
+      `historical_p50`, or an `explicit_thesis_recipe` (e.g. Damodaran
+      identity, through-cycle P/E).  NEVER on the company's own current
+      multiple.  When base-case fundamental lands within 5% of
+      `current_price` the server flags `intrinsic.anchored_to_spot` and
+      clamps confidence to 60.
     - For EACH scenario (bear/base/bull) in BOTH `economic_value` and `etv`, you MUST emit
       `value_decomposition` with five additive $/share components whose sum equals the
       scenario `price` exactly (rounded to whole dollars):
