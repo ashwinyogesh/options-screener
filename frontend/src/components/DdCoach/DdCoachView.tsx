@@ -78,6 +78,16 @@ function deriveFairEps(card: DataCard, pathResult: PathToTarget | null): number 
   return null
 }
 
+/** 3-yr revenue CAGR from card data — fallback when pathResult is unavailable. */
+function revenueCagr(card: DataCard): number | null {
+  const pts = card.revenue_3yr
+    .filter(m => m.value != null && m.value > 0)
+    .sort((a, b) => a.year - b.year)
+  if (pts.length < 2) return null
+  const n = pts.length - 1
+  return Math.pow(pts[n].value! / pts[0].value!, 1 / n) - 1
+}
+
 // ---------------------------------------------------------------------------
 // Main view
 // ---------------------------------------------------------------------------
@@ -1100,10 +1110,11 @@ function Screen9BearCase({ value, onChange }: {
 
 // ---- Small number inputs for Fair Price screen ----
 
-function PctInput({ label, value, onChange }: {
+function PctInput({ label, value, onChange, presets }: {
   label: string
   value: number      // stored as decimal, e.g. 0.10 = 10 %
   onChange: (v: number) => void
+  presets?: Array<{ label: string; value: number }>
 }) {
   return (
     <label className="dd-fp-input-group">
@@ -1113,7 +1124,7 @@ function PctInput({ label, value, onChange }: {
           type="number"
           className="dd-input"
           style={{ width: 80 }}
-          value={value !== 0 ? (value * 100).toFixed(1) : ''}
+          value={(value * 100).toFixed(1)}
           onChange={e => onChange((parseFloat(e.target.value) || 0) / 100)}
           min={-50}
           max={200}
@@ -1121,14 +1132,29 @@ function PctInput({ label, value, onChange }: {
         />
         <span style={{ color: '#94a3b8', fontSize: 13 }}>%/yr</span>
       </div>
+      {presets && (
+        <div className="dd-fp-presets">
+          {presets.map(pr => (
+            <button
+              key={pr.label}
+              type="button"
+              className={`dd-fp-preset-chip${Math.abs(value - pr.value) < 0.001 ? ' active' : ''}`}
+              onClick={() => onChange(pr.value)}
+            >
+              {pr.label}
+            </button>
+          ))}
+        </div>
+      )}
     </label>
   )
 }
 
-function MultInput({ label, value, onChange }: {
+function MultInput({ label, value, onChange, presets }: {
   label: string
   value: number      // raw P/E multiple
   onChange: (v: number) => void
+  presets?: Array<{ label: string; value: number }>
 }) {
   return (
     <label className="dd-fp-input-group">
@@ -1146,6 +1172,20 @@ function MultInput({ label, value, onChange }: {
         />
         <span style={{ color: '#94a3b8', fontSize: 13 }}>×</span>
       </div>
+      {presets && (
+        <div className="dd-fp-presets">
+          {presets.map(pr => (
+            <button
+              key={pr.label}
+              type="button"
+              className={`dd-fp-preset-chip${value === pr.value ? ' active' : ''}`}
+              onClick={() => onChange(pr.value)}
+            >
+              {pr.label}
+            </button>
+          ))}
+        </div>
+      )}
     </label>
   )
 }
@@ -1174,7 +1214,52 @@ function ScreenFairPrice(p: ScreenFairPriceProps) {
   const spot = p.card.spot_price
   const isPreProfit = eps == null || eps <= 0
 
-  // Inline equation preview (before hitting compute)
+  // ---- contextual hints + preset chips derived from pathResult ----
+  const histPct  = p.pathResult?.historical_growth_pct ?? null
+  const peerLow  = p.pathResult?.peer_multiple_low  ?? 15
+  const peerHigh = p.pathResult?.peer_multiple_high ?? 25
+
+  const growthHint = histPct != null
+    ? `This company's recent history: ~${(histPct * 100).toFixed(0)}%/yr. S&P 500 companies average 7–10%/yr.`
+    : 'S&P 500 companies average 7–10%/yr. Faster-growing businesses typically land 15–25%/yr.'
+  const peHint = p.pathResult
+    ? `Peers trade ${peerLow.toFixed(0)}–${peerHigh.toFixed(0)}×. Broad market average: ~18×. Fast-growers often command 25–35×.`
+    : 'Broad market average: ~18×. Slow, steady businesses trade 10–15×; fast-growers 25–35×.'
+
+  const growthBearPresets: Array<{ label: string; value: number }> = [
+    { label: 'Flat 0%', value: 0 },
+    { label: 'Slow 3%', value: 0.03 },
+    ...(histPct != null ? [{ label: `Historical ${(histPct * 100).toFixed(0)}%`, value: +histPct.toFixed(4) }] : []),
+  ]
+  const growthBasePresets: Array<{ label: string; value: number }> = [
+    ...(histPct != null ? [{ label: `Historical ${(histPct * 100).toFixed(0)}%`, value: +histPct.toFixed(4) }] : []),
+    { label: 'S&P avg 8%', value: 0.08 },
+    { label: 'Strong 15%', value: 0.15 },
+  ]
+  const growthBullPresets: Array<{ label: string; value: number }> = [
+    { label: 'Moderate 15%', value: 0.15 },
+    { label: 'Fast 20%',     value: 0.20 },
+    { label: 'Hot 30%',      value: 0.30 },
+  ]
+  const peBearPresets: Array<{ label: string; value: number }> = [
+    { label: `Value ${Math.round(peerLow)}×`,  value: Math.round(peerLow) },
+    { label: 'Market 18×', value: 18 },
+  ]
+  const peBasePresets: Array<{ label: string; value: number }> = [
+    { label: `Peer avg ${Math.round((peerLow + peerHigh) / 2)}×`, value: Math.round((peerLow + peerHigh) / 2) },
+    { label: 'Market 18×', value: 18 },
+    { label: 'Growth 25×', value: 25 },
+  ]
+  const peBullPresets: Array<{ label: string; value: number }> = [
+    { label: `Peer high ${Math.round(peerHigh)}×`, value: Math.round(peerHigh) },
+    { label: 'Growth 25×',  value: 25 },
+    { label: 'Premium 35×', value: 35 },
+  ]
+  const rrPresets: Array<{ label: string; value: number }> = [
+    { label: 'Conservative 10%', value: 0.10 },
+    { label: 'Standard 12%',     value: 0.12 },
+    { label: 'Demanding 15%',    value: 0.15 },
+  ]
   const equationPreview = !isPreProfit && p.peBear > 0 && p.peBase > 0 ? (
     <div className="dd-fp-formula">
       <strong>How the math works:</strong><br />
@@ -1225,20 +1310,49 @@ function ScreenFairPrice(p: ScreenFairPriceProps) {
 
       {!isPreProfit && (
         <>
+          {/* Today's actual numbers — read-only reference strip */}
+          {(() => {
+            const growth = histPct ?? revenueCagr(p.card)
+            const pe     = p.card.price_to_earnings_ttm
+            const yield_ = pe != null && pe > 0 ? 1 / pe : null
+            return (
+              <div className="dd-fp-ref-strip">
+                <div className="dd-fp-ref-label">Today's actual numbers — the baseline reality</div>
+                <div className="dd-fp-ref-grid">
+                  <div className="dd-fp-ref-item">
+                    <div className="dd-fp-ref-value">{growth != null ? `${(growth * 100).toFixed(1)}%/yr` : '—'}</div>
+                    <div className="dd-fp-ref-name">Revenue growth</div>
+                    <div className="dd-fp-ref-sub">3-yr average pace</div>
+                  </div>
+                  <div className="dd-fp-ref-item">
+                    <div className="dd-fp-ref-value">{pe != null ? `${pe.toFixed(1)}×` : '—'}</div>
+                    <div className="dd-fp-ref-name">P/E ratio (TTM)</div>
+                    <div className="dd-fp-ref-sub">price paid per $1 of profit</div>
+                  </div>
+                  <div className="dd-fp-ref-item">
+                    <div className="dd-fp-ref-value">{yield_ != null ? `${(yield_ * 100).toFixed(1)}%/yr` : '—'}</div>
+                    <div className="dd-fp-ref-name">Earnings yield</div>
+                    <div className="dd-fp-ref-sub">return if growth stops entirely</div>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+
           {/* Step 2 — Growth assumptions */}
           <div className="dd-fp-section">
             <h4>
               Step 1 — How fast will earnings grow?{' '}
               <FinanceTerm termKey="growth_rate" />
             </h4>
-            <p className="dd-screen-prompt" style={{ marginBottom: 12 }}>
+            <p className="dd-screen-prompt" style={{ marginBottom: 6 }}>
               This is YOUR assumption — not a prediction. Bear = pessimistic, Base = your best guess, Bull = upside.
-              {p.pathResult && ` (Pre-filled from historical growth: ${pctFmt(p.pathResult.historical_growth_pct, 1)}/yr)`}
             </p>
+            <p className="dd-fp-input-hint" style={{ marginBottom: 12 }}>{growthHint}</p>
             <div className="dd-fp-inputs">
-              <PctInput label="🐻 Bear (worst case)" value={p.growthBear} onChange={p.setGrowthBear} />
-              <PctInput label="📊 Base (most likely)" value={p.growthBase} onChange={p.setGrowthBase} />
-              <PctInput label="🚀 Bull (best case)" value={p.growthBull} onChange={p.setGrowthBull} />
+              <PctInput label="🐻 Bear (worst case)" value={p.growthBear} onChange={p.setGrowthBear} presets={growthBearPresets} />
+              <PctInput label="📊 Base (most likely)" value={p.growthBase} onChange={p.setGrowthBase} presets={growthBasePresets} />
+              <PctInput label="🚀 Bull (best case)" value={p.growthBull} onChange={p.setGrowthBull} presets={growthBullPresets} />
             </div>
           </div>
 
@@ -1248,14 +1362,15 @@ function ScreenFairPrice(p: ScreenFairPriceProps) {
               Step 2 — What will investors pay per $1 earned in 5 years?{' '}
               <FinanceTerm termKey="pe_ratio" />
             </h4>
-            <p className="dd-screen-prompt" style={{ marginBottom: 12 }}>
+            <p className="dd-screen-prompt" style={{ marginBottom: 6 }}>
               The P/E multiple is how many dollars the market pays for $1 of annual profit.
-              {p.pathResult && ` (Current: ${multFmt(p.pathResult.current_multiple)}, Peers: ${multFmt(p.pathResult.peer_multiple_low)}–${multFmt(p.pathResult.peer_multiple_high)})`}
+              {p.pathResult?.current_multiple != null && ` (Today this company trades at ${multFmt(p.pathResult.current_multiple)}.)`}
             </p>
+            <p className="dd-fp-input-hint" style={{ marginBottom: 12 }}>{peHint}</p>
             <div className="dd-fp-inputs">
-              <MultInput label="🐻 Bear exit P/E" value={p.peBear} onChange={p.setPeBear} />
-              <MultInput label="📊 Base exit P/E" value={p.peBase} onChange={p.setPeBase} />
-              <MultInput label="🚀 Bull exit P/E" value={p.peBull} onChange={p.setPeBull} />
+              <MultInput label="🐻 Bear exit P/E" value={p.peBear} onChange={p.setPeBear} presets={peBearPresets} />
+              <MultInput label="📊 Base exit P/E" value={p.peBase} onChange={p.setPeBase} presets={peBasePresets} />
+              <MultInput label="🚀 Bull exit P/E" value={p.peBull} onChange={p.setPeBull} presets={peBullPresets} />
             </div>
           </div>
 
@@ -1269,12 +1384,12 @@ function ScreenFairPrice(p: ScreenFairPriceProps) {
               12%/yr is a common benchmark (roughly what a diversified stock portfolio earns long-term).
               Higher = more conservative fair value.
             </p>
-            <div className="dd-fp-mos-row">
-              <label style={{ color: '#94a3b8', fontSize: 13 }}>Required annual return</label>
+            <div className="dd-fp-section-single">
               <PctInput
-                label=""
+                label="Required annual return"
                 value={p.requiredReturn}
                 onChange={p.setRequiredReturn}
+                presets={rrPresets}
               />
             </div>
             {equationPreview}
