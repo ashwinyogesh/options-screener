@@ -252,13 +252,19 @@ export interface BusinessSummaryContent {
 export interface RiskDiffNewRisk {
   title: string
   summary: string
+  quote: string
+  why_it_matters: string
   severity: 'low' | 'medium' | 'high'
+  severity_rationale: string
 }
 
 export interface RiskDiffExpandedRisk {
   title: string
   what_changed: string
+  quote: string
+  why_it_matters: string
   severity: 'low' | 'medium' | 'high'
+  severity_rationale: string
 }
 
 export interface RiskDiffContent {

@@ -217,7 +217,7 @@ def test_risk_diff_includes_both_accessions_in_key(cache: CacheStub) -> None:
     )
     svc.set_llm_for_tests(lambda **_kw: {"new_risks": [], "expanded_risks": [], "overall_tone": "modestly worse"})
     r = svc.get_intel("MSFT", "risk_diff", fetcher=fetcher)
-    assert r.cache_key == "0000-25-001_vs_0000-24-001"
+    assert r.cache_key == "v2_0000-25-001_vs_0000-24-001"
     assert len(r.sources) == 2
 
 

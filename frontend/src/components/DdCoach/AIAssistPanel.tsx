@@ -181,8 +181,18 @@ function RiskDiffBody({ c }: { c: RiskDiffContent }) {
           <ul className="dd-ai-risks">
             {c.new_risks.map(r => (
               <li key={r.title}>
-                <span className={`dd-ai-sev dd-ai-sev-${r.severity}`}>{r.severity}</span>
-                <strong>{r.title}</strong>: {r.summary}
+                <div className="dd-ai-risk-head">
+                  <span className={`dd-ai-sev dd-ai-sev-${r.severity}`}>{r.severity}</span>
+                  <strong>{r.title}</strong>
+                </div>
+                <p className="dd-ai-risk-summary">{r.summary}</p>
+                {r.quote && <blockquote className="dd-ai-quote">“{r.quote}”</blockquote>}
+                {r.why_it_matters && (
+                  <p className="dd-ai-risk-why"><em>Why it matters:</em> {r.why_it_matters}</p>
+                )}
+                {r.severity_rationale && (
+                  <p className="dd-ai-risk-sev-note"><em>Severity:</em> {r.severity_rationale}</p>
+                )}
               </li>
             ))}
           </ul>
@@ -194,8 +204,18 @@ function RiskDiffBody({ c }: { c: RiskDiffContent }) {
           <ul className="dd-ai-risks">
             {c.expanded_risks.map(r => (
               <li key={r.title}>
-                <span className={`dd-ai-sev dd-ai-sev-${r.severity}`}>{r.severity}</span>
-                <strong>{r.title}</strong>: {r.what_changed}
+                <div className="dd-ai-risk-head">
+                  <span className={`dd-ai-sev dd-ai-sev-${r.severity}`}>{r.severity}</span>
+                  <strong>{r.title}</strong>
+                </div>
+                <p className="dd-ai-risk-summary">{r.what_changed}</p>
+                {r.quote && <blockquote className="dd-ai-quote">“{r.quote}”</blockquote>}
+                {r.why_it_matters && (
+                  <p className="dd-ai-risk-why"><em>Why it matters:</em> {r.why_it_matters}</p>
+                )}
+                {r.severity_rationale && (
+                  <p className="dd-ai-risk-sev-note"><em>Severity:</em> {r.severity_rationale}</p>
+                )}
               </li>
             ))}
           </ul>
