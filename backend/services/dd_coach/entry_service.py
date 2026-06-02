@@ -12,7 +12,7 @@ single-user V1 volume.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from azure.cosmos import exceptions as cosmos_exceptions
 
@@ -47,6 +47,40 @@ def _wrap_cosmos_call(op: str):  # decorator factory  # type: ignore[no-untyped-
     raise NotImplementedError  # not used — kept as a doc anchor for the convention
 
 
+T = TypeVar("T")
+
+
+def _safe(op: str, fn: Callable[[], T]) -> T:
+    """Run a Cosmos call and translate infra errors into ``DDCoachUnavailable``.
+
+    Without this, an unhandled ``CosmosHttpResponseError`` (e.g. container not
+    yet provisioned in a new environment) bubbles up as a bare 500 from
+    FastAPI, which Starlette emits *outside* CORS middleware — the browser
+    then shows "Failed to fetch" with no actionable message. Mapping to a
+    typed domain error lets the router return 503 with proper CORS headers.
+
+    ``CosmosResourceNotFoundError`` is re-raised unchanged so callers that
+    care about "document not found" (point reads) keep their semantics.
+    ``CosmosResourceExistsError`` is also re-raised (id collisions are real).
+    """
+    try:
+        return fn()
+    except cosmos_exceptions.CosmosResourceNotFoundError:
+        raise
+    except cosmos_exceptions.CosmosResourceExistsError:
+        raise
+    except cosmos_exceptions.CosmosHttpResponseError as exc:
+        logger.exception("dd_coach.cosmos_error op=%s", op)
+        raise DDCoachUnavailable(
+            f"DD Coach storage unavailable ({op}): {exc.message or exc!s}",
+        ) from exc
+    except Exception as exc:  # transport-level (DNS, TLS, auth) failures
+        logger.exception("dd_coach.cosmos_unexpected op=%s", op)
+        raise DDCoachUnavailable(
+            f"DD Coach storage unavailable ({op}): {exc!s}",
+        ) from exc
+
+
 def _doc_to_entry(doc: dict[str, Any]) -> DDEntryDoc:
     return DDEntryDoc.model_validate(doc)
 
@@ -74,7 +108,7 @@ def create_draft(
         data_card_snapshot=data_card_snapshot or {},
     )
     container = get_container()
-    container.create_item(_entry_to_doc(entry))
+    _safe("create_item", lambda: container.create_item(_entry_to_doc(entry)))
     logger.info("dd_coach.create_draft ticker=%s id=%s", entry.ticker, entry.id)
     return entry
 
@@ -83,7 +117,10 @@ def get_entry(entry_id: str, ticker: str) -> DDEntryDoc:
     """Point-read by id + partition key (ticker)."""
     container = get_container()
     try:
-        doc = container.read_item(item=entry_id, partition_key=ticker.upper())
+        doc = _safe(
+            "read_item",
+            lambda: container.read_item(item=entry_id, partition_key=ticker.upper()),
+        )
     except cosmos_exceptions.CosmosResourceNotFoundError as exc:
         raise DDEntryNotFound(
             f"DD entry not found: id={entry_id} ticker={ticker}",
@@ -120,10 +157,13 @@ def list_entries(
         + " ORDER BY c.created_at DESC"
         + f" OFFSET 0 LIMIT {int(limit)}"
     )
-    items = container.query_items(
-        query=query,
-        parameters=params,
-        enable_cross_partition_query=ticker is None,
+    items = _safe(
+        "query_items",
+        lambda: list(container.query_items(
+            query=query,
+            parameters=params,
+            enable_cross_partition_query=ticker is None,
+        )),
     )
     return [_doc_to_entry(doc) for doc in items]
 
@@ -153,7 +193,10 @@ def patch_entry(
     existing.updated_at = _now_iso()
 
     container = get_container()
-    container.replace_item(item=entry_id, body=_entry_to_doc(existing))
+    _safe(
+        "replace_item",
+        lambda: container.replace_item(item=entry_id, body=_entry_to_doc(existing)),
+    )
     return existing
 
 
@@ -170,7 +213,10 @@ def complete_entry(entry_id: str, ticker: str) -> DDEntryDoc:
     existing.updated_at = existing.completed_at
 
     container = get_container()
-    container.replace_item(item=entry_id, body=_entry_to_doc(existing))
+    _safe(
+        "replace_item",
+        lambda: container.replace_item(item=entry_id, body=_entry_to_doc(existing)),
+    )
     logger.info("dd_coach.complete_entry id=%s ticker=%s", entry_id, ticker)
     return existing
 
@@ -183,7 +229,10 @@ def delete_entry(entry_id: str, ticker: str) -> None:
             f"Entry {entry_id} is completed and cannot be deleted.",
         )
     container = get_container()
-    container.delete_item(item=entry_id, partition_key=ticker.upper())
+    _safe(
+        "delete_item",
+        lambda: container.delete_item(item=entry_id, partition_key=ticker.upper()),
+    )
 
 
 __all__ = [
