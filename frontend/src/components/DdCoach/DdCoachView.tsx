@@ -401,7 +401,7 @@ function ScreenBody(p: ScreenBodyProps) {
         ticker={p.ticker}
         insightType="mda_summary"
         title="AI take: latest revenue & margin drivers"
-        subtitle="MD&A from the most recent 10-Q"
+        subtitle="Management's Discussion and Analysis (MD&A) from the most recent 10-Q"
       />
     </>
     case 2: return <SimpleTextScreen
@@ -850,7 +850,7 @@ const SKIM_ROWS: SkimRow[] = [
   { item: 'Item 1',  section: 'Business',           look_for: 'What they sell, segments, top customers, geography',         minutes: '5 min' },
   { item: 'Item 1A', section: 'Risk Factors',       look_for: 'Diff vs. last year’s 10-K — only the new risks',   minutes: '5 min' },
   { item: 'Item 3',  section: 'Legal Proceedings',  look_for: 'Anything material (lawsuits, investigations)',                minutes: '1 min' },
-  { item: 'Item 7',  section: 'MD&A',               look_for: 'Revenue bridge, margin commentary, liquidity',                minutes: '10 min' },
+  { item: 'Item 7',  section: "Management's Discussion and Analysis (MD&A)", look_for: 'Revenue bridge, margin commentary, liquidity',                minutes: '10 min' },
   { item: 'Item 8',  section: 'Cash Flow Statement', look_for: 'CFO vs. Net Income, CapEx, buybacks vs. stock-based comp',   minutes: '3 min' },
   { item: 'Item 8',  section: 'Notes (Debt, Segments, Related Parties)', look_for: 'Debt maturities, true segment profit, anything weird', minutes: '5 min' },
   { item: 'Item 9A', section: 'Controls',           look_for: 'Search for “material weakness” — if present, stop', minutes: '30 sec' },
