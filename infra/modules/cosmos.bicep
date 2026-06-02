@@ -457,6 +457,42 @@ resource ddEntriesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/
   }
 }
 
+// dd_filings_intel: cached LLM-derived insights from SEC filings (V3).
+// One doc per (ticker, accession_or_period, insight_type) tuple. Doc id
+// shape: `{ticker}|{cache_key}|{insight_type}`. Cache is immutable per
+// accession — when SEC publishes a new 10-K the cache_key changes and a
+// fresh insight is generated on first request. Partition key /ticker so a
+// single-ticker DD session reads contiguously.
+//
+// No TTL — insights are tied to historical filings and stay valid as long
+// as the filing remains the latest of its type. Risk-diff entries pin to a
+// pair of accessions so they're always reproducible.
+resource ddFilingsIntelContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: database
+  name: 'dd_filings_intel'
+  properties: {
+    resource: {
+      id: 'dd_filings_intel'
+      partitionKey: {
+        paths: ['/ticker']
+        kind: 'Hash'
+        version: 2
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          { path: '/ticker/?' }
+          { path: '/insight_type/?' }
+          { path: '/cache_key/?' }
+          { path: '/generated_at/?' }
+        ]
+        excludedPaths: [{ path: '/*' }]
+      }
+    }
+  }
+}
+
 // Grant Cosmos DB Built-in Data Contributor to provided principal IDs.
 // Built-in role definition ID is fixed across all accounts.
 var cosmosDataContributorRoleId = '00000000-0000-0000-0000-000000000002'

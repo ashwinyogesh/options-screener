@@ -39,6 +39,8 @@ from services.dd_coach.errors import (
     DDEntryInvalid,
     DDEntryNotFound,
 )
+from services.dd_coach.filings_intel import service as filings_intel_service
+from services.dd_coach.filings_intel.prompts import VALID_INSIGHT_TYPES
 from services.dd_coach.models import (
     CreateEntryInput,
     DDEntryDoc,
@@ -249,6 +251,41 @@ def get_filings(
     except DDEntryNotFound as exc:
         _raise_http(exc)
     return links.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — LLM filings intelligence
+# ---------------------------------------------------------------------------
+
+
+_INSIGHT_TYPE_LITERAL = Literal[
+    "business_summary",
+    "risk_diff",
+    "mda_summary",
+    "leadership",
+    "bear_scaffold",
+]
+
+
+@router.get("/intel/{ticker}/{insight_type}")
+@limiter.limit("10/minute")
+def get_filings_intel(
+    request: Request,
+    ticker: str = Path(..., min_length=1, max_length=10),
+    insight_type: _INSIGHT_TYPE_LITERAL = Path(..., description="One of: " + ", ".join(VALID_INSIGHT_TYPES)),
+    force: bool = Query(default=False, description="Bypass cache and recompute"),
+) -> dict[str, Any]:
+    """Return LLM-derived insight for a filing.
+
+    First call per (ticker, accession#, insight_type) hits the SEC + Azure
+    OpenAI; subsequent calls return the cached Cosmos document. Set
+    ``force=true`` to recompute.
+    """
+    try:
+        result = filings_intel_service.get_intel(ticker, insight_type, force=force)
+    except (DDEntryNotFound, DDEntryInvalid, DDCoachUnavailable) as exc:
+        _raise_http(exc)
+    return result.to_dict()
 
 
 # ---------------------------------------------------------------------------
