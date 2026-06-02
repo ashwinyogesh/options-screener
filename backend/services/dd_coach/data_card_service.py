@@ -70,6 +70,8 @@ class DataCard:
 
     revenue_3yr: list[YearlyMetric]
     fcf_3yr: list[YearlyMetric]
+    revenue_ttm: float | None
+    fcf_ttm: float | None
     cash: float | None
     debt: float | None
     net_cash_position: float | None  # cash − debt; positive = net cash
@@ -196,6 +198,67 @@ def _compute_fcf_series(financials: Any, cashflow: Any) -> list[YearlyMetric]:
         points.append((int(yr), fcf))
     points.sort(key=lambda p: p[0])
     return [YearlyMetric(year=y, value=v) for y, v in points[-3:]]
+
+
+_REVENUE_NAMES = ["Total Revenue", "Revenue", "Operating Revenue"]
+_OCF_NAMES = [
+    "Operating Cash Flow",
+    "Total Cash From Operating Activities",
+    "Cash Flow From Continuing Operating Activities",
+]
+_CAPEX_NAMES = [
+    "Capital Expenditure",
+    "Capital Expenditures",
+    "Purchase Of PPE",
+]
+
+
+def _sum_last_n_quarters(row: pd.Series | None, n: int = 4) -> float | None:
+    """Sum the most recent ``n`` quarterly values. Returns None unless all ``n``
+    quarters are present and numeric — partial TTMs would mislead."""
+    if row is None or row.empty:
+        return None
+    points: list[tuple[Any, float]] = []
+    for col, val in row.items():
+        v = _safe_float(val)
+        if v is None:
+            continue
+        points.append((col, v))
+    if len(points) < n:
+        return None
+    # yfinance quarterly frames are typically newest-first; sort by date desc.
+    try:
+        points.sort(key=lambda p: p[0], reverse=True)
+    except Exception:
+        pass
+    return float(sum(v for _, v in points[:n]))
+
+
+def _compute_revenue_ttm(quarterly_financials: Any) -> float | None:
+    return _sum_last_n_quarters(_row(quarterly_financials, _REVENUE_NAMES))
+
+
+def _compute_fcf_ttm(quarterly_cashflow: Any) -> float | None:
+    ocf_row = _row(quarterly_cashflow, _OCF_NAMES)
+    if ocf_row is None or ocf_row.empty:
+        return None
+    capex_row = _row(quarterly_cashflow, _CAPEX_NAMES)
+    # Take the same 4 most-recent quarter columns from each row so OCF and
+    # capex are aligned in time.
+    try:
+        cols = sorted(ocf_row.index, reverse=True)[:4]
+    except Exception:
+        cols = list(ocf_row.index)[:4]
+    if len(cols) < 4:
+        return None
+    total = 0.0
+    for col in cols:
+        ocf = _safe_float(ocf_row.get(col))
+        if ocf is None:
+            return None
+        capex = _safe_float(capex_row.get(col)) if capex_row is not None else None
+        total += ocf - (abs(capex) if capex is not None else 0.0)
+    return total
 
 
 def _compute_gross_margin_series(financials: Any) -> list[YearlyMetric]:
@@ -361,11 +424,16 @@ def get_data_card(
     financials = getattr(t, "financials", None)
     cashflow = getattr(t, "cashflow", None)
     balance_sheet = getattr(t, "balance_sheet", None)
+    quarterly_financials = getattr(t, "quarterly_financials", None)
+    quarterly_cashflow = getattr(t, "quarterly_cashflow", None)
 
     revenue_row = _row(financials, ["Total Revenue"])
     revenue_3yr = _yearly_series(revenue_row, max_years=3)
 
     fcf_3yr = _compute_fcf_series(financials, cashflow)
+
+    revenue_ttm = _compute_revenue_ttm(quarterly_financials)
+    fcf_ttm = _compute_fcf_ttm(quarterly_cashflow)
 
     cash = _latest_value(balance_sheet, [
         "Cash And Cash Equivalents",
@@ -407,6 +475,8 @@ def get_data_card(
         market_cap=_safe_float(info.get("marketCap")),
         revenue_3yr=revenue_3yr,
         fcf_3yr=fcf_3yr,
+        revenue_ttm=revenue_ttm,
+        fcf_ttm=fcf_ttm,
         cash=cash,
         debt=debt,
         net_cash_position=net_cash,

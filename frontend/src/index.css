@@ -2032,6 +2032,10 @@ details[open] .ic-guide-summary::before { content: '▼ '; }
 .dd-series-cell {
   background: #0f172a; border-radius: 6px; padding: 6px 10px; flex: 1; text-align: center;
 }
+.dd-series-cell-ttm {
+  background: #111d3a; border: 1px solid #1e3a8a;
+}
+.dd-series-cell-ttm .dd-series-year { color: #93c5fd; font-weight: 600; }
 .dd-series-year { font-size: 11px; color: #64748b; }
 .dd-series-value { font-size: 13px; color: #f1f5f9; font-weight: 500; }
 .dd-series-empty { font-size: 12px; color: #64748b; }

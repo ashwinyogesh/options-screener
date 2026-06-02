@@ -53,8 +53,8 @@ export function DataCardPanel({ card }: { card: DataCard }) {
         <KeyValue label="Price ÷ earnings" value={fmtMultiple(card.price_to_earnings_ttm)} />
       </div>
 
-      <SeriesTable label="Revenue (last 3 yrs)" series={card.revenue_3yr} formatter={fmtMoney} />
-      <SeriesTable label="Free cash flow (last 3 yrs)" series={card.fcf_3yr} formatter={fmtMoney} />
+      <SeriesTable label="Revenue (last 3 yrs)" series={card.revenue_3yr} formatter={fmtMoney} ttm={card.revenue_ttm} />
+      <SeriesTable label="Free cash flow (last 3 yrs)" series={card.fcf_3yr} formatter={fmtMoney} ttm={card.fcf_ttm} />
 
       {card.growth_lens && <GrowthLensBlock lens={card.growth_lens} />}
     </div>
@@ -117,12 +117,13 @@ function KeyValue({ label, value, tone = 'default' }: {
   )
 }
 
-function SeriesTable({ label, series, formatter }: {
+function SeriesTable({ label, series, formatter, ttm }: {
   label: string
   series: YearlyMetric[]
   formatter: (v: number | null) => string
+  ttm?: number | null
 }) {
-  if (series.length === 0) {
+  if (series.length === 0 && ttm == null) {
     return (
       <div className="dd-series">
         <div className="dd-series-label">{label}</div>
@@ -140,6 +141,12 @@ function SeriesTable({ label, series, formatter }: {
             <div className="dd-series-value">{formatter(pt.value)}</div>
           </div>
         ))}
+        {ttm != null && (
+          <div key="ttm" className="dd-series-cell dd-series-cell-ttm">
+            <div className="dd-series-year">TTM</div>
+            <div className="dd-series-value">{formatter(ttm)}</div>
+          </div>
+        )}
       </div>
     </div>
   )

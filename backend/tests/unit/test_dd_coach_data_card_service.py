@@ -37,6 +37,8 @@ class FakeTicker:
     financials: pd.DataFrame | None
     cashflow: pd.DataFrame | None
     balance_sheet: pd.DataFrame | None
+    quarterly_financials: pd.DataFrame | None = None
+    quarterly_cashflow: pd.DataFrame | None = None
 
 
 class FakeProvider:
@@ -77,6 +79,21 @@ def _msft_like() -> FakeTicker:
         {cols[0]: [76e9, 52e9]},
         index=["Cash And Cash Equivalents", "Total Debt"],
     )
+    # Quarterly frames: 4 most recent quarters, newest-first (matches yfinance).
+    qcols = [datetime(2025, 9, 30), datetime(2025, 6, 30), datetime(2025, 3, 31), datetime(2024, 12, 31)]
+    qfin = pd.DataFrame(
+        {qcols[0]: [70e9], qcols[1]: [65e9], qcols[2]: [62e9], qcols[3]: [60e9]},
+        index=["Total Revenue"],
+    )
+    qcf = pd.DataFrame(
+        {
+            qcols[0]: [26e9, -5e9],
+            qcols[1]: [24e9, -4e9],
+            qcols[2]: [22e9, -4e9],
+            qcols[3]: [20e9, -3e9],
+        },
+        index=["Operating Cash Flow", "Capital Expenditure"],
+    )
     return FakeTicker(
         info={
             "longName": "Microsoft Corporation",
@@ -91,6 +108,8 @@ def _msft_like() -> FakeTicker:
         financials=fin,
         cashflow=cf,
         balance_sheet=bs,
+        quarterly_financials=qfin,
+        quarterly_cashflow=qcf,
     )
 
 
@@ -174,6 +193,14 @@ class TestProfitableCompany:
     def test_net_cash_position(self, card: dcs.DataCard) -> None:
         assert card.net_cash_position == pytest.approx(24e9)
 
+    def test_revenue_ttm_sums_last_four_quarters(self, card: dcs.DataCard) -> None:
+        # 70 + 65 + 62 + 60 = 257B
+        assert card.revenue_ttm == pytest.approx(257e9)
+
+    def test_fcf_ttm_sums_last_four_quarters(self, card: dcs.DataCard) -> None:
+        # OCF (26+24+22+20)=92B; capex |-5-4-4-3|=16B; FCF = 76B
+        assert card.fcf_ttm == pytest.approx(76e9)
+
 
 class TestUnprofitableGrowthCompany:
     @pytest.fixture
@@ -207,6 +234,11 @@ class TestUnprofitableGrowthCompany:
         runway = card.growth_lens.cash_runway_years
         assert runway is not None
         assert 4.5 < runway < 7.0
+
+    def test_ttm_none_when_no_quarterly_frames(self, card: dcs.DataCard) -> None:
+        # _nbis_like doesn't populate quarterly frames → TTM should degrade to None.
+        assert card.revenue_ttm is None
+        assert card.fcf_ttm is None
 
 
 class TestEmptyTicker:

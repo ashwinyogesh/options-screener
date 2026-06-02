@@ -46,6 +46,8 @@ export interface DataCard {
   market_cap: number | null
   revenue_3yr: YearlyMetric[]
   fcf_3yr: YearlyMetric[]
+  revenue_ttm: number | null
+  fcf_ttm: number | null
   cash: number | null
   debt: number | null
   net_cash_position: number | null
