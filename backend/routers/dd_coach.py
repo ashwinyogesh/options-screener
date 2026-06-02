@@ -381,3 +381,85 @@ def compute_valuation(
     except DDEntryInvalid as exc:
         _raise_http(exc)
     return out.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Guided valuation — Fair Price screen (V3)
+# ---------------------------------------------------------------------------
+
+
+class GuidedValuationRequest(BaseModel):
+    """User-driven 5-year owner valuation inputs.
+
+    All growth rates and PE multiples are supplied by the user (pre-populated
+    from data card and path-to-target signals on the frontend).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    current_eps: float = Field(..., gt=0, description="FCF per share today (must be positive).")
+    growth_bear: float = Field(..., ge=-0.5, le=2.0, description="Bear annual growth rate (decimal).")
+    growth_base: float = Field(..., ge=-0.5, le=2.0, description="Base annual growth rate (decimal).")
+    growth_bull: float = Field(..., ge=-0.5, le=2.0, description="Bull annual growth rate (decimal).")
+    years: int = Field(5, gt=0, le=20, description="Projection horizon (default 5).")
+    pe_bear: float = Field(..., gt=0)
+    pe_base: float = Field(..., gt=0)
+    pe_bull: float = Field(..., gt=0)
+    required_return: float = Field(0.12, gt=0, lt=1, description="Annual hurdle rate (e.g. 0.12).")
+    spot_price: float | None = None
+    required_mos: float | None = Field(
+        None, ge=0, lt=1,
+        description="User's minimum margin of safety (e.g. 0.25 = 25 %). Defaults to 0.25.",
+    )
+
+
+@router.post("/guided_valuation")
+@limiter.limit("60/minute")
+def compute_guided_valuation(
+    request: Request,
+    payload: GuidedValuationRequest,
+) -> dict[str, Any]:
+    """5-year owner model — project EPS forward × exit multiple, discount to today.
+
+    Returns bear / base / bull fair values plus:
+    - ``margin_of_safety``: (base − spot) / base  (positive = discount, negative = premium)
+    - ``buy_at_or_below``: base × (1 − required_mos) — the price gate for the user
+    """
+    try:
+        out = valuation_service.compute_guided_valuation(
+            valuation_service.GuidedValuationInputs(
+                current_eps=payload.current_eps,
+                growth_bear=payload.growth_bear,
+                growth_base=payload.growth_base,
+                growth_bull=payload.growth_bull,
+                years=payload.years,
+                pe_bear=payload.pe_bear,
+                pe_base=payload.pe_base,
+                pe_bull=payload.pe_bull,
+                required_return=payload.required_return,
+                spot_price=payload.spot_price,
+            ),
+        )
+    except DDEntryInvalid as exc:
+        _raise_http(exc)
+
+    rng = out.range
+    mos = (
+        (rng.base - rng.spot) / rng.base
+        if (rng.base and rng.spot and rng.base > 0)
+        else None
+    )
+    mos_target = payload.required_mos if payload.required_mos is not None else 0.25
+    buy_at_or_below = rng.base * (1.0 - mos_target) if rng.base else None
+
+    return {
+        "bear": rng.bear,
+        "base": rng.base,
+        "bull": rng.bull,
+        "spot": rng.spot,
+        "margin_of_safety": mos,
+        "buy_at_or_below": buy_at_or_below,
+        "method": out.method.value,
+        "rationale": out.rationale,
+        "inputs_used": out.inputs_used,
+    }

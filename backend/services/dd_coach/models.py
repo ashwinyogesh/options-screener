@@ -144,6 +144,36 @@ class ValuationResult(BaseModel):
     spot: float | None = None
 
 
+class GuidedValuationSave(BaseModel):
+    """Persisted Fair Price screen state — user inputs + computed fair values.
+
+    Added in V3. Stored inside ``Valuation.guided`` so older Cosmos docs
+    (which lack this field) continue to deserialise cleanly.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    # User-owned inputs
+    current_eps: float | None = None
+    growth_bear: float | None = None   # decimal, e.g. 0.05 = 5 %/yr
+    growth_base: float | None = None
+    growth_bull: float | None = None
+    years: int = 5
+    pe_bear: float | None = None
+    pe_base: float | None = None
+    pe_bull: float | None = None
+    required_return: float = 0.12
+    required_mos: float | None = None   # user's minimum margin of safety
+
+    # Computed at calculation time
+    fair_bear: float | None = None
+    fair_base: float | None = None
+    fair_bull: float | None = None
+    spot_at_time: float | None = None
+    margin_of_safety: float | None = None    # (base − spot) / base
+    buy_at_or_below: float | None = None     # base × (1 − required_mos)
+
+
 class Valuation(BaseModel):
     """Q5 inputs + outcome. Empty on draft until user reaches Q5."""
 
@@ -154,6 +184,7 @@ class Valuation(BaseModel):
     result: ValuationResult | None = None
     user_call: UserCall | None = None
     reasoning: str | None = None
+    guided: GuidedValuationSave | None = None   # V3 Fair Price screen
 
 
 class Sizing(BaseModel):

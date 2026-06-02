@@ -4,6 +4,8 @@ import type {
   DDCoachError,
   DDEntry,
   FilingLinks,
+  GuidedValuationInput,
+  GuidedValuationResult,
   InsightType,
   IntelResult,
   PatchEntryInput,
@@ -66,6 +68,8 @@ export interface UseDdCoachReturn {
   fetchIntel: (ticker: string, insightType: InsightType, opts?: { force?: boolean }) => Promise<FetchResult<IntelResult>>
   // Valuation compute
   computeValuation: (req: ValuationRequest) => Promise<FetchResult<ValuationOutput>>
+  // Guided valuation (V3 Fair Price screen)
+  guidedValuation: (req: GuidedValuationInput) => Promise<FetchResult<GuidedValuationResult>>
   // Entry CRUD
   createEntry: (ticker: string) => Promise<FetchResult<DDEntry>>
   patchEntry: (id: string, ticker: string, patch: PatchEntryInput) => Promise<FetchResult<DDEntry>>
@@ -123,6 +127,14 @@ export function useDdCoach(): UseDdCoachReturn {
     [wrap],
   )
 
+  const guidedValuation = useCallback(
+    (req: GuidedValuationInput) => wrap(() => jsonFetch<GuidedValuationResult>(
+      `${API_BASE}/api/dd_coach/guided_valuation`,
+      { method: 'POST', body: JSON.stringify(req) },
+    )),
+    [wrap],
+  )
+
   const createEntry = useCallback(
     (ticker: string) => wrap(() => jsonFetch<DDEntry>(
       `${API_BASE}/api/dd_coach/entries`,
@@ -153,6 +165,7 @@ export function useDdCoach(): UseDdCoachReturn {
     fetchPathToTarget,
     fetchIntel,
     computeValuation,
+    guidedValuation,
     createEntry,
     patchEntry,
     completeEntry,

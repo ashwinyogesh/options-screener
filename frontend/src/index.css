@@ -2259,3 +2259,252 @@ details[open] .ic-guide-summary::before { content: '▼ '; }
 .dd-ai-scenario h5 small { color: #fbbf24; font-size: 11px; font-weight: 500; }
 .dd-ai-watch { margin: 4px 0 0; font-size: 12px; color: #94a3b8; }
 
+/* ── FinanceTerm inline glossary (V3) ────────────────────────────────────── */
+.ft-wrapper {
+  position: relative;
+  display: inline;
+}
+.ft-term {
+  font-weight: 500;
+  color: #e2e8f0;
+}
+.ft-icon {
+  display: inline;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: #60a5fa;
+  padding: 0 1px;
+  line-height: 1;
+  vertical-align: super;
+}
+.ft-icon:hover { color: #93c5fd; }
+.ft-popover {
+  position: absolute;
+  z-index: 999;
+  left: 0;
+  top: calc(100% + 6px);
+  width: 320px;
+  background: #1e2235;
+  border: 1px solid #3b4268;
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ft-popover-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+}
+.ft-popover-close:hover { color: #e2e8f0; }
+.ft-popover-plain {
+  color: #e2e8f0;
+  margin-bottom: 10px;
+}
+.ft-popover-context {
+  color: #cbd5e1;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.ft-popover-news {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+/* ── Fair Price screen (V3) ──────────────────────────────────────────────── */
+.dd-fp-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.dd-fp-pre-profit {
+  background: #1e2235;
+  border: 1px solid #3b4268;
+  border-radius: 10px;
+  padding: 20px;
+  text-align: center;
+}
+.dd-fp-pre-profit p { color: #94a3b8; font-size: 14px; margin-bottom: 8px; }
+.dd-fp-anchor {
+  background: #1a1d27;
+  border: 1px solid #2d3148;
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+.dd-fp-anchor-label {
+  font-size: 12px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+.dd-fp-anchor-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+.dd-fp-anchor-sub {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 4px;
+}
+.dd-fp-section {
+  background: #1a1d27;
+  border: 1px solid #2d3148;
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+.dd-fp-section h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+.dd-fp-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+.dd-fp-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dd-fp-input-group label {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.dd-fp-input-group input {
+  background: #0f1117;
+  border: 1px solid #2d3148;
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 14px;
+  padding: 7px 10px;
+  width: 100%;
+}
+.dd-fp-input-group input:focus {
+  outline: none;
+  border-color: #4f5a8a;
+}
+.dd-fp-formula {
+  font-size: 12px;
+  color: #64748b;
+  background: #0a0c14;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 10px;
+  font-family: 'Courier New', monospace;
+  line-height: 1.6;
+}
+.dd-fp-mos-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.dd-fp-mos-row label {
+  font-size: 13px;
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+.dd-fp-result {
+  border-radius: 10px;
+  padding: 16px 20px;
+  background: #1a1d27;
+  border: 1px solid #2d3148;
+}
+.dd-fp-result-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.dd-fp-scenario {
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+.dd-fp-scenario-bear { background: #1f1215; border: 1px solid #6b2737; }
+.dd-fp-scenario-base { background: #12181f; border: 1px solid #1d4ed8; }
+.dd-fp-scenario-bull { background: #0f1a12; border: 1px solid #166534; }
+.dd-fp-scenario-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 4px;
+}
+.dd-fp-scenario-bear .dd-fp-scenario-label { color: #f87171; }
+.dd-fp-scenario-base .dd-fp-scenario-label { color: #60a5fa; }
+.dd-fp-scenario-bull .dd-fp-scenario-label { color: #4ade80; }
+.dd-fp-scenario-price {
+  font-size: 22px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+.dd-fp-scenario-vs {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+.dd-fp-gate {
+  border-top: 1px solid #2d3148;
+  padding-top: 14px;
+  margin-top: 4px;
+}
+.dd-fp-gate-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dd-fp-gate-label {
+  font-size: 13px;
+  color: #94a3b8;
+}
+.dd-fp-gate-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+.dd-fp-gate-value.mos-positive { color: #4ade80; }
+.dd-fp-gate-value.mos-negative { color: #f87171; }
+.dd-fp-gate-buy {
+  font-size: 15px;
+  font-weight: 600;
+  color: #fbbf24;
+}
+.dd-fp-error {
+  background: #1f1215;
+  border: 1px solid #6b2737;
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #fca5a5;
+  font-size: 13px;
+}
+.dd-fp-compute-btn {
+  background: #2d3148;
+  border: 1px solid #4f5a8a;
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 24px;
+  cursor: pointer;
+  transition: background 0.15s;
+  align-self: flex-start;
+}
+.dd-fp-compute-btn:hover { background: #3b4268; }
+.dd-fp-compute-btn:disabled { opacity: 0.5; cursor: default; }

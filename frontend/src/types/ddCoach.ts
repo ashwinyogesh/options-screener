@@ -113,6 +113,55 @@ export interface ValuationRequest {
   maturity_discount?: MaturityDiscountInputs
 }
 
+// ---------- Guided valuation (V3 Fair Price screen) ----------
+
+export interface GuidedValuationInput {
+  current_eps: number
+  growth_bear: number
+  growth_base: number
+  growth_bull: number
+  years: number
+  pe_bear: number
+  pe_base: number
+  pe_bull: number
+  required_return: number
+  spot_price?: number | null
+  required_mos?: number | null
+}
+
+/** Shape returned by POST /api/dd_coach/guided_valuation */
+export interface GuidedValuationResult {
+  bear: number
+  base: number
+  bull: number
+  spot: number | null
+  margin_of_safety: number | null    // positive = discount to fair value
+  buy_at_or_below: number | null
+  method: string
+  rationale: string
+  inputs_used: Record<string, number>
+}
+
+/** Subset persisted into entry.valuation.guided */
+export interface GuidedValuationSave {
+  current_eps?: number | null
+  growth_bear?: number | null
+  growth_base?: number | null
+  growth_bull?: number | null
+  years: number
+  pe_bear?: number | null
+  pe_base?: number | null
+  pe_bull?: number | null
+  required_return: number
+  required_mos?: number | null
+  fair_bear?: number | null
+  fair_base?: number | null
+  fair_bull?: number | null
+  spot_at_time?: number | null
+  margin_of_safety?: number | null
+  buy_at_or_below?: number | null
+}
+
 // ---------- Entry document ----------
 
 export interface FlagResponse {
@@ -147,6 +196,7 @@ export interface Valuation {
   result?: ValuationRange | null
   user_call?: UserCall | null
   reasoning?: string | null
+  guided?: GuidedValuationSave | null   // V3 Fair Price screen
 }
 
 export interface Sizing {

@@ -279,3 +279,88 @@ def default_sector_multiple_psales(sector: str) -> tuple[float, float, float] | 
 
 def default_sector_multiple_pe(sector: str) -> tuple[float, float, float] | None:
     return SECTOR_MULTIPLES_PE.get(sector)
+
+
+# ---------------------------------------------------------------------------
+# Guided valuation — Fair Price screen (V3)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class GuidedValuationInputs:
+    """Inputs for the user-driven 5-year owner valuation.
+
+    The user owns every assumption; the service is pure arithmetic.
+
+    Formula (per scenario):
+        projected_eps = current_eps * (1 + growth_rate) ** years
+        future_price  = projected_eps * exit_pe
+        fair_value    = future_price / (1 + required_return) ** years
+    """
+
+    current_eps: float        # FCF per share today (positive; caller validates sign)
+    growth_bear: float        # decimal fraction, e.g. 0.05 = 5 %/yr
+    growth_base: float
+    growth_bull: float
+    years: int                # projection horizon (default 5)
+    pe_bear: float            # exit P/E multiple, bear scenario
+    pe_base: float
+    pe_bull: float
+    required_return: float    # annual discount / hurdle rate (e.g. 0.12)
+    spot_price: float | None = None
+
+
+def compute_guided_valuation(inp: GuidedValuationInputs) -> ValuationOutput:
+    """Project current EPS forward × exit multiple and discount back to today.
+
+    Bear / base / bull fair values each use their own growth rate and exit
+    multiple so the scenario spread is meaningful to the user.
+    """
+    if inp.current_eps <= 0:
+        raise DDEntryInvalid(
+            "current_eps must be positive — use the optionality path for "
+            "pre-profit companies.",
+        )
+    if not (1 <= inp.years <= 30):
+        raise DDEntryInvalid("years must be between 1 and 30.")
+    if not (0 < inp.required_return < 1):
+        raise DDEntryInvalid(
+            "required_return must be between 0 and 1 (e.g. 0.12 for 12 %).",
+        )
+    if not (inp.pe_bear <= inp.pe_base <= inp.pe_bull):
+        raise DDEntryInvalid(
+            "PE multiples must be ordered: bear ≤ base ≤ bull.",
+        )
+    if inp.pe_bear <= 0:
+        raise DDEntryInvalid("PE multiples must be positive.")
+
+    discount = (1.0 + inp.required_return) ** inp.years
+
+    def _fair(growth: float, pe: float) -> float:
+        projected = inp.current_eps * (1.0 + growth) ** inp.years
+        return (projected * pe) / discount
+
+    bear = _fair(inp.growth_bear, inp.pe_bear)
+    base = _fair(inp.growth_base, inp.pe_base)
+    bull = _fair(inp.growth_bull, inp.pe_bull)
+
+    return ValuationOutput(
+        method=ValuationMethod.MULTIPLE_BASED,
+        range=ValuationRange(bear=bear, base=base, bull=bull, spot=inp.spot_price),
+        inputs_used={
+            "current_eps": inp.current_eps,
+            "growth_bear": inp.growth_bear,
+            "growth_base": inp.growth_base,
+            "growth_bull": inp.growth_bull,
+            "years": float(inp.years),
+            "pe_bear": inp.pe_bear,
+            "pe_base": inp.pe_base,
+            "pe_bull": inp.pe_bull,
+            "required_return": inp.required_return,
+        },
+        rationale=(
+            f"5-year owner model: projects today's ${inp.current_eps:.2f}/share earnings "
+            f"forward at your growth assumptions × exit P/E multiple, "
+            f"discounted at {inp.required_return * 100:.0f}%/yr to today's value."
+        ),
+    )

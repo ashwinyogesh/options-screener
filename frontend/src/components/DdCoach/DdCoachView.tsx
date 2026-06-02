@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AIAssistPanel } from './AIAssistPanel'
 import { DataCardPanel } from './DataCardPanel'
+import { FinanceTerm } from './FinanceTerm'
 import { useDdCoach } from '../../hooks/useDdCoach'
 import type {
   Answers,
@@ -9,6 +10,9 @@ import type {
   DDEntry,
   FilingLinks,
   FlagAcknowledgment,
+  GuidedValuationInput,
+  GuidedValuationResult,
+  GuidedValuationSave,
   InsiderActivity,
   LeadershipCheck,
   PathResult,
@@ -32,10 +36,11 @@ const SCREENS = [
   'The Risks',
   'Why Now',
   'Bear Case',
+  'Fair Price',       // V3 — user-driven guided valuation
   'Decision & Plan',
 ] as const
 
-type ScreenIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+type ScreenIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,6 +61,21 @@ const REALISM_LABEL: Record<Realism, string> = {
   plausible: 'Plausible — within peer norms',
   stretch: 'Stretch — would be unusual',
   unrealistic: 'Unrealistic — rarely happens',
+}
+
+function deriveFairEps(card: DataCard, pathResult: PathToTarget | null): number | null {
+  if (pathResult?.cash_per_share != null && pathResult.cash_per_share > 0) {
+    return pathResult.cash_per_share
+  }
+  if (
+    card.fcf_ttm != null
+    && card.market_cap != null
+    && card.spot_price != null
+    && card.market_cap > 0
+  ) {
+    return (card.fcf_ttm * card.spot_price) / card.market_cap
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +113,19 @@ export function DdCoachView() {
   const [pathResult, setPathResult] = useState<PathToTarget | null>(null)
   const [pathError, setPathError] = useState<string | null>(null)
 
+  // V3 guided valuation — Fair Price screen (Screen 9)
+  const [growthBear, setGrowthBear] = useState<number>(0)
+  const [growthBase, setGrowthBase] = useState<number>(0)
+  const [growthBull, setGrowthBull] = useState<number>(0)
+  const [peBear, setPeBear] = useState<number>(0)
+  const [peBase, setPeBase] = useState<number>(0)
+  const [peBull, setPeBull] = useState<number>(0)
+  const [requiredReturn, setRequiredReturn] = useState<number>(0.12)
+  const [requiredMos, setRequiredMos] = useState<number>(0.25)
+  const [guidedValResult, setGuidedValResult] = useState<GuidedValuationResult | null>(null)
+  const [guidedValError, setGuidedValError] = useState<string | null>(null)
+  const [guidedSeeded, setGuidedSeeded] = useState<boolean>(false)
+
   // ---- start a new entry ----
   const startEntry = useCallback(async () => {
     const t = ticker.trim().toUpperCase()
@@ -105,6 +138,10 @@ export function DdCoachView() {
     setPortfolioPct(0); setSellTarget(0); setAddMorePrice(0)
     setBailOutTrigger(''); setCommitmentAck(false)
     setTargetPrice(0); setPathResult(null); setPathError(null)
+    setGrowthBear(0); setGrowthBase(0); setGrowthBull(0)
+    setPeBear(0); setPeBase(0); setPeBull(0)
+    setRequiredReturn(0.12); setRequiredMos(0.25)
+    setGuidedValResult(null); setGuidedValError(null); setGuidedSeeded(false)
     setScreenIdx(0)
 
     const [cardRes, entryRes, filingsRes] = await Promise.all([
@@ -118,6 +155,12 @@ export function DdCoachView() {
     setCard(cardRes.data)
     setEntry(entryRes.data)
     setFilings(filingsRes.data)  // soft-fail on filings
+    // Fix: patch snapshot immediately so _snapshot_had_flags() works at creation time
+    if (cardRes.data && entryRes.data) {
+      void coach.patchEntry(entryRes.data.id, t, {
+        data_card_snapshot: cardRes.data as unknown as Record<string, unknown>,
+      })
+    }
     // Seed target price with a +20% over spot — easy to override.
     if (cardRes.data?.spot_price) {
       setTargetPrice(Number((cardRes.data.spot_price * 1.2).toFixed(2)))
@@ -156,6 +199,56 @@ export function DdCoachView() {
     if (res.data) setPathResult(res.data)
   }, [activeTicker, targetPrice, coach])
 
+  // Seed Fair Price defaults from Path-to-Target once (when pathResult arrives)
+  useEffect(() => {
+    if (!pathResult || guidedSeeded) return
+    const hist = pathResult.historical_growth_pct ?? 0
+    setGrowthBear(0)
+    setGrowthBase(hist)
+    setGrowthBull(Math.min(hist * 1.5, 0.50))
+    setPeBear(pathResult.peer_multiple_low)
+    setPeBase(
+      pathResult.current_multiple
+      ?? (pathResult.peer_multiple_low + pathResult.peer_multiple_high) / 2,
+    )
+    setPeBull(pathResult.peer_multiple_high)
+    setGuidedSeeded(true)
+  }, [pathResult, guidedSeeded])
+
+  const computeGuidedVal = useCallback(async () => {
+    if (!activeTicker || !card) return
+    setGuidedValError(null)
+    const eps = deriveFairEps(card, pathResult)
+    if (eps == null || eps <= 0) {
+      setGuidedValError(
+        'No positive earnings found — this appears to be a pre-profit company. '
+        + 'Size it as an option premium instead.',
+      )
+      return
+    }
+    const req: GuidedValuationInput = {
+      current_eps: eps,
+      growth_bear: growthBear,
+      growth_base: growthBase,
+      growth_bull: growthBull,
+      years: 5,
+      pe_bear: peBear || 10,
+      pe_base: peBase || 15,
+      pe_bull: peBull || 20,
+      required_return: requiredReturn,
+      spot_price: card.spot_price,
+      required_mos: requiredMos,
+    }
+    const res = await coach.guidedValuation(req)
+    if (res.error) { setGuidedValError(res.error.detail); return }
+    if (res.data) setGuidedValResult(res.data)
+  }, [
+    activeTicker, card, pathResult,
+    growthBear, growthBase, growthBull,
+    peBear, peBase, peBull,
+    requiredReturn, requiredMos, coach,
+  ])
+
   const advance = useCallback(() => {
     setScreenIdx(i => (Math.min(i + 1, SCREENS.length - 1) as ScreenIdx))
   }, [])
@@ -187,8 +280,28 @@ export function DdCoachView() {
       return
     }
     setError(null)
+    const guidedSave: GuidedValuationSave | null = guidedValResult
+      ? {
+          current_eps: guidedValResult.inputs_used.current_eps ?? null,
+          growth_bear: growthBear, growth_base: growthBase, growth_bull: growthBull,
+          years: 5,
+          pe_bear: peBear, pe_base: peBase, pe_bull: peBull,
+          required_return: requiredReturn,
+          required_mos: requiredMos,
+          fair_bear: guidedValResult.bear,
+          fair_base: guidedValResult.base,
+          fair_bull: guidedValResult.bull,
+          spot_at_time: guidedValResult.spot ?? null,
+          margin_of_safety: guidedValResult.margin_of_safety,
+          buy_at_or_below: guidedValResult.buy_at_or_below,
+        }
+      : null
     const patch = await coach.patchEntry(entry.id, activeTicker, {
-      valuation: { user_call: userCall, reasoning: answers.q3_why_now ?? null },
+      valuation: {
+        user_call: userCall,
+        reasoning: answers.q3_why_now ?? null,
+        guided: guidedSave,
+      },
       sizing: {
         planned_dollars: plannedDollars,
         stomach_answer: stomach,
@@ -208,7 +321,10 @@ export function DdCoachView() {
     entry, activeTicker, userCall, stomach, finalDollars,
     sellTarget, bailOutTrigger, commitmentAck,
     answers.q3_why_now, answers.q9_bear_case,
-    plannedDollars, portfolioPct, addMorePrice, coach,
+    plannedDollars, portfolioPct, addMorePrice,
+    growthBear, growthBase, growthBull,
+    peBear, peBase, peBull,
+    requiredReturn, requiredMos, guidedValResult, coach,
   ])
 
   // ---- render ----
@@ -286,6 +402,25 @@ export function DdCoachView() {
           pathError={pathError}
           onComputePath={computePath}
           pathLoading={coach.loading}
+          growthBear={growthBear}
+          setGrowthBear={setGrowthBear}
+          growthBase={growthBase}
+          setGrowthBase={setGrowthBase}
+          growthBull={growthBull}
+          setGrowthBull={setGrowthBull}
+          peBear={peBear}
+          setPeBear={setPeBear}
+          peBase={peBase}
+          setPeBase={setPeBase}
+          peBull={peBull}
+          setPeBull={setPeBull}
+          requiredReturn={requiredReturn}
+          setRequiredReturn={setRequiredReturn}
+          requiredMos={requiredMos}
+          setRequiredMos={setRequiredMos}
+          guidedValResult={guidedValResult}
+          guidedValError={guidedValError}
+          onComputeGuidedVal={computeGuidedVal}
         />
       )}
 
@@ -370,6 +505,26 @@ interface ScreenBodyProps {
   pathError: string | null
   onComputePath: () => Promise<void> | void
   pathLoading: boolean
+  // V3 guided valuation — Fair Price screen
+  growthBear: number
+  setGrowthBear: (n: number) => void
+  growthBase: number
+  setGrowthBase: (n: number) => void
+  growthBull: number
+  setGrowthBull: (n: number) => void
+  peBear: number
+  setPeBear: (n: number) => void
+  peBase: number
+  setPeBase: (n: number) => void
+  peBull: number
+  setPeBull: (n: number) => void
+  requiredReturn: number
+  setRequiredReturn: (n: number) => void
+  requiredMos: number
+  setRequiredMos: (n: number) => void
+  guidedValResult: GuidedValuationResult | null
+  guidedValError: string | null
+  onComputeGuidedVal: () => Promise<void> | void
 }
 
 function ScreenBody(p: ScreenBodyProps) {
@@ -470,9 +625,34 @@ function ScreenBody(p: ScreenBodyProps) {
         subtitle="stress-tests for your thesis, not predictions"
       />
     </>
-    case 9: return <Screen10Decision
+    case 9: return <ScreenFairPrice
       card={p.card}
       pathResult={p.pathResult}
+      growthBear={p.growthBear}
+      setGrowthBear={p.setGrowthBear}
+      growthBase={p.growthBase}
+      setGrowthBase={p.setGrowthBase}
+      growthBull={p.growthBull}
+      setGrowthBull={p.setGrowthBull}
+      peBear={p.peBear}
+      setPeBear={p.setPeBear}
+      peBase={p.peBase}
+      setPeBase={p.setPeBase}
+      peBull={p.peBull}
+      setPeBull={p.setPeBull}
+      requiredReturn={p.requiredReturn}
+      setRequiredReturn={p.setRequiredReturn}
+      requiredMos={p.requiredMos}
+      setRequiredMos={p.setRequiredMos}
+      guidedValResult={p.guidedValResult}
+      guidedValError={p.guidedValError}
+      loading={p.pathLoading}
+      onCompute={p.onComputeGuidedVal}
+    />
+    case 10: return <Screen10Decision
+      card={p.card}
+      pathResult={p.pathResult}
+      guidedValResult={p.guidedValResult}
       userCall={p.userCall}
       setUserCall={p.setUserCall}
       plannedDollars={p.plannedDollars}
@@ -918,10 +1098,286 @@ function Screen9BearCase({ value, onChange }: {
   )
 }
 
+// ---- Small number inputs for Fair Price screen ----
+
+function PctInput({ label, value, onChange }: {
+  label: string
+  value: number      // stored as decimal, e.g. 0.10 = 10 %
+  onChange: (v: number) => void
+}) {
+  return (
+    <label className="dd-fp-input-group">
+      <span>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <input
+          type="number"
+          className="dd-input"
+          style={{ width: 80 }}
+          value={value !== 0 ? (value * 100).toFixed(1) : ''}
+          onChange={e => onChange((parseFloat(e.target.value) || 0) / 100)}
+          min={-50}
+          max={200}
+          step={0.5}
+        />
+        <span style={{ color: '#94a3b8', fontSize: 13 }}>%/yr</span>
+      </div>
+    </label>
+  )
+}
+
+function MultInput({ label, value, onChange }: {
+  label: string
+  value: number      // raw P/E multiple
+  onChange: (v: number) => void
+}) {
+  return (
+    <label className="dd-fp-input-group">
+      <span>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <input
+          type="number"
+          className="dd-input"
+          style={{ width: 80 }}
+          value={value || ''}
+          onChange={e => onChange(parseFloat(e.target.value) || 0)}
+          min={1}
+          max={500}
+          step={1}
+        />
+        <span style={{ color: '#94a3b8', fontSize: 13 }}>×</span>
+      </div>
+    </label>
+  )
+}
+
+// ---- Screen 9 — Fair Price (V3) ----
+
+interface ScreenFairPriceProps {
+  card: DataCard
+  pathResult: PathToTarget | null
+  growthBear: number; setGrowthBear: (n: number) => void
+  growthBase: number; setGrowthBase: (n: number) => void
+  growthBull: number; setGrowthBull: (n: number) => void
+  peBear: number; setPeBear: (n: number) => void
+  peBase: number; setPeBase: (n: number) => void
+  peBull: number; setPeBull: (n: number) => void
+  requiredReturn: number; setRequiredReturn: (n: number) => void
+  requiredMos: number; setRequiredMos: (n: number) => void
+  guidedValResult: GuidedValuationResult | null
+  guidedValError: string | null
+  loading: boolean
+  onCompute: () => Promise<void> | void
+}
+
+function ScreenFairPrice(p: ScreenFairPriceProps) {
+  const eps = deriveFairEps(p.card, p.pathResult)
+  const spot = p.card.spot_price
+  const isPreProfit = eps == null || eps <= 0
+
+  // Inline equation preview (before hitting compute)
+  const equationPreview = !isPreProfit && p.peBear > 0 && p.peBase > 0 ? (
+    <div className="dd-fp-formula">
+      <strong>How the math works:</strong><br />
+      {'  '}Projected earnings in 5 yrs = ${eps?.toFixed(2)} × (1 + growth%)⁵<br />
+      {'  '}Future price = projected earnings × exit P/E<br />
+      {'  '}Fair value today = future price ÷ (1 + {(p.requiredReturn * 100).toFixed(0)}%/yr)⁵
+    </div>
+  ) : null
+
+  // Live buy-at-or-below when result is available
+  const buyAtOrBelow = p.guidedValResult?.base != null
+    ? p.guidedValResult.base * (1 - p.requiredMos)
+    : null
+
+  return (
+    <div className="dd-screen dd-fp-screen">
+      <h3 className="dd-screen-heading">Fair Price</h3>
+      <p className="dd-screen-prompt">
+        You've studied the business, the risks, and the bull case. Now: what's it actually worth?
+        This screen walks you through the "<strong>5-year owner</strong>" model — every assumption is yours.
+        There's no black box.
+      </p>
+
+      {/* Step 1 — Anchor */}
+      <div className="dd-fp-anchor">
+        <div className="dd-fp-anchor-label">Today's earnings anchor</div>
+        {isPreProfit ? (
+          <>
+            <div className="dd-fp-anchor-value" style={{ fontSize: 18, color: '#fbbf24' }}>
+              Pre-profit company
+            </div>
+            <p className="dd-fp-anchor-sub">
+              Traditional valuation doesn't apply — no positive earnings to project forward.
+              Size this as an option premium: only invest what you can afford to lose entirely.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="dd-fp-anchor-value">${eps!.toFixed(2)}</div>
+            <p className="dd-fp-anchor-sub">
+              <FinanceTerm termKey="fcf_per_share" labelOverride="earnings per share" />
+              {' '}— this is the company's real cash profit per share last year.
+              {spot && ` Today's price is $${spot.toFixed(2)}.`}
+            </p>
+          </>
+        )}
+      </div>
+
+      {!isPreProfit && (
+        <>
+          {/* Step 2 — Growth assumptions */}
+          <div className="dd-fp-section">
+            <h4>
+              Step 1 — How fast will earnings grow?{' '}
+              <FinanceTerm termKey="growth_rate" />
+            </h4>
+            <p className="dd-screen-prompt" style={{ marginBottom: 12 }}>
+              This is YOUR assumption — not a prediction. Bear = pessimistic, Base = your best guess, Bull = upside.
+              {p.pathResult && ` (Pre-filled from historical growth: ${pctFmt(p.pathResult.historical_growth_pct, 1)}/yr)`}
+            </p>
+            <div className="dd-fp-inputs">
+              <PctInput label="🐻 Bear (worst case)" value={p.growthBear} onChange={p.setGrowthBear} />
+              <PctInput label="📊 Base (most likely)" value={p.growthBase} onChange={p.setGrowthBase} />
+              <PctInput label="🚀 Bull (best case)" value={p.growthBull} onChange={p.setGrowthBull} />
+            </div>
+          </div>
+
+          {/* Step 3 — Exit multiple */}
+          <div className="dd-fp-section">
+            <h4>
+              Step 2 — What will investors pay per $1 earned in 5 years?{' '}
+              <FinanceTerm termKey="pe_ratio" />
+            </h4>
+            <p className="dd-screen-prompt" style={{ marginBottom: 12 }}>
+              The P/E multiple is how many dollars the market pays for $1 of annual profit.
+              {p.pathResult && ` (Current: ${multFmt(p.pathResult.current_multiple)}, Peers: ${multFmt(p.pathResult.peer_multiple_low)}–${multFmt(p.pathResult.peer_multiple_high)})`}
+            </p>
+            <div className="dd-fp-inputs">
+              <MultInput label="🐻 Bear exit P/E" value={p.peBear} onChange={p.setPeBear} />
+              <MultInput label="📊 Base exit P/E" value={p.peBase} onChange={p.setPeBase} />
+              <MultInput label="🚀 Bull exit P/E" value={p.peBull} onChange={p.setPeBull} />
+            </div>
+          </div>
+
+          {/* Step 4 — Required return + equation */}
+          <div className="dd-fp-section">
+            <h4>
+              Step 3 — What annual return do you require?{' '}
+              <FinanceTerm termKey="required_return" />
+            </h4>
+            <p className="dd-screen-prompt" style={{ marginBottom: 12 }}>
+              12%/yr is a common benchmark (roughly what a diversified stock portfolio earns long-term).
+              Higher = more conservative fair value.
+            </p>
+            <div className="dd-fp-mos-row">
+              <label style={{ color: '#94a3b8', fontSize: 13 }}>Required annual return</label>
+              <PctInput
+                label=""
+                value={p.requiredReturn}
+                onChange={p.setRequiredReturn}
+              />
+            </div>
+            {equationPreview}
+          </div>
+
+          {/* Compute button */}
+          <button
+            type="button"
+            className="dd-fp-compute-btn"
+            disabled={p.loading || p.peBear <= 0 || p.peBase <= 0 || p.peBull <= 0}
+            onClick={() => void p.onCompute()}
+          >
+            {p.loading ? 'Computing…' : 'Calculate my fair value range'}
+          </button>
+
+          {p.guidedValError && (
+            <div className="dd-fp-error">{p.guidedValError}</div>
+          )}
+
+          {/* Results */}
+          {p.guidedValResult && (
+            <div className="dd-fp-result">
+              <h4 style={{ marginBottom: 12, color: '#94a3b8', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Your fair value range
+              </h4>
+              <div className="dd-fp-result-grid">
+                <div className="dd-fp-scenario dd-fp-scenario-bear">
+                  <div className="dd-fp-scenario-label">🐻 Bear</div>
+                  <div className="dd-fp-scenario-price">${p.guidedValResult.bear.toFixed(2)}</div>
+                  {spot && <div className="dd-fp-scenario-vs">
+                    {p.guidedValResult.bear >= spot ? '+' : ''}{pctFmt((p.guidedValResult.bear - spot) / spot, 0)} vs today
+                  </div>}
+                </div>
+                <div className="dd-fp-scenario dd-fp-scenario-base">
+                  <div className="dd-fp-scenario-label">📊 Base</div>
+                  <div className="dd-fp-scenario-price">${p.guidedValResult.base.toFixed(2)}</div>
+                  {spot && <div className="dd-fp-scenario-vs">
+                    {p.guidedValResult.base >= spot ? '+' : ''}{pctFmt((p.guidedValResult.base - spot) / spot, 0)} vs today
+                  </div>}
+                </div>
+                <div className="dd-fp-scenario dd-fp-scenario-bull">
+                  <div className="dd-fp-scenario-label">🚀 Bull</div>
+                  <div className="dd-fp-scenario-price">${p.guidedValResult.bull.toFixed(2)}</div>
+                  {spot && <div className="dd-fp-scenario-vs">
+                    {p.guidedValResult.bull >= spot ? '+' : ''}{pctFmt((p.guidedValResult.bull - spot) / spot, 0)} vs today
+                  </div>}
+                </div>
+              </div>
+
+              <div className="dd-fp-gate">
+                {p.guidedValResult.margin_of_safety != null && (
+                  <div className="dd-fp-gate-row" style={{ marginBottom: 10 }}>
+                    <span className="dd-fp-gate-label">
+                      <FinanceTerm termKey="margin_of_safety" /> on base case
+                    </span>
+                    <span className={`dd-fp-gate-value ${p.guidedValResult.margin_of_safety >= 0 ? 'mos-positive' : 'mos-negative'}`}>
+                      {pctFmt(p.guidedValResult.margin_of_safety, 1)}
+                    </span>
+                  </div>
+                )}
+
+                <div className="dd-fp-gate-row" style={{ marginBottom: 14 }}>
+                  <span className="dd-fp-gate-label">
+                    Your minimum <FinanceTerm termKey="margin_of_safety" /> <FinanceTerm termKey="scenarios" labelOverride="buffer" />
+                  </span>
+                  <PctInput label="" value={p.requiredMos} onChange={p.setRequiredMos} />
+                </div>
+
+                {buyAtOrBelow != null && (
+                  <div className="dd-fp-gate-row">
+                    <span className="dd-fp-gate-label">
+                      Your price gate — only buy at or below:
+                    </span>
+                    <span className="dd-fp-gate-buy">
+                      ${buyAtOrBelow.toFixed(2)}
+                      {spot && buyAtOrBelow < spot && (
+                        <span style={{ color: '#94a3b8', fontSize: 12, fontWeight: 400 }}>
+                          {' '}(${(spot - buyAtOrBelow).toFixed(2)} below today's ${spot.toFixed(2)})
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {!p.guidedValResult && (
+            <p className="dd-fp-anchor-sub" style={{ textAlign: 'center', padding: '8px 0' }}>
+              Fill in your assumptions above and hit <strong>Calculate</strong> to see your fair value.
+              You can adjust the numbers and recalculate as many times as you like.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ---- Screen 10 — Decision + plan-pre-commit ----
 
 function Screen10Decision({
-  card, pathResult, userCall, setUserCall,
+  card, pathResult, guidedValResult, userCall, setUserCall,
   plannedDollars, setPlannedDollars, stomach, setStomach,
   finalDollars, setFinalDollars,
   portfolioPct, setPortfolioPct,
@@ -932,6 +1388,7 @@ function Screen10Decision({
 }: {
   card: DataCard
   pathResult: PathToTarget | null
+  guidedValResult: GuidedValuationResult | null
   userCall: UserCall | null
   setUserCall: (v: UserCall) => void
   plannedDollars: number
@@ -951,8 +1408,16 @@ function Screen10Decision({
   commitmentAck: boolean
   setCommitmentAck: (v: boolean) => void
 }) {
-  // Auto-suggest a call from the Path-to-Target mixed-path realism.
+  // Derive a suggested call from MoS (V3) with fallback to path realism.
   const suggestedCall: UserCall | null = useMemo(() => {
+    if (guidedValResult?.margin_of_safety != null) {
+      const mos = guidedValResult.margin_of_safety
+      if (mos >= 0.15) return 'cheap'
+      if (mos >= -0.05) return 'fair'
+      if (mos >= -0.20) return 'expensive_worth_it'
+      return 'cannot_value'
+    }
+    // Fallback: path realism (pre-V3 behaviour)
     const mixed = pathResult?.path_c_mixed
     if (!mixed?.realism) return null
     switch (mixed.realism) {
@@ -961,7 +1426,7 @@ function Screen10Decision({
       case 'stretch': return 'expensive_worth_it'
       case 'unrealistic': return 'cannot_value'
     }
-  }, [pathResult])
+  }, [guidedValResult, pathResult])
 
   useEffect(() => {
     if (userCall == null && suggestedCall != null) setUserCall(suggestedCall)
@@ -972,6 +1437,30 @@ function Screen10Decision({
   return (
     <div className="dd-screen">
       <h3 className="dd-screen-heading">Decision &amp; Plan</h3>
+
+      {/* Fair value summary from Fair Price screen */}
+      {guidedValResult && (
+        <div className="dd-fp-result" style={{ marginBottom: 4 }}>
+          <h4 style={{ marginBottom: 10, color: '#94a3b8', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Your fair value (from Fair Price screen)
+          </h4>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ color: '#f87171', fontSize: 13 }}>Bear: ${guidedValResult.bear.toFixed(2)}</span>
+            <span style={{ color: '#60a5fa', fontSize: 15, fontWeight: 600 }}>Base: ${guidedValResult.base.toFixed(2)}</span>
+            <span style={{ color: '#4ade80', fontSize: 13 }}>Bull: ${guidedValResult.bull.toFixed(2)}</span>
+            {guidedValResult.margin_of_safety != null && (
+              <span style={{ color: guidedValResult.margin_of_safety >= 0 ? '#4ade80' : '#f87171', fontSize: 13 }}>
+                MoS: {pctFmt(guidedValResult.margin_of_safety, 1)}
+              </span>
+            )}
+            {guidedValResult.buy_at_or_below != null && (
+              <span style={{ color: '#fbbf24', fontSize: 13, fontWeight: 600 }}>
+                Buy ≤ ${guidedValResult.buy_at_or_below.toFixed(2)}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="dd-section">
         <h4>1. What's your call?</h4>
@@ -1100,6 +1589,7 @@ function Screen10Decision({
 
 function CompletedSummary({ entry, card }: { entry: DDEntry | null; card: DataCard }) {
   if (!entry) return null
+  const guided = entry.valuation.guided
   return (
     <div className="dd-complete">
       <h3>Thesis saved for {card.ticker}</h3>
@@ -1114,6 +1604,40 @@ function CompletedSummary({ entry, card }: { entry: DDEntry | null; card: DataCa
         <dd>{entry.valuation.user_call ?? '—'}</dd>
         <dt>Stomach test</dt>
         <dd>{entry.sizing.stomach_answer ?? '—'}</dd>
+        {guided?.fair_base != null && (
+          <>
+            <dt>Fair value range</dt>
+            <dd>
+              ${guided.fair_bear?.toFixed(2) ?? '—'} — ${guided.fair_base.toFixed(2)} — ${guided.fair_bull?.toFixed(2) ?? '—'}
+            </dd>
+            {guided.margin_of_safety != null && (
+              <>
+                <dt>Margin of safety (base)</dt>
+                <dd style={{ color: guided.margin_of_safety >= 0 ? '#4ade80' : '#f87171' }}>
+                  {pctFmt(guided.margin_of_safety, 1)}
+                </dd>
+              </>
+            )}
+            {guided.buy_at_or_below != null && (
+              <>
+                <dt>Buy at or below</dt>
+                <dd style={{ color: '#fbbf24' }}>${guided.buy_at_or_below.toFixed(2)}</dd>
+              </>
+            )}
+          </>
+        )}
+        {entry.sizing.sell_target != null && entry.sizing.sell_target > 0 && (
+          <>
+            <dt>Sell target</dt>
+            <dd>${entry.sizing.sell_target.toLocaleString()}</dd>
+          </>
+        )}
+        {entry.sizing.bail_out_trigger && (
+          <>
+            <dt>Bail-out trigger</dt>
+            <dd>{entry.sizing.bail_out_trigger}</dd>
+          </>
+        )}
       </dl>
     </div>
   )
