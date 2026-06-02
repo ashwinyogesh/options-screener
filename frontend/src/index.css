@@ -2583,3 +2583,48 @@ details[open] .ic-guide-summary::before { content: '▼ '; }
 }
 .dd-fp-compute-btn:hover { background: #3b4268; }
 .dd-fp-compute-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ---- Thesis recap (Decision screen collapsible) ---- */
+.dd-thesis-recap {
+  border: 1px solid #2d3148;
+  border-radius: 8px;
+  background: #0f1117;
+  margin-bottom: 18px;
+}
+.dd-thesis-recap-summary {
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dd-thesis-recap-summary::-webkit-details-marker { display: none; }
+.dd-thesis-recap[open] .dd-thesis-recap-summary { color: #cbd5e1; }
+.dd-thesis-recap-body {
+  padding: 4px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dd-thesis-recap-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dd-thesis-recap-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #475569;
+}
+.dd-thesis-recap-value {
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}

@@ -71,7 +71,7 @@ class CompStructure(str, Enum):
 # ---- Validation thresholds (v2) -------------------------------------------
 # Hardcoded here so completion validation is auditable and easy to tune.
 
-BEAR_CASE_MIN_CHARS = 30
+BEAR_CASE_MIN_CHARS = 100
 BAIL_OUT_TRIGGER_MIN_CHARS = 20
 
 
@@ -111,6 +111,9 @@ class Answers(BaseModel):
 
     # Screen 9 — steel-manned bear case. Required, min length enforced.
     q9_bear_case: str | None = None
+
+    # Screen 5 (new order) — risk monitoring signal. Optional for completion.
+    q4_risk_monitor: str | None = None
 
 
 class FlagResponse(BaseModel):
@@ -299,7 +302,7 @@ class DDEntryDoc(BaseModel):
         bear = (a.q9_bear_case or "").strip()
         if len(bear) < BEAR_CASE_MIN_CHARS:
             missing.append(
-                f"answers.q9_bear_case (min {BEAR_CASE_MIN_CHARS} chars)",
+                f"answers.q9_bear_case (min {BEAR_CASE_MIN_CHARS} chars — write a real argument)",
             )
         s = self.sizing
         if s.sell_target is None or s.sell_target <= 0:

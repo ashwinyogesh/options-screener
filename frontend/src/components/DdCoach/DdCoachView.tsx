@@ -32,10 +32,10 @@ const SCREENS = [
   'The Market',
   'The Moat',
   'Leadership',
-  'Path to Target',
-  'The Risks',
+  'The Risks',        // moved before Why Now + Bear Case (avoid price anchoring)
   'Why Now',
   'Bear Case',
+  'Path to Target',   // moved after Bear Case so qualitative work comes first
   'Fair Price',       // V3 — user-driven guided valuation
   'Decision & Plan',
 ] as const
@@ -281,8 +281,8 @@ export function DdCoachView() {
       setError('Write a specific bail-out trigger (at least 20 characters).')
       return
     }
-    if ((answers.q9_bear_case ?? '').trim().length < 30) {
-      setError('Write a bear case (at least 30 characters) before completing.')
+    if ((answers.q9_bear_case ?? '').trim().length < 100) {
+      setError('Write a proper bear case (at least 100 characters) before completing.')
       return
     }
     if (!commitmentAck) {
@@ -561,6 +561,7 @@ function ScreenBody(p: ScreenBodyProps) {
         example="They rent GPU compute by the hour to AI startups. About 40% of revenue comes from one customer."
         value={p.answers.q2_revenue_model ?? ''}
         onChange={v => p.onAnswers({ q2_revenue_model: v })}
+        minLength={60}
       />
       <AIAssistPanel
         ticker={p.ticker}
@@ -575,6 +576,7 @@ function ScreenBody(p: ScreenBodyProps) {
       example="Cloud GPU compute is a ~$50B market in 2026 and growing fast. They have a tiny sliver — maybe 1% — so there's room to grow."
       value={p.answers.q3_market ?? ''}
       onChange={v => p.onAnswers({ q3_market: v })}
+      minLength={60}
     />
     case 3: return <SimpleTextScreen
       heading="The Moat"
@@ -582,6 +584,7 @@ function ScreenBody(p: ScreenBodyProps) {
       example="Switching cost — once a customer wires their AI training pipeline into a specific provider, moving is expensive and risky."
       value={p.answers.q3_moat ?? ''}
       onChange={v => p.onAnswers({ q3_moat: v })}
+      minLength={60}
     />
     case 4: return <>
       <Screen5Leadership
@@ -595,19 +598,12 @@ function ScreenBody(p: ScreenBodyProps) {
         subtitle="latest DEF 14A proxy + recent Form 4 cadence"
       />
     </>
-    case 5: return <Screen6PathToTarget
-      card={p.card}
-      targetPrice={p.targetPrice}
-      setTargetPrice={p.setTargetPrice}
-      result={p.pathResult}
-      error={p.pathError}
-      loading={p.pathLoading}
-      onCompute={p.onComputePath}
-    />
-    case 6: return <>
+    case 5: return <>
       <Screen7Risks
         value={p.answers.q4_risks ?? ''}
         onChange={v => p.onAnswers({ q4_risks: v })}
+        monitorValue={p.answers.q4_risk_monitor ?? ''}
+        onMonitorChange={v => p.onAnswers({ q4_risk_monitor: v })}
       />
       <AIAssistPanel
         ticker={p.ticker}
@@ -616,14 +612,15 @@ function ScreenBody(p: ScreenBodyProps) {
         subtitle="new this year, materially expanded, and ongoing"
       />
     </>
-    case 7: return <SimpleTextScreen
+    case 6: return <SimpleTextScreen
       heading="Why Now"
       prompt="What has to happen in the next 12 months for this to work? If you can't name a catalyst, it isn't 'now' — it's 'maybe someday.'"
       example="The next earnings call should show their AI cloud business crossing $1B annual run-rate. If it does, the stock re-rates."
       value={p.answers.q3_why_now ?? ''}
       onChange={v => p.onAnswers({ q3_why_now: v })}
+      minLength={60}
     />
-    case 8: return <>
+    case 7: return <>
       <Screen9BearCase
         value={p.answers.q9_bear_case ?? ''}
         onChange={v => p.onAnswers({ q9_bear_case: v })}
@@ -635,6 +632,15 @@ function ScreenBody(p: ScreenBodyProps) {
         subtitle="stress-tests for your thesis, not predictions"
       />
     </>
+    case 8: return <Screen6PathToTarget
+      card={p.card}
+      targetPrice={p.targetPrice}
+      setTargetPrice={p.setTargetPrice}
+      result={p.pathResult}
+      error={p.pathError}
+      loading={p.pathLoading}
+      onCompute={p.onComputePath}
+    />
     case 9: return <ScreenFairPrice
       card={p.card}
       pathResult={p.pathResult}
@@ -663,6 +669,7 @@ function ScreenBody(p: ScreenBodyProps) {
       card={p.card}
       pathResult={p.pathResult}
       guidedValResult={p.guidedValResult}
+      answers={p.answers}
       userCall={p.userCall}
       setUserCall={p.setUserCall}
       plannedDollars={p.plannedDollars}
@@ -753,20 +760,28 @@ function RedFlagResponsePanel({ reasons, value, onChange }: {
   )
 }
 
-// ---- Simple text screens (2, 3, 4, 7) ----
+// ---- Simple text screens (1, 2, 3, 6) ----
 
-function SimpleTextScreen({ heading, prompt, example, value, onChange }: {
+function SimpleTextScreen({ heading, prompt, example, value, onChange, minLength }: {
   heading: string
   prompt: string
   example: string
   value: string
   onChange: (v: string) => void
+  minLength?: number
 }) {
+  const count = value.trim().length
+  const needsMore = minLength != null && count < minLength
   return (
     <div className="dd-screen">
       <h3 className="dd-screen-heading">{heading}</h3>
       <p className="dd-screen-prompt">{prompt}</p>
       <Textarea value={value} onChange={onChange} placeholder="Your answer…" />
+      {minLength != null && (
+        <p className={`dd-bear-case${needsMore ? ' dd-bear-case-short' : ''}`}>
+          {count} / {minLength} characters {needsMore ? '— write a bit more' : '✓'}
+        </p>
+      )}
       <p className="dd-example"><strong>Example:</strong> {example}</p>
     </div>
   )
@@ -1005,12 +1020,16 @@ function PathCard({ title, subtitle, path }: {
   )
 }
 
-// ---- Screen 7 — Risks + filings links ----
+// ---- Screen 5 (new) — Risks + monitoring question ----
 
-function Screen7Risks({ value, onChange }: {
+function Screen7Risks({ value, onChange, monitorValue, onMonitorChange }: {
   value: string
   onChange: (v: string) => void
+  monitorValue: string
+  onMonitorChange: (v: string) => void
 }) {
+  const count = value.trim().length
+  const enough = count >= 80
   return (
     <div className="dd-screen">
       <h3 className="dd-screen-heading">The Risks</h3>
@@ -1021,6 +1040,24 @@ function Screen7Risks({ value, onChange }: {
       </p>
       <TenKSkimGuide />
       <Textarea value={value} onChange={onChange} placeholder="Top three risks, in your own words…" />
+      <p className={`dd-bear-case${enough ? '' : ' dd-bear-case-short'}`}>
+        {count} / 80 characters {enough ? '✓' : '— go deeper than a headline'}
+      </p>
+
+      <div style={{ marginTop: 20 }}>
+        <h4 style={{ marginBottom: 6, fontSize: 14, color: '#cbd5e1' }}>
+          What would tell you one of these risks is actually playing out?
+        </h4>
+        <p className="dd-screen-prompt" style={{ marginBottom: 8 }}>
+          Discipline means knowing what to watch. Name a specific metric, event,
+          or news item that would confirm one of the risks above is real.
+        </p>
+        <Textarea
+          value={monitorValue}
+          onChange={onMonitorChange}
+          placeholder="Example: two consecutive quarters of gross margin below 30%, or a major customer loss announced on earnings."
+        />
+      </div>
     </div>
   )
 }
@@ -1080,14 +1117,14 @@ function TenKSkimGuide() {
   )
 }
 
-// ---- Screen 9 — Bear case ----
+// ---- Screen 7 (new) — Bear case ----
 
 function Screen9BearCase({ value, onChange }: {
   value: string
   onChange: (v: string) => void
 }) {
   const count = value.trim().length
-  const enough = count >= 30
+  const enough = count >= 100
   return (
     <div className="dd-screen">
       <h3 className="dd-screen-heading">Bear Case</h3>
@@ -1102,7 +1139,7 @@ function Screen9BearCase({ value, onChange }: {
         placeholder="The most likely way this turns into a 50% loser…"
       />
       <p className={`dd-bear-case ${enough ? '' : 'dd-bear-case-short'}`}>
-        {count} / 30 characters {enough ? '✓' : '(write a real sentence)'}
+        {count} / 100 characters {enough ? '✓' : '(write a real argument — one headline isn\'t enough)'}
       </p>
     </div>
   )
@@ -1492,7 +1529,7 @@ function ScreenFairPrice(p: ScreenFairPriceProps) {
 // ---- Screen 10 — Decision + plan-pre-commit ----
 
 function Screen10Decision({
-  card, pathResult, guidedValResult, userCall, setUserCall,
+  card, pathResult, guidedValResult, answers, userCall, setUserCall,
   plannedDollars, setPlannedDollars, stomach, setStomach,
   finalDollars, setFinalDollars,
   portfolioPct, setPortfolioPct,
@@ -1504,6 +1541,7 @@ function Screen10Decision({
   card: DataCard
   pathResult: PathToTarget | null
   guidedValResult: GuidedValuationResult | null
+  answers: Answers
   userCall: UserCall | null
   setUserCall: (v: UserCall) => void
   plannedDollars: number
@@ -1552,6 +1590,9 @@ function Screen10Decision({
   return (
     <div className="dd-screen">
       <h3 className="dd-screen-heading">Decision &amp; Plan</h3>
+
+      {/* Your DD recap — read back what the user wrote, forces re-read before committing */}
+      <ThesisRecap answers={answers} />
 
       {/* Fair value summary from Fair Price screen */}
       {guidedValResult && (
@@ -1697,6 +1738,38 @@ function Screen10Decision({
         </label>
       </div>
     </div>
+  )
+}
+
+// ---- Thesis recap (read-only summary shown at top of Decision screen) ----
+
+function ThesisRecap({ answers }: { answers: Answers }) {
+  const rows = [
+    { label: 'What it does',   value: answers.q1_business },
+    { label: 'How it earns',   value: answers.q2_revenue_model },
+    { label: 'The market',     value: answers.q3_market },
+    { label: 'The moat',       value: answers.q3_moat },
+    { label: 'Why now',        value: answers.q3_why_now },
+    { label: 'Top risks',      value: answers.q4_risks },
+    { label: 'Bear case',      value: answers.q9_bear_case },
+  ].filter(r => r.value?.trim())
+
+  if (rows.length === 0) return null
+
+  return (
+    <details className="dd-thesis-recap">
+      <summary className="dd-thesis-recap-summary">
+        📋 Your DD so far — read this before you decide
+      </summary>
+      <div className="dd-thesis-recap-body">
+        {rows.map(r => (
+          <div key={r.label} className="dd-thesis-recap-row">
+            <span className="dd-thesis-recap-label">{r.label}</span>
+            <span className="dd-thesis-recap-value">{r.value}</span>
+          </div>
+        ))}
+      </div>
+    </details>
   )
 }
 

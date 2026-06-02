@@ -181,6 +181,7 @@ export interface Answers {
   q2_revenue_model?: string | null
   q3_upside?: string | null
   q4_risks?: string | null
+  q4_risk_monitor?: string | null   // what event/metric would signal a risk is playing out
   q3_market?: string | null
   q3_moat?: string | null
   q3_why_now?: string | null
