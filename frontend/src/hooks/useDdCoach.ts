@@ -5,6 +5,7 @@ import type {
   DDEntry,
   FilingLinks,
   PatchEntryInput,
+  PathToTarget,
   ValuationOutput,
   ValuationRequest,
 } from '../types/ddCoach'
@@ -57,6 +58,8 @@ export interface UseDdCoachReturn {
   fetchDataCard: (ticker: string) => Promise<FetchResult<DataCard>>
   // Filings
   fetchFilings: (ticker: string) => Promise<FetchResult<FilingLinks>>
+  // Path to target (Screen 6)
+  fetchPathToTarget: (ticker: string, targetPrice: number) => Promise<FetchResult<PathToTarget>>
   // Valuation compute
   computeValuation: (req: ValuationRequest) => Promise<FetchResult<ValuationOutput>>
   // Entry CRUD
@@ -88,6 +91,14 @@ export function useDdCoach(): UseDdCoachReturn {
   const fetchFilings = useCallback(
     (ticker: string) => wrap(() => jsonFetch<FilingLinks>(
       `${API_BASE}/api/dd_coach/filings/${encodeURIComponent(ticker.toUpperCase())}`,
+    )),
+    [wrap],
+  )
+
+  const fetchPathToTarget = useCallback(
+    (ticker: string, targetPrice: number) => wrap(() => jsonFetch<PathToTarget>(
+      `${API_BASE}/api/dd_coach/path_to_target/${encodeURIComponent(ticker.toUpperCase())}`
+      + `?target_price=${encodeURIComponent(String(targetPrice))}`,
     )),
     [wrap],
   )
@@ -127,6 +138,7 @@ export function useDdCoach(): UseDdCoachReturn {
   return {
     fetchDataCard,
     fetchFilings,
+    fetchPathToTarget,
     computeValuation,
     createEntry,
     patchEntry,

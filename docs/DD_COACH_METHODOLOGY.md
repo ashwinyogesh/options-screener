@@ -1,28 +1,37 @@
-# DD Coach — Methodology (V1)
+# DD Coach — Methodology (V2)
 
 > Plain-English due-diligence wizard for non-finance retail investors.
 > This doc and the code in `backend/services/dd_coach/` change together.
-> If the math here disagrees with `valuation_service.py`, the code wins
-> and this doc needs a PR.
+> If the math here disagrees with the services, the code wins and this doc
+> needs a PR.
 
 ## Mission
 
-Walk a non-finance retail investor through 8 short screens that produce a
-written investment thesis with a fair-value range — without ever showing
-finance vocabulary or asking them to pick a model.
+Walk a non-finance retail investor through 10 short screens that produce a
+written investment thesis, a target-realism check, and a pre-committed
+position plan — without ever showing finance vocabulary or asking them to
+pick a model.
 
-## Scope (V1, locked)
+## Scope (V2)
 
-8 sequential screens, in this order:
+10 sequential screens, in this order:
 
-1. **The Business** — Data Card + Hard Rails (auto). User confirms in their own words.
-2. **What They Sell** — short text on revenue concentration.
+1. **The Business** — Data Card + Hard Rails. If the card flags red items, the
+   user must explicitly react before continuing (`answers.q1_flag_response`).
+2. **What They Sell** — short text on revenue model & concentration.
 3. **The Market** — TAM / share / growth.
-4. **The Moat** — checkbox + one-liner (network / brand / switching / cost / IP).
-5. **The Numbers** — auto-selected valuation method + bear/base/bull inputs.
-6. **The Risks** — top 3 from 10-K Risk Factors, in plain English.
-7. **Why Now** — catalyst within 12 months.
-8. **Decision** — pass / size / wait; saved to Cosmos as a `DDEntryDoc`.
+4. **The Moat** — one-liner (network / brand / switching / cost / IP).
+5. **Leadership** — CEO identity, insider activity, comp structure, concerns
+   (`answers.q5_leadership`). Encourages cross-reference to Proxy + Form 4.
+6. **Path to Target** — user picks a target price; we show three concrete paths
+   to get there (growth-only, multiple-only, mixed) with realism bands.
+7. **The Risks** — top 3 from 10-K Risk Factors with a 30-minute skim guide.
+8. **Why Now** — catalyst within 12 months.
+9. **Bear Case** — steel-manned 50%-loss scenario (`answers.q9_bear_case`,
+   minimum 30 chars).
+10. **Decision & Plan** — call + size + stomach test, then a pre-committed
+    sell target, optional add-more price, bail-out trigger (≥20 chars),
+    and an explicit commitment acknowledgment (`sizing.commitment_*`).
 
 The frontend wizard renders these. The backend exposes:
 
@@ -30,8 +39,9 @@ The frontend wizard renders these. The backend exposes:
 |---|---|
 | `GET /api/dd_coach/data_card/{ticker}` | Screen 1 facts |
 | `GET /api/dd_coach/filings/{ticker}` | SEC EDGAR landing-page links |
-| `POST /api/dd_coach/valuation` | Screen 5 compute |
-| `POST/GET/PATCH /api/dd_coach/entries` | CRUD on the saved thesis (Phase 0) |
+| `GET /api/dd_coach/path_to_target/{ticker}?target_price=` | Screen 6 paths |
+| `POST /api/dd_coach/valuation` | Optional fair-value compute (kept for V1 callers) |
+| `POST/GET/PATCH /api/dd_coach/entries` | CRUD on the saved thesis |
 
 ## Hard Rails (exactly two, non-blocking)
 
@@ -178,3 +188,122 @@ CIKs come from `services/fundamentals_service._load_cik_map()` which is already 
 - [ ] Changed a discount rate / years / dilution default? Update both `valuation_service` constants **and** the Method Math section.
 - [ ] Added a sector? Update `SECTOR_MULTIPLES_*` **and** the two sector tables above.
 - [ ] Changed an endpoint shape? Update both the router and the Scope table.
+- [ ] Touched V2 completion validation (`assert_completable`) thresholds? Update both `models.BEAR_CASE_MIN_CHARS` / `BAIL_OUT_TRIGGER_MIN_CHARS` **and** the V2 Additions section below.
+- [ ] Touched the peer-multiple band? Update `peer_multiples.py` **and** the Path-to-Target peer-band table.
+
+---
+
+# V2 Additions
+
+## V2.1 Screen 1 — Forced reaction to red flags
+
+If `DataCard.flags.reasons` is non-empty when the wizard loads, the user
+cannot complete the entry without filling `answers.q1_flag_response`:
+
+- `acknowledgment`: one of `accounted` / `changes_view` / `explained`.
+- `note` (optional): one-sentence explanation.
+
+This is the only conditional V2 completion gate — entries with a clean
+data card don’t require this field. Enforced in
+[`DDEntryDoc.assert_completable`](../backend/services/dd_coach/models.py).
+
+## V2.2 Screen 5 — Leadership mini-screen
+
+`answers.q5_leadership` captures four fields; the first two are required
+for completion:
+
+| Field | Required | Notes |
+|---|---|---|
+| `who` | yes | Free text — CEO name, tenure, founder vs hired |
+| `insider_activity` | yes | enum: `heavy_buy` / `light_buy` / `quiet` / `light_sell` / `heavy_sell` / `unknown` |
+| `comp_structure` | no | enum: `revenue` / `profit` / `stock` / `salary` / `unknown` |
+| `concerns` | no | Free text |
+
+The screen links to the existing Proxy (DEF14A) and Form-4 endpoints via
+`FilingsBar` so the user can cross-reference without leaving the wizard.
+
+## V2.3 Screen 6 — Path to Target (replaces “The Numbers”)
+
+The V1 valuation auto-selector asked non-finance users to fill multi-input
+forms they didn’t understand. V2 inverts the question: **the user picks a
+target price, and we tell them what would have to be true for it to happen.**
+
+[`path_to_target_service.get_path_to_target`](../backend/services/dd_coach/path_to_target_service.py) is a pure function over yfinance. Let:
+
+- $S$ = spot price
+- $T$ = user target price
+- $R = T/S - 1$ — required total return
+- $C$ = per-share cash basis (see basis selection below)
+- $M = S/C$ — current multiple
+- $P_\text{low}, P_\text{high}$ — peer-multiple band (sector-keyed)
+
+We surface three paths:
+
+| Path | Required growth (cash) | Required multiple |
+|---|---|---|
+| **A — Growth only** (“lemonade-stand grows”) | $R$ | unchanged at $M$ |
+| **B — Multiple only** (“neighborhood gets trendy”) | $0$ | $T/C$ |
+| **C — A bit of both** | $R/2$ | $M \cdot (1 + R/2)$ |
+
+**Cash basis selection** (in `_pick_cash_basis`):
+
+1. Use earnings (`trailingEps`) if positive **and** $\text{eps}/\text{revenue\_per\_share} \ge 2\%$.
+2. Else use trailing FCF per share if positive.
+3. Else: `applicable=False` on Paths A and C; only Path B with `applicable=False` too.
+
+**Realism bands.**
+
+Growth realism compares the required cash-growth rate to the 3-year revenue
+CAGR (or to a 15% absolute baseline when no history is available):
+
+| Bucket | Rule |
+|---|---|
+| `easy` | required ≤ baseline |
+| `plausible` | required ≤ 1.5 × baseline |
+| `stretch` | required ≤ 3 × baseline |
+| `unrealistic` | required > 3 × baseline |
+
+Multiple realism compares the required multiple to the sector peer high
+$P_\text{high}$:
+
+| Bucket | Rule |
+|---|---|
+| `easy` | required ≤ current $M$ |
+| `plausible` | required ≤ $P_\text{high}$ |
+| `stretch` | required ≤ 1.5 × $P_\text{high}$ |
+| `unrealistic` | required > 1.5 × $P_\text{high}$ |
+
+Path C’s realism is the *worse* (higher-rank) of its two component realisms.
+
+**Peer-multiple bands.** Hardcoded in [`peer_multiples.py`](../backend/services/dd_coach/peer_multiples.py) and keyed by yfinance `info["sector"]`. Unknown sectors fall back to a broad-market band of 15–22×.
+
+## V2.4 Screen 9 — Bear Case
+
+`answers.q9_bear_case` is required for completion with a minimum of
+`BEAR_CASE_MIN_CHARS = 30` characters. The wizard prompts the user to
+“steelman” a 50%-loss scenario.
+
+## V2.5 Screen 10 — Plan-Pre-Commit
+
+`sizing` extends with five fields:
+
+| Field | Required | Notes |
+|---|---|---|
+| `portfolio_pct_estimate` | no (advisory) | Frontend warns when > 5% |
+| `sell_target` | yes (> 0) | Take-profit price |
+| `add_more_price` | no | Buy-the-dip price |
+| `bail_out_trigger` | yes (≥ `BAIL_OUT_TRIGGER_MIN_CHARS = 20` chars) | Specific bad-news condition |
+| `commitment_acknowledged` | yes (must be `True`) | Explicit checkbox |
+
+Front-end suggests a `valuation.user_call` from Path C’s realism (easy→cheap,
+plausible→fair, stretch→expensive_worth_it, unrealistic→cannot_value); the
+user can override.
+
+## V2.6 Cuts table updates
+
+| Idea | Previous status | New status | Reason |
+|---|---|---|---|
+| Peer-median live multiple | Deferred | **Shipped (V2)** via sector peer bands in `peer_multiples.py` (hardcoded, audit-friendly). |
+| Reverse-DCF check | Deferred | **Shipped (V2)** as Path to Target — same idea, no jargon. |
+| Print / PDF export | Deferred | Still deferred. |
+| Outcome marker | Deferred | Still deferred; revisit-date scheduler too. |

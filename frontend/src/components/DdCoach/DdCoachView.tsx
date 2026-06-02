@@ -3,16 +3,18 @@ import { DataCardPanel } from './DataCardPanel'
 import { useDdCoach } from '../../hooks/useDdCoach'
 import type {
   Answers,
+  CompStructure,
   DataCard,
   DDEntry,
   FilingLinks,
-  MaturityDiscountInputs,
-  MultipleBasedInputs,
+  FlagAcknowledgment,
+  InsiderActivity,
+  LeadershipCheck,
+  PathResult,
+  PathToTarget,
+  Realism,
   StomachAnswer,
   UserCall,
-  ValuationMethod,
-  ValuationOutput,
-  ValuationRequest,
 } from '../../types/ddCoach'
 
 // ---------------------------------------------------------------------------
@@ -24,40 +26,35 @@ const SCREENS = [
   'What They Sell',
   'The Market',
   'The Moat',
-  'The Numbers',
+  'Leadership',
+  'Path to Target',
   'The Risks',
   'Why Now',
-  'Decision',
+  'Bear Case',
+  'Decision & Plan',
 ] as const
 
-type ScreenIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+type ScreenIdx = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 
 // ---------------------------------------------------------------------------
-// Helpers — local rules that mirror backend valuation_service.select_method.
-// Used only to drive the UI; the backend remains authoritative for results.
+// Helpers
 // ---------------------------------------------------------------------------
 
-function autoSelectMethod(card: DataCard | null): ValuationMethod {
-  if (!card) return 'optionality'
-  const fcfs = card.fcf_3yr.map(p => p.value).filter((v): v is number => v != null)
-  const profitable3yr = fcfs.length >= 3 && fcfs.every(v => v > 0)
-  if (profitable3yr) return 'multiple_based'
-  const latestRev = card.revenue_3yr[card.revenue_3yr.length - 1]?.value ?? null
-  const gms = card.growth_lens?.gross_margin_3yr.map(p => p.value).filter((v): v is number => v != null) ?? []
-  const gmImproving = gms.length >= 2 && gms[gms.length - 1] > gms[0] + 0.02
-  if (latestRev != null && latestRev > 50_000_000 && gmImproving) return 'maturity_discount'
-  return 'optionality'
+function pctFmt(decimal: number | null | undefined, digits = 0): string {
+  if (decimal == null) return '—'
+  return `${(decimal * 100).toFixed(digits)}%`
 }
 
-function methodHeadline(method: ValuationMethod): string {
-  switch (method) {
-    case 'multiple_based':
-      return "We're valuing this like a mature business — it has been making real money for years."
-    case 'maturity_discount':
-      return "We're imagining this company grown up in a few years, then discounting back to today."
-    case 'optionality':
-      return "We can't put a number on this. Treat it like an option premium — only invest what you'd lose at a poker table."
-  }
+function multFmt(m: number | null | undefined): string {
+  if (m == null) return '—'
+  return `${m.toFixed(1)}×`
+}
+
+const REALISM_LABEL: Record<Realism, string> = {
+  easy: 'Easy — already in line with history',
+  plausible: 'Plausible — within peer norms',
+  stretch: 'Stretch — would be unusual',
+  unrealistic: 'Unrealistic — rarely happens',
 }
 
 // ---------------------------------------------------------------------------
@@ -78,29 +75,22 @@ export function DdCoachView() {
 
   // Wizard form state
   const [answers, setAnswers] = useState<Answers>({})
-  const [valMethod, setValMethod] = useState<ValuationMethod>('optionality')
-  const [valResult, setValResult] = useState<ValuationOutput | null>(null)
-  const [valError, setValError] = useState<string | null>(null)
-  const [mbInputs, setMbInputs] = useState<MultipleBasedInputs>({
-    forward_eps: 0,
-    target_pe_low: 0,
-    target_pe_mid: 0,
-    target_pe_high: 0,
-  })
-  const [mdInputs, setMdInputs] = useState<MaturityDiscountInputs>({
-    revenue_bear: 0,
-    revenue_base: 0,
-    revenue_bull: 0,
-    mature_multiple: 10,
-    shares_outstanding_today: 0,
-    years_to_maturity: 4,
-    dilution_pct: 0.30,
-    discount_rate: 0.12,
-  })
   const [userCall, setUserCall] = useState<UserCall | null>(null)
   const [plannedDollars, setPlannedDollars] = useState<number>(0)
   const [stomach, setStomach] = useState<StomachAnswer | null>(null)
   const [finalDollars, setFinalDollars] = useState<number>(0)
+
+  // V2 plan-pre-commit state
+  const [portfolioPct, setPortfolioPct] = useState<number>(0)
+  const [sellTarget, setSellTarget] = useState<number>(0)
+  const [addMorePrice, setAddMorePrice] = useState<number>(0)
+  const [bailOutTrigger, setBailOutTrigger] = useState<string>('')
+  const [commitmentAck, setCommitmentAck] = useState<boolean>(false)
+
+  // Path-to-Target state (Screen 6)
+  const [targetPrice, setTargetPrice] = useState<number>(0)
+  const [pathResult, setPathResult] = useState<PathToTarget | null>(null)
+  const [pathError, setPathError] = useState<string | null>(null)
 
   // ---- start a new entry ----
   const startEntry = useCallback(async () => {
@@ -109,8 +99,11 @@ export function DdCoachView() {
     setError(null)
     setCompleted(false)
     setEntry(null); setCard(null); setFilings(null)
-    setValResult(null); setValError(null); setValMethod('optionality')
-    setAnswers({}); setUserCall(null); setPlannedDollars(0); setStomach(null); setFinalDollars(0)
+    setAnswers({}); setUserCall(null)
+    setPlannedDollars(0); setStomach(null); setFinalDollars(0)
+    setPortfolioPct(0); setSellTarget(0); setAddMorePrice(0)
+    setBailOutTrigger(''); setCommitmentAck(false)
+    setTargetPrice(0); setPathResult(null); setPathError(null)
     setScreenIdx(0)
 
     const [cardRes, entryRes, filingsRes] = await Promise.all([
@@ -124,12 +117,9 @@ export function DdCoachView() {
     setCard(cardRes.data)
     setEntry(entryRes.data)
     setFilings(filingsRes.data)  // soft-fail on filings
-    if (cardRes.data) {
-      setValMethod(autoSelectMethod(cardRes.data))
-      if (cardRes.data.spot_price != null) {
-        setMbInputs(p => ({ ...p, spot_price: cardRes.data!.spot_price ?? null }))
-        setMdInputs(p => ({ ...p, spot_price: cardRes.data!.spot_price ?? null }))
-      }
+    // Seed target price with a +20% over spot — easy to override.
+    if (cardRes.data?.spot_price) {
+      setTargetPrice(Number((cardRes.data.spot_price * 1.2).toFixed(2)))
     }
   }, [ticker, coach])
 
@@ -157,31 +147,13 @@ export function DdCoachView() {
     if (res.data) setEntry(res.data)
   }, [entry, activeTicker, answers, coach])
 
-  const computeValuation = useCallback(async () => {
-    if (!card) return
-    setValError(null)
-    const req: ValuationRequest = {
-      method: valMethod,
-      spot_price: card.spot_price ?? null,
-    }
-    if (valMethod === 'multiple_based') req.multiple_based = mbInputs
-    if (valMethod === 'maturity_discount') req.maturity_discount = mdInputs
-    const res = await coach.computeValuation(req)
-    if (res.error) { setValError(res.error.detail); return }
-    if (res.data) {
-      setValResult(res.data)
-      if (entry && activeTicker) {
-        const r = await coach.patchEntry(entry.id, activeTicker, {
-          valuation: {
-            method: res.data.method,
-            inputs: res.data.inputs_used,
-            result: res.data.range,
-          },
-        })
-        if (r.data) setEntry(r.data)
-      }
-    }
-  }, [card, valMethod, mbInputs, mdInputs, coach, entry, activeTicker])
+  const computePath = useCallback(async () => {
+    if (!activeTicker || !targetPrice || targetPrice <= 0) return
+    setPathError(null)
+    const res = await coach.fetchPathToTarget(activeTicker, targetPrice)
+    if (res.error) { setPathError(res.error.detail); return }
+    if (res.data) setPathResult(res.data)
+  }, [activeTicker, targetPrice, coach])
 
   const advance = useCallback(() => {
     setScreenIdx(i => (Math.min(i + 1, SCREENS.length - 1) as ScreenIdx))
@@ -191,19 +163,52 @@ export function DdCoachView() {
   }, [])
 
   const finalize = useCallback(async () => {
-    if (!entry || !activeTicker || !userCall || !stomach || finalDollars <= 0) {
-      setError('Please pick a call, a stomach answer, and a final size before completing.')
+    if (!entry || !activeTicker) return
+    // Front-end basic gates — backend re-validates via assert_completable().
+    if (!userCall || !stomach || finalDollars <= 0) {
+      setError('Please pick a call, a stomach answer, and a final size.')
       return
     }
+    if (!sellTarget || sellTarget <= 0) {
+      setError('Pick a sell target so you know when to take profit.')
+      return
+    }
+    if ((bailOutTrigger ?? '').trim().length < 20) {
+      setError('Write a specific bail-out trigger (at least 20 characters).')
+      return
+    }
+    if ((answers.q9_bear_case ?? '').trim().length < 30) {
+      setError('Write a bear case (at least 30 characters) before completing.')
+      return
+    }
+    if (!commitmentAck) {
+      setError('Check the commitment box before completing.')
+      return
+    }
+    setError(null)
     const patch = await coach.patchEntry(entry.id, activeTicker, {
       valuation: { user_call: userCall, reasoning: answers.q3_why_now ?? null },
-      sizing: { planned_dollars: plannedDollars, stomach_answer: stomach, final_dollars: finalDollars },
+      sizing: {
+        planned_dollars: plannedDollars,
+        stomach_answer: stomach,
+        final_dollars: finalDollars,
+        portfolio_pct_estimate: portfolioPct > 0 ? portfolioPct : null,
+        sell_target: sellTarget,
+        add_more_price: addMorePrice > 0 ? addMorePrice : null,
+        bail_out_trigger: bailOutTrigger,
+        commitment_acknowledged: commitmentAck,
+      },
     })
     if (patch.error) { setError(patch.error.detail); return }
     const done = await coach.completeEntry(entry.id, activeTicker)
     if (done.error) { setError(done.error.detail); return }
     if (done.data) { setEntry(done.data); setCompleted(true) }
-  }, [entry, activeTicker, userCall, stomach, finalDollars, coach, answers.q3_why_now, plannedDollars])
+  }, [
+    entry, activeTicker, userCall, stomach, finalDollars,
+    sellTarget, bailOutTrigger, commitmentAck,
+    answers.q3_why_now, answers.q9_bear_case,
+    plannedDollars, portfolioPct, addMorePrice, coach,
+  ])
 
   // ---- render ----
   if (!activeTicker || !card) {
@@ -255,14 +260,6 @@ export function DdCoachView() {
           card={card}
           answers={answers}
           onAnswers={persistAnswers}
-          valMethod={valMethod}
-          valResult={valResult}
-          valError={valError}
-          mbInputs={mbInputs}
-          setMbInputs={setMbInputs}
-          mdInputs={mdInputs}
-          setMdInputs={setMdInputs}
-          onComputeValuation={computeValuation}
           userCall={userCall}
           setUserCall={setUserCall}
           plannedDollars={plannedDollars}
@@ -271,6 +268,22 @@ export function DdCoachView() {
           setStomach={setStomach}
           finalDollars={finalDollars}
           setFinalDollars={setFinalDollars}
+          portfolioPct={portfolioPct}
+          setPortfolioPct={setPortfolioPct}
+          sellTarget={sellTarget}
+          setSellTarget={setSellTarget}
+          addMorePrice={addMorePrice}
+          setAddMorePrice={setAddMorePrice}
+          bailOutTrigger={bailOutTrigger}
+          setBailOutTrigger={setBailOutTrigger}
+          commitmentAck={commitmentAck}
+          setCommitmentAck={setCommitmentAck}
+          targetPrice={targetPrice}
+          setTargetPrice={setTargetPrice}
+          pathResult={pathResult}
+          pathError={pathError}
+          onComputePath={computePath}
+          pathLoading={coach.loading}
         />
       )}
 
@@ -330,14 +343,6 @@ interface ScreenBodyProps {
   card: DataCard
   answers: Answers
   onAnswers: (next: Answers) => Promise<void> | void
-  valMethod: ValuationMethod
-  valResult: ValuationOutput | null
-  valError: string | null
-  mbInputs: MultipleBasedInputs
-  setMbInputs: React.Dispatch<React.SetStateAction<MultipleBasedInputs>>
-  mdInputs: MaturityDiscountInputs
-  setMdInputs: React.Dispatch<React.SetStateAction<MaturityDiscountInputs>>
-  onComputeValuation: () => Promise<void> | void
   userCall: UserCall | null
   setUserCall: (v: UserCall) => void
   plannedDollars: number
@@ -346,11 +351,33 @@ interface ScreenBodyProps {
   setStomach: (v: StomachAnswer) => void
   finalDollars: number
   setFinalDollars: (n: number) => void
+  portfolioPct: number
+  setPortfolioPct: (n: number) => void
+  sellTarget: number
+  setSellTarget: (n: number) => void
+  addMorePrice: number
+  setAddMorePrice: (n: number) => void
+  bailOutTrigger: string
+  setBailOutTrigger: (v: string) => void
+  commitmentAck: boolean
+  setCommitmentAck: (v: boolean) => void
+  targetPrice: number
+  setTargetPrice: (n: number) => void
+  pathResult: PathToTarget | null
+  pathError: string | null
+  onComputePath: () => Promise<void> | void
+  pathLoading: boolean
 }
 
 function ScreenBody(p: ScreenBodyProps) {
   switch (p.idx) {
-    case 0: return <Screen1 card={p.card} q1={p.answers.q1_business ?? ''} setQ1={v => p.onAnswers({ q1_business: v })} />
+    case 0: return <Screen1
+      card={p.card}
+      q1={p.answers.q1_business ?? ''}
+      setQ1={v => p.onAnswers({ q1_business: v })}
+      flagResponse={p.answers.q1_flag_response ?? null}
+      setFlagResponse={fr => p.onAnswers({ q1_flag_response: fr })}
+    />
     case 1: return <SimpleTextScreen
       heading="What They Sell"
       prompt="How does this company actually make money? Name the top product or service, and who pays for it."
@@ -372,31 +399,37 @@ function ScreenBody(p: ScreenBodyProps) {
       value={p.answers.q3_moat ?? ''}
       onChange={v => p.onAnswers({ q3_moat: v })}
     />
-    case 4: return <Screen5Numbers
-      card={p.card}
-      method={p.valMethod}
-      result={p.valResult}
-      error={p.valError}
-      mbInputs={p.mbInputs}
-      setMbInputs={p.setMbInputs}
-      mdInputs={p.mdInputs}
-      setMdInputs={p.setMdInputs}
-      onCompute={p.onComputeValuation}
+    case 4: return <Screen5Leadership
+      value={p.answers.q5_leadership ?? null}
+      onChange={lead => p.onAnswers({ q5_leadership: lead })}
     />
-    case 5: return <Screen6Risks
+    case 5: return <Screen6PathToTarget
+      card={p.card}
+      targetPrice={p.targetPrice}
+      setTargetPrice={p.setTargetPrice}
+      result={p.pathResult}
+      error={p.pathError}
+      loading={p.pathLoading}
+      onCompute={p.onComputePath}
+    />
+    case 6: return <Screen7Risks
       value={p.answers.q4_risks ?? ''}
       onChange={v => p.onAnswers({ q4_risks: v })}
     />
-    case 6: return <SimpleTextScreen
+    case 7: return <SimpleTextScreen
       heading="Why Now"
       prompt="What has to happen in the next 12 months for this to work? If you can't name a catalyst, it isn't 'now' — it's 'maybe someday.'"
       example="The next earnings call should show their AI cloud business crossing $1B annual run-rate. If it does, the stock re-rates."
       value={p.answers.q3_why_now ?? ''}
       onChange={v => p.onAnswers({ q3_why_now: v })}
     />
-    case 7: return <Screen8Decision
+    case 8: return <Screen9BearCase
+      value={p.answers.q9_bear_case ?? ''}
+      onChange={v => p.onAnswers({ q9_bear_case: v })}
+    />
+    case 9: return <Screen10Decision
       card={p.card}
-      result={p.valResult}
+      pathResult={p.pathResult}
       userCall={p.userCall}
       setUserCall={p.setUserCall}
       plannedDollars={p.plannedDollars}
@@ -405,13 +438,30 @@ function ScreenBody(p: ScreenBodyProps) {
       setStomach={p.setStomach}
       finalDollars={p.finalDollars}
       setFinalDollars={p.setFinalDollars}
+      portfolioPct={p.portfolioPct}
+      setPortfolioPct={p.setPortfolioPct}
+      sellTarget={p.sellTarget}
+      setSellTarget={p.setSellTarget}
+      addMorePrice={p.addMorePrice}
+      setAddMorePrice={p.setAddMorePrice}
+      bailOutTrigger={p.bailOutTrigger}
+      setBailOutTrigger={p.setBailOutTrigger}
+      commitmentAck={p.commitmentAck}
+      setCommitmentAck={p.setCommitmentAck}
     />
   }
 }
 
 // ---- Screen 1 ----
 
-function Screen1({ card, q1, setQ1 }: { card: DataCard; q1: string; setQ1: (v: string) => void }) {
+function Screen1({ card, q1, setQ1, flagResponse, setFlagResponse }: {
+  card: DataCard
+  q1: string
+  setQ1: (v: string) => void
+  flagResponse: import('../../types/ddCoach').FlagResponse | null
+  setFlagResponse: (fr: import('../../types/ddCoach').FlagResponse) => void
+}) {
+  const hasFlags = card.flags.reasons.length > 0
   return (
     <div className="dd-screen">
       <h3 className="dd-screen-heading">The Business</h3>
@@ -421,10 +471,50 @@ function Screen1({ card, q1, setQ1 }: { card: DataCard; q1: string; setQ1: (v: s
         without jargon, you don't understand it well enough yet.
       </p>
       <DataCardPanel card={card} />
+      {hasFlags && (
+        <RedFlagResponsePanel
+          reasons={card.flags.reasons}
+          value={flagResponse}
+          onChange={setFlagResponse}
+        />
+      )}
       <Textarea
         value={q1}
         onChange={setQ1}
         placeholder="In your own words: what does this company do?"
+      />
+    </div>
+  )
+}
+
+function RedFlagResponsePanel({ reasons, value, onChange }: {
+  reasons: string[]
+  value: import('../../types/ddCoach').FlagResponse | null
+  onChange: (fr: import('../../types/ddCoach').FlagResponse) => void
+}) {
+  const ack = value?.acknowledgment ?? null
+  return (
+    <div className="dd-red-flag-block">
+      <h4 className="dd-red-flag-heading">
+        The data card flagged something — you must react before continuing
+      </h4>
+      <ul className="dd-red-flag-list">
+        {reasons.map(r => <li key={r}>{r}</li>)}
+      </ul>
+      <p className="dd-screen-prompt">How does this change your view?</p>
+      <RadioRow<FlagAcknowledgment>
+        value={ack}
+        onChange={v => onChange({ acknowledgment: v, note: value?.note ?? null })}
+        options={[
+          { value: 'accounted', label: "I've factored this in — my thesis still holds" },
+          { value: 'changes_view', label: "It changes my view — I'll size smaller or wait" },
+          { value: 'explained', label: "I read the data card explanations and understand why" },
+        ]}
+      />
+      <Textarea
+        value={value?.note ?? ''}
+        onChange={v => onChange({ acknowledgment: ack ?? 'explained', note: v })}
+        placeholder="Optional: one sentence on how this affects your decision."
       />
     </div>
   )
@@ -449,130 +539,242 @@ function SimpleTextScreen({ heading, prompt, example, value, onChange }: {
   )
 }
 
-// ---- Screen 5 — Valuation ----
+// ---- Screen 5 — Leadership ----
 
-function Screen5Numbers({
-  card, method, result, error,
-  mbInputs, setMbInputs, mdInputs, setMdInputs, onCompute,
-}: {
-  card: DataCard
-  method: ValuationMethod
-  result: ValuationOutput | null
-  error: string | null
-  mbInputs: MultipleBasedInputs
-  setMbInputs: React.Dispatch<React.SetStateAction<MultipleBasedInputs>>
-  mdInputs: MaturityDiscountInputs
-  setMdInputs: React.Dispatch<React.SetStateAction<MaturityDiscountInputs>>
-  onCompute: () => Promise<void> | void
+function Screen5Leadership({ value, onChange }: {
+  value: LeadershipCheck | null
+  onChange: (v: LeadershipCheck) => void
 }) {
+  const v: LeadershipCheck = value ?? {
+    who: '',
+    insider_activity: null,
+    comp_structure: null,
+    concerns: '',
+  }
+  const patch = (next: Partial<LeadershipCheck>) => onChange({ ...v, ...next })
+
   return (
     <div className="dd-screen">
-      <h3 className="dd-screen-heading">The Numbers</h3>
-      <p className="dd-screen-prompt">{methodHeadline(method)}</p>
+      <h3 className="dd-screen-heading">Leadership</h3>
+      <p className="dd-screen-prompt">
+        Who's driving the bus? You don't need a biography — just enough to
+        decide whether you trust them with your money for the next few years.
+        Check the proxy (link in the toolbar) for comp and the Form 4 link
+        for insider buying/selling.
+      </p>
 
-      {method === 'multiple_based' && (
-        <div className="dd-form">
-          <NumberField
-            label="Earnings per share you expect next year"
-            value={mbInputs.forward_eps}
-            onChange={v => setMbInputs(p => ({ ...p, forward_eps: v }))}
-          />
-          <NumberField
-            label="Pessimistic earnings multiple"
-            value={mbInputs.target_pe_low}
-            onChange={v => setMbInputs(p => ({ ...p, target_pe_low: v }))}
-          />
-          <NumberField
-            label="Reasonable earnings multiple"
-            value={mbInputs.target_pe_mid}
-            onChange={v => setMbInputs(p => ({ ...p, target_pe_mid: v }))}
-          />
-          <NumberField
-            label="Optimistic earnings multiple"
-            value={mbInputs.target_pe_high}
-            onChange={v => setMbInputs(p => ({ ...p, target_pe_high: v }))}
+      <div className="dd-leadership-grid">
+        <div className="dd-section">
+          <h4>Who runs it?</h4>
+          <Textarea
+            value={v.who ?? ''}
+            onChange={s => patch({ who: s })}
+            placeholder="CEO name, how long in role, founder or hired?"
           />
         </div>
-      )}
 
-      {method === 'maturity_discount' && (
-        <div className="dd-form">
-          <NumberField
-            label="Revenue in 4 years — pessimistic ($)"
-            value={mdInputs.revenue_bear}
-            onChange={v => setMdInputs(p => ({ ...p, revenue_bear: v }))}
-          />
-          <NumberField
-            label="Revenue in 4 years — base case ($)"
-            value={mdInputs.revenue_base}
-            onChange={v => setMdInputs(p => ({ ...p, revenue_base: v }))}
-          />
-          <NumberField
-            label="Revenue in 4 years — optimistic ($)"
-            value={mdInputs.revenue_bull}
-            onChange={v => setMdInputs(p => ({ ...p, revenue_bull: v }))}
-          />
-          <NumberField
-            label="Mature sales multiple (e.g. 10)"
-            value={mdInputs.mature_multiple}
-            onChange={v => setMdInputs(p => ({ ...p, mature_multiple: v }))}
-          />
-          <NumberField
-            label="Shares outstanding today"
-            value={mdInputs.shares_outstanding_today}
-            onChange={v => setMdInputs(p => ({ ...p, shares_outstanding_today: v }))}
+        <div className="dd-section">
+          <h4>Insider activity (last 6–12 months)</h4>
+          <RadioRow<InsiderActivity>
+            value={v.insider_activity ?? null}
+            onChange={s => patch({ insider_activity: s })}
+            options={[
+              { value: 'heavy_buy', label: 'Heavy insider buying' },
+              { value: 'light_buy', label: 'Some insider buying' },
+              { value: 'quiet', label: 'Quiet — no notable activity' },
+              { value: 'light_sell', label: 'Some insider selling' },
+              { value: 'heavy_sell', label: 'Heavy insider selling' },
+              { value: 'unknown', label: "Don't know / couldn't tell" },
+            ]}
           />
         </div>
-      )}
 
-      {method === 'optionality' && (
-        <div className="dd-callout">
-          This is a speculative bet — there's no honest way to put a fair-value
-          number on it. Decide a position size you can lose without losing
-          sleep, and move on to the next screen.
+        <div className="dd-section">
+          <h4>How is the CEO paid? (proxy / DEF 14A)</h4>
+          <RadioRow<CompStructure>
+            value={v.comp_structure ?? null}
+            onChange={s => patch({ comp_structure: s })}
+            options={[
+              { value: 'revenue', label: 'Mostly tied to revenue growth' },
+              { value: 'profit', label: 'Mostly tied to profit / margins' },
+              { value: 'stock', label: 'Mostly tied to stock price / TSR' },
+              { value: 'salary', label: 'Mostly salary' },
+              { value: 'unknown', label: "Don't know" },
+            ]}
+          />
         </div>
-      )}
 
-      <div className="dd-form-actions">
-        <button
-          className="btn-primary"
-          onClick={() => void onCompute()}
-          disabled={method === 'optionality'}
-        >
-          Compute fair value
-        </button>
+        <div className="dd-section">
+          <h4>Concerns? (optional)</h4>
+          <Textarea
+            value={v.concerns ?? ''}
+            onChange={s => patch({ concerns: s })}
+            placeholder="Anything that bothers you — turnover, dual-class, related-party deals?"
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---- Screen 6 — Path to Target ----
+
+function Screen6PathToTarget({
+  card, targetPrice, setTargetPrice, result, error, loading, onCompute,
+}: {
+  card: DataCard
+  targetPrice: number
+  setTargetPrice: (n: number) => void
+  result: PathToTarget | null
+  error: string | null
+  loading: boolean
+  onCompute: () => Promise<void> | void
+}) {
+  const spot = card.spot_price ?? null
+
+  // Quick-pick buttons set a +X% target above spot.
+  const quickPick = (mult: number) => {
+    if (spot == null) return
+    setTargetPrice(Number((spot * mult).toFixed(2)))
+  }
+
+  return (
+    <div className="dd-screen">
+      <h3 className="dd-screen-heading">Path to Target</h3>
+      <p className="dd-screen-prompt">
+        Pick a price you think the stock could reach. We'll show you the three
+        ways it can get there — and how realistic each path is — so you know
+        what you're really betting on.
+      </p>
+
+      <div className="dd-form">
+        <div className="dd-field">
+          <span className="dd-field-label">
+            Today's price: {spot != null ? `$${spot.toFixed(2)}` : '—'}
+          </span>
+        </div>
+        <NumberField
+          label="Your target price ($)"
+          value={targetPrice}
+          onChange={setTargetPrice}
+        />
+        {spot != null && (
+          <div className="dd-target-buttons">
+            <button type="button" className="btn-secondary" onClick={() => quickPick(1.2)}>+20%</button>
+            <button type="button" className="btn-secondary" onClick={() => quickPick(1.5)}>+50%</button>
+            <button type="button" className="btn-secondary" onClick={() => quickPick(2.0)}>2×</button>
+            <button type="button" className="btn-secondary" onClick={() => quickPick(3.0)}>3×</button>
+          </div>
+        )}
+        <div className="dd-form-actions">
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => void onCompute()}
+            disabled={loading || !targetPrice || targetPrice <= 0}
+          >
+            {loading ? 'Computing…' : 'Show me the paths'}
+          </button>
+        </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
 
-      {result && (
-        <div className="dd-result">
-          <h4>Fair value range (per share)</h4>
-          <div className="dd-result-grid">
-            <ResultCell label="Pessimistic" value={result.range.bear} />
-            <ResultCell label="Base case" value={result.range.base} />
-            <ResultCell label="Optimistic" value={result.range.bull} />
-            <ResultCell label="Today's price" value={card.spot_price ?? result.range.spot} />
-          </div>
-          <p className="dd-result-rationale">{result.rationale}</p>
-        </div>
+      {result && <PathToTargetResult result={result} />}
+
+      <p className="dd-glossary">
+        <strong>Glossary:</strong> "Multiple" = how much investors pay for
+        every $1 of yearly cash the company throws off.
+      </p>
+    </div>
+  )
+}
+
+function PathToTargetResult({ result }: { result: PathToTarget }) {
+  const r = result
+  return (
+    <div className="dd-result">
+      <h4>
+        From ${r.spot?.toFixed(2) ?? '—'} to ${r.target.toFixed(2)} —{' '}
+        {pctFmt(r.target_return_pct)} return
+      </h4>
+      <p className="dd-screen-prompt">
+        We're measuring against per-share{' '}
+        <strong>
+          {r.cash_basis === 'earnings' ? 'earnings'
+            : r.cash_basis === 'fcf' ? 'free cash flow'
+            : 'cash (n/a — not profitable yet)'}
+        </strong>
+        {r.current_multiple != null && (
+          <> — today the market pays <strong>{multFmt(r.current_multiple)}</strong> per $1 of that cash.</>
+        )}
+        {' '}
+        {r.peer_label} typically trade {r.peer_multiple_low.toFixed(0)}–{r.peer_multiple_high.toFixed(0)}×
+        {r.historical_growth_pct != null && (
+          <> and this company has been growing revenue ~{pctFmt(r.historical_growth_pct)} per year.</>
+        )}
+      </p>
+      <div className="dd-paths">
+        <PathCard
+          title="Path A — Lemonade-stand grows"
+          subtitle="The company grows fast enough to earn its way to your target."
+          path={r.path_a_growth_only}
+        />
+        <PathCard
+          title="Path B — Neighborhood gets trendy"
+          subtitle="The market revalues the same cash flows — same scoops, more dollars per scoop."
+          path={r.path_b_multiple_only}
+        />
+        <PathCard
+          title="Path C — A bit of both"
+          subtitle="Half from growth, half from re-rating."
+          path={r.path_c_mixed}
+        />
+      </div>
+      {r.notes.length > 0 && (
+        <ul className="dd-notes">
+          {r.notes.map(n => <li key={n}>{n}</li>)}
+        </ul>
       )}
     </div>
   )
 }
 
-function ResultCell({ label, value }: { label: string; value: number | null }) {
+function PathCard({ title, subtitle, path }: {
+  title: string
+  subtitle: string
+  path: PathResult
+}) {
+  const cls = path.realism ? `dd-path-realism-${path.realism}` : ''
   return (
-    <div className="dd-result-cell">
-      <div className="dd-result-label">{label}</div>
-      <div className="dd-result-value">{value == null ? '—' : `$${value.toFixed(2)}`}</div>
+    <div className={`dd-path-card ${cls}`}>
+      <h5 className="dd-path-title">{title}</h5>
+      <p className="dd-path-subtitle">{subtitle}</p>
+      {!path.applicable ? (
+        <p className="dd-path-na">Not applicable — {path.note}</p>
+      ) : (
+        <>
+          <ul className="dd-path-requirements">
+            {path.required_growth_pct != null && (
+              <li>Required cash growth: <strong>{pctFmt(path.required_growth_pct)} / yr</strong></li>
+            )}
+            {path.required_multiple != null && (
+              <li>Required multiple: <strong>{multFmt(path.required_multiple)}</strong></li>
+            )}
+          </ul>
+          <p className="dd-path-note">{path.note}</p>
+          {path.realism && (
+            <p className="dd-path-realism">{REALISM_LABEL[path.realism]}</p>
+          )}
+        </>
+      )}
     </div>
   )
 }
 
-// ---- Screen 6 — Risks + filings links ----
+// ---- Screen 7 — Risks + filings links ----
 
-function Screen6Risks({ value, onChange }: {
+function Screen7Risks({ value, onChange }: {
   value: string
   onChange: (v: string) => void
 }) {
@@ -645,15 +847,48 @@ function TenKSkimGuide() {
   )
 }
 
-// ---- Screen 8 — Decision ----
+// ---- Screen 9 — Bear case ----
 
-function Screen8Decision({
-  card, result, userCall, setUserCall,
+function Screen9BearCase({ value, onChange }: {
+  value: string
+  onChange: (v: string) => void
+}) {
+  const count = value.trim().length
+  const enough = count >= 30
+  return (
+    <div className="dd-screen">
+      <h3 className="dd-screen-heading">Bear Case</h3>
+      <p className="dd-screen-prompt">
+        Argue against yourself. If this investment loses 50% over the next two
+        years, what was the most likely reason? Steelman it — write the version
+        a smart short-seller would say.
+      </p>
+      <Textarea
+        value={value}
+        onChange={onChange}
+        placeholder="The most likely way this turns into a 50% loser…"
+      />
+      <p className={`dd-bear-case ${enough ? '' : 'dd-bear-case-short'}`}>
+        {count} / 30 characters {enough ? '✓' : '(write a real sentence)'}
+      </p>
+    </div>
+  )
+}
+
+// ---- Screen 10 — Decision + plan-pre-commit ----
+
+function Screen10Decision({
+  card, pathResult, userCall, setUserCall,
   plannedDollars, setPlannedDollars, stomach, setStomach,
   finalDollars, setFinalDollars,
+  portfolioPct, setPortfolioPct,
+  sellTarget, setSellTarget,
+  addMorePrice, setAddMorePrice,
+  bailOutTrigger, setBailOutTrigger,
+  commitmentAck, setCommitmentAck,
 }: {
   card: DataCard
-  result: ValuationOutput | null
+  pathResult: PathToTarget | null
   userCall: UserCall | null
   setUserCall: (v: UserCall) => void
   plannedDollars: number
@@ -662,23 +897,38 @@ function Screen8Decision({
   setStomach: (v: StomachAnswer) => void
   finalDollars: number
   setFinalDollars: (n: number) => void
+  portfolioPct: number
+  setPortfolioPct: (n: number) => void
+  sellTarget: number
+  setSellTarget: (n: number) => void
+  addMorePrice: number
+  setAddMorePrice: (n: number) => void
+  bailOutTrigger: string
+  setBailOutTrigger: (v: string) => void
+  commitmentAck: boolean
+  setCommitmentAck: (v: boolean) => void
 }) {
-  const spot = card.spot_price
-  const base = result?.range.base ?? null
-  const calculatedCall: UserCall | null = useMemo(() => {
-    if (spot == null || base == null) return null
-    if (spot < base * 0.7) return 'cheap'
-    if (spot < base * 1.1) return 'fair'
-    return 'expensive_worth_it'
-  }, [spot, base])
+  // Auto-suggest a call from the Path-to-Target mixed-path realism.
+  const suggestedCall: UserCall | null = useMemo(() => {
+    const mixed = pathResult?.path_c_mixed
+    if (!mixed?.realism) return null
+    switch (mixed.realism) {
+      case 'easy': return 'cheap'
+      case 'plausible': return 'fair'
+      case 'stretch': return 'expensive_worth_it'
+      case 'unrealistic': return 'cannot_value'
+    }
+  }, [pathResult])
 
   useEffect(() => {
-    if (userCall == null && calculatedCall != null) setUserCall(calculatedCall)
-  }, [userCall, calculatedCall, setUserCall])
+    if (userCall == null && suggestedCall != null) setUserCall(suggestedCall)
+  }, [userCall, suggestedCall, setUserCall])
+
+  const portfolioWarn = portfolioPct > 5
 
   return (
     <div className="dd-screen">
-      <h3 className="dd-screen-heading">Decision</h3>
+      <h3 className="dd-screen-heading">Decision &amp; Plan</h3>
 
       <div className="dd-section">
         <h4>1. What's your call?</h4>
@@ -686,21 +936,32 @@ function Screen8Decision({
           value={userCall}
           onChange={setUserCall}
           options={[
-            { value: 'cheap', label: 'Cheap — there\'s a margin of safety' },
+            { value: 'cheap', label: "Cheap — there's a margin of safety" },
             { value: 'fair', label: 'Fairly priced — pay full price for a good business' },
             { value: 'expensive_worth_it', label: 'Expensive but worth it — paying up for quality' },
-            { value: 'cannot_value', label: 'Can\'t put a number on it — pure speculation' },
+            { value: 'cannot_value', label: "Can't put a number on it — pure speculation" },
           ]}
         />
       </div>
 
       <div className="dd-section">
-        <h4>2. How much were you planning to put in?</h4>
+        <h4>2. Position size</h4>
         <NumberField
           label="Planned dollars"
           value={plannedDollars}
           onChange={setPlannedDollars}
         />
+        <NumberField
+          label="As % of your total portfolio (optional, advisory)"
+          value={portfolioPct}
+          onChange={setPortfolioPct}
+        />
+        {portfolioWarn && (
+          <div className="dd-portfolio-warning">
+            That's a concentrated bet ({portfolioPct.toFixed(1)}% of your portfolio).
+            Make sure your conviction matches the size.
+          </div>
+        )}
       </div>
 
       <div className="dd-section">
@@ -713,9 +974,9 @@ function Screen8Decision({
           value={stomach}
           onChange={setStomach}
           options={[
-            { value: 'yes', label: 'Yes — I\'d add more' },
-            { value: 'unsure', label: 'I\'d hold but it would hurt' },
-            { value: 'no', label: 'No — I\'d panic-sell' },
+            { value: 'yes', label: "Yes — I'd add more" },
+            { value: 'unsure', label: "I'd hold but it would hurt" },
+            { value: 'no', label: "No — I'd panic-sell" },
           ]}
         />
         {stomach === 'no' && (
@@ -732,6 +993,61 @@ function Screen8Decision({
           value={finalDollars}
           onChange={setFinalDollars}
         />
+      </div>
+
+      <div className="dd-section dd-plan-block">
+        <h4>5. Your plan — written BEFORE you buy</h4>
+        <p className="dd-screen-prompt">
+          The single biggest reason retail investors lose money is no plan.
+          Decide now — when you're calm — what would make you sell, add, or bail.
+        </p>
+
+        <div className="dd-plan-field">
+          <NumberField
+            label={`Sell target — take profit when price hits $${sellTarget || '…'}`}
+            value={sellTarget}
+            onChange={setSellTarget}
+          />
+          {card.spot_price && sellTarget > 0 && (
+            <p className="dd-field-hint">
+              That's {pctFmt((sellTarget / card.spot_price) - 1, 0)} above today's price.
+            </p>
+          )}
+        </div>
+
+        <div className="dd-plan-field">
+          <NumberField
+            label="Add-more price (optional) — buy more if it dips to this price"
+            value={addMorePrice}
+            onChange={setAddMorePrice}
+          />
+        </div>
+
+        <div className="dd-plan-field">
+          <span className="dd-field-label">
+            Bail-out trigger — what specific bad news would make you sell at a loss?
+          </span>
+          <Textarea
+            value={bailOutTrigger}
+            onChange={setBailOutTrigger}
+            placeholder="Example: 'Two consecutive quarters of AI-revenue decline' or 'CEO departs'."
+          />
+          <p className="dd-field-hint">
+            {bailOutTrigger.trim().length} / 20 characters minimum
+          </p>
+        </div>
+
+        <label className="dd-commitment">
+          <input
+            type="checkbox"
+            checked={commitmentAck}
+            onChange={e => setCommitmentAck(e.target.checked)}
+          />
+          <span>
+            I commit to this plan. If I ever revisit it, it's to update with new
+            facts — not to talk myself out of selling.
+          </span>
+        </label>
       </div>
     </div>
   )
@@ -767,12 +1083,22 @@ function Textarea({ value, onChange, placeholder }: {
   onChange: (v: string) => void
   placeholder?: string
 }) {
+  // The whole point of DD Coach is that the user has to *think* and write the
+  // answer themselves. Block paste, drop, drag, and the context menu so they
+  // can't shortcut the reflection with copied text from elsewhere.
   return (
     <textarea
       className="dd-textarea"
       value={value}
       onChange={e => onChange(e.target.value)}
       onBlur={e => onChange(e.target.value)}
+      onPaste={e => e.preventDefault()}
+      onDrop={e => e.preventDefault()}
+      onDragOver={e => e.preventDefault()}
+      onContextMenu={e => e.preventDefault()}
+      autoComplete="off"
+      autoCorrect="off"
+      spellCheck={false}
       placeholder={placeholder}
       rows={4}
     />

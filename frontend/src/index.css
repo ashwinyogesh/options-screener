@@ -2086,3 +2086,85 @@ details[open] .ic-guide-summary::before { content: '▼ '; }
 .dd-glossary-term { color: #4f6ef7; font-weight: 600; margin: 0; }
 .dd-glossary-def { color: #cbd5e1; margin: 0; }
 @media (max-width: 640px) { .dd-glossary-row { grid-template-columns: 1fr; gap: 2px; } }
+
+/* ---------- DD Coach v2 ---------- */
+
+.dd-red-flag-block {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid #7c2d12;
+  border-left: 4px solid #f59e0b;
+  background: #1f1408;
+  border-radius: 6px;
+}
+.dd-red-flag-heading { margin: 0 0 8px; font-size: 14px; color: #fde68a; }
+.dd-red-flag-list { margin: 0 0 10px 18px; color: #fbbf24; font-size: 13px; }
+.dd-red-flag-list li { margin: 2px 0; }
+
+.dd-leadership-grid { display: flex; flex-direction: column; gap: 18px; }
+
+.dd-bear-case { font-size: 12px; color: #64748b; margin: 6px 0 0; }
+.dd-bear-case-short { color: #f59e0b; }
+
+.dd-plan-block {
+  margin-top: 22px; padding: 16px;
+  border: 1px solid #1e3a8a; border-radius: 8px;
+  background: #0b1330;
+}
+.dd-plan-field { margin: 10px 0 16px; }
+.dd-field-hint { font-size: 12px; color: #64748b; margin: 4px 0 0; }
+
+.dd-portfolio-warning {
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: #2a1d05;
+  border-left: 3px solid #f59e0b;
+  color: #fde68a;
+  font-size: 13px;
+  border-radius: 4px;
+}
+
+.dd-commitment {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin-top: 14px; padding: 12px;
+  background: #0f172a; border: 1px solid #1f2440;
+  border-radius: 6px; cursor: pointer;
+  color: #e2e8f0; font-size: 13px; line-height: 1.5;
+}
+.dd-commitment input { margin-top: 3px; }
+
+/* ---- Path to Target ---- */
+.dd-target-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }
+.dd-glossary {
+  margin-top: 16px; padding: 8px 12px;
+  background: #0f172a; border-left: 3px solid #4f6ef7;
+  font-size: 12px; color: #94a3b8; border-radius: 4px;
+}
+.dd-paths { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 14px 0; }
+@media (min-width: 1000px) {
+  .dd-paths { grid-template-columns: repeat(3, 1fr); }
+}
+.dd-path-card {
+  padding: 14px;
+  background: #0f172a;
+  border: 1px solid #1f2440;
+  border-left: 4px solid #475569;
+  border-radius: 6px;
+}
+.dd-path-title { margin: 0 0 4px; font-size: 14px; color: #f1f5f9; }
+.dd-path-subtitle { margin: 0 0 10px; font-size: 12px; color: #94a3b8; line-height: 1.5; }
+.dd-path-requirements { margin: 0 0 8px 16px; color: #cbd5e1; font-size: 13px; }
+.dd-path-note { margin: 0 0 8px; color: #94a3b8; font-size: 12px; line-height: 1.5; }
+.dd-path-realism { margin: 0; font-size: 12px; font-weight: 600; }
+.dd-path-na { margin: 0; color: #64748b; font-size: 12px; font-style: italic; }
+
+.dd-path-realism-easy        { border-left-color: #22c55e; }
+.dd-path-realism-easy .dd-path-realism        { color: #4ade80; }
+.dd-path-realism-plausible   { border-left-color: #3b82f6; }
+.dd-path-realism-plausible .dd-path-realism   { color: #60a5fa; }
+.dd-path-realism-stretch     { border-left-color: #f59e0b; }
+.dd-path-realism-stretch .dd-path-realism     { color: #fbbf24; }
+.dd-path-realism-unrealistic { border-left-color: #ef4444; }
+.dd-path-realism-unrealistic .dd-path-realism { color: #f87171; }
+
+.dd-notes { margin: 8px 0 0 18px; color: #94a3b8; font-size: 12px; }

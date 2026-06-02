@@ -5,6 +5,19 @@ export type EntryStatus = 'draft' | 'completed'
 export type UserCall = 'cheap' | 'fair' | 'expensive_worth_it' | 'cannot_value'
 export type StomachAnswer = 'yes' | 'unsure' | 'no'
 
+export type FlagAcknowledgment = 'accounted' | 'changes_view' | 'explained'
+export type InsiderActivity =
+  | 'heavy_buy'
+  | 'light_buy'
+  | 'quiet'
+  | 'light_sell'
+  | 'heavy_sell'
+  | 'unknown'
+export type CompStructure = 'revenue' | 'profit' | 'stock' | 'salary' | 'unknown'
+
+export type Realism = 'easy' | 'plausible' | 'stretch' | 'unrealistic'
+export type CashBasis = 'earnings' | 'fcf'
+
 // ---------- Data card ----------
 
 export interface YearlyMetric {
@@ -100,6 +113,18 @@ export interface ValuationRequest {
 
 // ---------- Entry document ----------
 
+export interface FlagResponse {
+  acknowledgment: FlagAcknowledgment
+  note?: string | null
+}
+
+export interface LeadershipCheck {
+  who?: string | null
+  insider_activity?: InsiderActivity | null
+  comp_structure?: CompStructure | null
+  concerns?: string | null
+}
+
 export interface Answers {
   q1_business?: string | null
   q2_revenue_model?: string | null
@@ -108,6 +133,10 @@ export interface Answers {
   q3_market?: string | null
   q3_moat?: string | null
   q3_why_now?: string | null
+  // V2 additions
+  q1_flag_response?: FlagResponse | null
+  q5_leadership?: LeadershipCheck | null
+  q9_bear_case?: string | null
 }
 
 export interface Valuation {
@@ -122,6 +151,40 @@ export interface Sizing {
   planned_dollars?: number | null
   stomach_answer?: StomachAnswer | null
   final_dollars?: number | null
+  // V2 plan-pre-commit
+  portfolio_pct_estimate?: number | null
+  sell_target?: number | null
+  add_more_price?: number | null
+  bail_out_trigger?: string | null
+  commitment_acknowledged?: boolean
+}
+
+// ---------- Path to Target (Screen 6) ----------
+
+export interface PathResult {
+  applicable: boolean
+  realism: Realism | null
+  required_growth_pct: number | null
+  required_multiple: number | null
+  note: string
+}
+
+export interface PathToTarget {
+  ticker: string
+  spot: number | null
+  target: number
+  target_return_pct: number | null
+  cash_basis: CashBasis | null
+  cash_per_share: number | null
+  current_multiple: number | null
+  historical_growth_pct: number | null
+  peer_label: string
+  peer_multiple_low: number
+  peer_multiple_high: number
+  path_a_growth_only: PathResult
+  path_b_multiple_only: PathResult
+  path_c_mixed: PathResult
+  notes: string[]
 }
 
 export interface DDEntry {
