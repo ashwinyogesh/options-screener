@@ -30,6 +30,7 @@ from services.dd_coach import (
     data_card_service,
     entry_service,
     filings_service,
+    path_to_target_service,
     valuation_service,
 )
 from services.dd_coach.errors import (
@@ -209,6 +210,26 @@ def get_data_card(
     except (DDEntryNotFound, DDCoachUnavailable) as exc:
         _raise_http(exc)
     return card.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Path to Target (Screen 6)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/path_to_target/{ticker}")
+@limiter.limit("30/minute")
+def get_path_to_target(
+    request: Request,
+    ticker: str = Path(..., min_length=1, max_length=10),
+    target_price: float = Query(..., gt=0, description="User-entered target price"),
+) -> dict[str, Any]:
+    """Return three paths (growth / multiple / mixed) from spot to ``target_price``."""
+    try:
+        result = path_to_target_service.get_path_to_target(ticker, target_price)
+    except (DDEntryNotFound, DDEntryInvalid, DDCoachUnavailable) as exc:
+        _raise_http(exc)
+    return result.to_dict()
 
 
 # ---------------------------------------------------------------------------

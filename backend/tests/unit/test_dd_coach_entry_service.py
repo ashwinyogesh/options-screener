@@ -22,6 +22,8 @@ from services.dd_coach.errors import (
 from services.dd_coach.models import (
     Answers,
     EntryStatus,
+    InsiderActivity,
+    LeadershipCheck,
     PatchEntryInput,
     Sizing,
     StomachAnswer,
@@ -113,6 +115,13 @@ def _completable_patch() -> PatchEntryInput:
             q2_revenue_model="$/GPU-hour, multi-year customer contracts.",
             q3_upside="AI compute demand outpaces hyperscaler capex.",
             q4_risks="Customer concentration; GPU supply timing.",
+            q5_leadership=LeadershipCheck(
+                who="Jensen Huang, CEO since founding.",
+                insider_activity=InsiderActivity.QUIET,
+            ),
+            q9_bear_case=(
+                "Hyperscalers shift to custom silicon and demand for general-purpose GPUs softens."
+            ),
         ),
         valuation=Valuation(
             method=ValuationMethod.MATURITY_DISCOUNT,
@@ -123,6 +132,9 @@ def _completable_patch() -> PatchEntryInput:
             planned_dollars=2000.0,
             stomach_answer=StomachAnswer.YES,
             final_dollars=2000.0,
+            sell_target=150.0,
+            bail_out_trigger="AI revenue decline two quarters in a row.",
+            commitment_acknowledged=True,
         ),
     )
 

@@ -44,6 +44,37 @@ class StomachAnswer(str, Enum):
     NO = "no"
 
 
+class FlagAcknowledgment(str, Enum):
+    """How the user reacted to a data-card red flag on Screen 1."""
+    ACCOUNTED = "accounted"          # "I've factored it in"
+    CHANGES_VIEW = "changes_view"    # "I'll size smaller / wait"
+    EXPLAINED = "explained"          # "I read the inline explainer"
+
+
+class InsiderActivity(str, Enum):
+    HEAVY_BUY = "heavy_buy"
+    LIGHT_BUY = "light_buy"
+    QUIET = "quiet"
+    LIGHT_SELL = "light_sell"
+    HEAVY_SELL = "heavy_sell"
+    UNKNOWN = "unknown"
+
+
+class CompStructure(str, Enum):
+    REVENUE = "revenue"
+    PROFIT = "profit"
+    STOCK = "stock"
+    SALARY = "salary"
+    UNKNOWN = "unknown"
+
+
+# ---- Validation thresholds (v2) -------------------------------------------
+# Hardcoded here so completion validation is auditable and easy to tune.
+
+BEAR_CASE_MIN_CHARS = 30
+BAIL_OUT_TRIGGER_MIN_CHARS = 20
+
+
 # ---- Nested doc sections --------------------------------------------------
 
 
@@ -68,6 +99,38 @@ class Answers(BaseModel):
     q3_market: str | None = None
     q3_moat: str | None = None
     q3_why_now: str | None = None
+
+    # V2 additions ---------------------------------------------------------
+    # Screen 1 — forced reaction to a data-card red flag (only required
+    # for completion if the snapshot had flags at draft time).
+    q1_flag_response: "FlagResponse | None" = None
+
+    # Screen 5 — leadership mini-screen. The two important fields
+    # (`who` and `insider_activity`) are required for completion.
+    q5_leadership: "LeadershipCheck | None" = None
+
+    # Screen 9 — steel-manned bear case. Required, min length enforced.
+    q9_bear_case: str | None = None
+
+
+class FlagResponse(BaseModel):
+    """Screen 1 — how the user reacted to a flagged red item."""
+
+    model_config = ConfigDict(extra="ignore", use_enum_values=True)
+
+    acknowledgment: FlagAcknowledgment
+    note: str | None = None
+
+
+class LeadershipCheck(BaseModel):
+    """Screen 5 — leadership / insider / comp / concerns."""
+
+    model_config = ConfigDict(extra="ignore", use_enum_values=True)
+
+    who: str | None = None
+    insider_activity: InsiderActivity | None = None
+    comp_structure: CompStructure | None = None
+    concerns: str | None = None
 
 
 class ValuationResult(BaseModel):
@@ -94,13 +157,21 @@ class Valuation(BaseModel):
 
 
 class Sizing(BaseModel):
-    """Position size + stomach test outcome."""
+    """Position size + stomach test outcome + V2 pre-commit plan."""
 
     model_config = ConfigDict(extra="ignore")
 
     planned_dollars: float | None = None
     stomach_answer: StomachAnswer | None = None
     final_dollars: float | None = None
+
+    # V2 plan-pre-commit. Sell target + bail-out + acknowledgment are
+    # required for completion. Add-more and portfolio % are optional.
+    portfolio_pct_estimate: float | None = None  # advisory; warn if > 5
+    sell_target: float | None = None
+    add_more_price: float | None = None
+    bail_out_trigger: str | None = None
+    commitment_acknowledged: bool = False
 
 
 # ---- Top-level doc --------------------------------------------------------
@@ -155,8 +226,17 @@ class DDEntryDoc(BaseModel):
     def assert_completable(self) -> None:
         """Raise DDEntryInvalid if any required-for-completion field is missing.
 
-        Required: Q1-Q4 non-empty, Q5 user_call set, sizing.final_dollars > 0,
+        V1 required: Q1-Q4 non-empty, Q5 user_call set, sizing.final_dollars > 0,
         stomach_answer set.
+
+        V2 additions:
+          - q1_flag_response is required when the data_card_snapshot at draft
+            time had any flagged reasons (``flags.balance_sheet_red`` etc.).
+          - q5_leadership.who and q5_leadership.insider_activity required.
+          - q9_bear_case >= 30 chars.
+          - sizing.sell_target > 0.
+          - sizing.bail_out_trigger >= 20 chars.
+          - sizing.commitment_acknowledged is True.
         """
         from services.dd_coach.errors import DDEntryInvalid
 
@@ -176,11 +256,49 @@ class DDEntryDoc(BaseModel):
             missing.append("sizing.stomach_answer")
         if self.sizing.final_dollars is None or self.sizing.final_dollars <= 0:
             missing.append("sizing.final_dollars")
+
+        # ---- V2 required fields ----
+        if self._snapshot_had_flags() and a.q1_flag_response is None:
+            missing.append("answers.q1_flag_response")
+        lead = a.q5_leadership
+        if lead is None or not (lead.who or "").strip():
+            missing.append("answers.q5_leadership.who")
+        if lead is None or lead.insider_activity is None:
+            missing.append("answers.q5_leadership.insider_activity")
+        bear = (a.q9_bear_case or "").strip()
+        if len(bear) < BEAR_CASE_MIN_CHARS:
+            missing.append(
+                f"answers.q9_bear_case (min {BEAR_CASE_MIN_CHARS} chars)",
+            )
+        s = self.sizing
+        if s.sell_target is None or s.sell_target <= 0:
+            missing.append("sizing.sell_target")
+        bail = (s.bail_out_trigger or "").strip()
+        if len(bail) < BAIL_OUT_TRIGGER_MIN_CHARS:
+            missing.append(
+                f"sizing.bail_out_trigger (min {BAIL_OUT_TRIGGER_MIN_CHARS} chars)",
+            )
+        if not s.commitment_acknowledged:
+            missing.append("sizing.commitment_acknowledged")
+
         if missing:
             raise DDEntryInvalid(
                 "Entry cannot be completed — missing required fields: "
                 + ", ".join(missing),
             )
+
+    def _snapshot_had_flags(self) -> bool:
+        """True if the data card snapshot captured at draft time had any
+        non-empty flag reasons. Mirrors ``DataCard.flags.reasons`` shape
+        from the data_card_service.
+        """
+        flags = self.data_card_snapshot.get("flags") if isinstance(
+            self.data_card_snapshot, dict,
+        ) else None
+        if not isinstance(flags, dict):
+            return False
+        reasons = flags.get("reasons")
+        return isinstance(reasons, list) and len(reasons) > 0
 
 
 # ---- Input shapes for the router ------------------------------------------
@@ -207,3 +325,8 @@ class PatchEntryInput(BaseModel):
     answers: Answers | None = None
     valuation: Valuation | None = None
     sizing: Sizing | None = None
+
+
+# Resolve the forward references inside ``Answers`` now that the nested
+# classes (FlagResponse, LeadershipCheck) are in scope.
+Answers.model_rebuild()
