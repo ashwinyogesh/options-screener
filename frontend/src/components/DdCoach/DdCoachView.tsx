@@ -447,8 +447,8 @@ function ScreenBody(p: ScreenBodyProps) {
       <AIAssistPanel
         ticker={p.ticker}
         insightType="risk_diff"
-        title="AI take: risks that are NEW this year"
-        subtitle="latest 10-K Item 1A compared to last year's"
+        title="AI take: risks you need to understand"
+        subtitle="new this year, materially expanded, and ongoing"
       />
     </>
     case 7: return <SimpleTextScreen

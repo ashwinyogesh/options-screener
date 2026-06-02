@@ -273,6 +273,7 @@ export interface RiskDiffContent {
   new_risks: RiskDiffNewRisk[]
   expanded_risks: RiskDiffExpandedRisk[]
   overall_tone: 'materially worse' | 'modestly worse' | 'unchanged' | 'modestly better'
+  ongoing_risks: RiskDiffNewRisk[]
 }
 
 export interface MdaSummaryContent {

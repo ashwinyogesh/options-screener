@@ -221,6 +221,29 @@ function RiskDiffBody({ c }: { c: RiskDiffContent }) {
           </ul>
         </div>
       )}
+      {c.ongoing_risks?.length > 0 && (
+        <div className="dd-ai-section">
+          <h5>Ongoing risks (present last year too — still material)</h5>
+          <ul className="dd-ai-risks">
+            {c.ongoing_risks.map(r => (
+              <li key={r.title}>
+                <div className="dd-ai-risk-head">
+                  <span className={`dd-ai-sev dd-ai-sev-${r.severity}`}>{r.severity}</span>
+                  <strong>{r.title}</strong>
+                </div>
+                <p className="dd-ai-risk-summary">{r.summary}</p>
+                {r.quote && <blockquote className="dd-ai-quote">“{r.quote}”</blockquote>}
+                {r.why_it_matters && (
+                  <p className="dd-ai-risk-why"><em>Why it matters:</em> {r.why_it_matters}</p>
+                )}
+                {r.severity_rationale && (
+                  <p className="dd-ai-risk-sev-note"><em>Severity:</em> {r.severity_rationale}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

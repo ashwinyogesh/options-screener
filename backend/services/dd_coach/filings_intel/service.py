@@ -183,8 +183,8 @@ def _do_risk_diff(ticker: str, f: FilingsFetcher) -> tuple[str, list[dict[str, s
         raise FilingNotFound(
             f"Risk Factors (Item 1A) missing from one of the 10-Ks for {ticker}.",
         )
-    # v2 prefix — schema gained quote/why_it_matters/severity_rationale.
-    cache_key = f"v2_{latest.ref.accession}_vs_{prior.ref.accession}"
+    # v3 prefix — schema gained ongoing_risks bucket.
+    cache_key = f"v3_{latest.ref.accession}_vs_{prior.ref.accession}"
     user = (
         f"Ticker: {ticker}\n\n"
         f"=== THIS YEAR'S 10-K ({latest.ref.filing_date}) Risk Factors ===\n"
@@ -381,7 +381,7 @@ def _peek_cache_key(ticker: str, insight_type: str, f: FilingsFetcher) -> str:
     if insight_type == "risk_diff":
         latest = f.get_10k(ticker, prior=False)
         prior = f.get_10k(ticker, prior=True)
-        return f"v2_{latest.ref.accession}_vs_{prior.ref.accession}"
+        return f"v3_{latest.ref.accession}_vs_{prior.ref.accession}"
     if insight_type == "mda_summary":
         try:
             ref, _ = f.get_10q_mda(ticker)

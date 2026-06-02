@@ -205,7 +205,7 @@ def test_force_recomputes_even_if_cached(cache: CacheStub) -> None:
 
 def test_risk_diff_requires_prior_year(cache: CacheStub) -> None:
     fetcher = FakeFetcher(latest_10k=_bundle("0000-25-001"))  # no prior
-    svc.set_llm_for_tests(lambda **_kw: {"new_risks": [], "expanded_risks": [], "overall_tone": "unchanged"})
+    svc.set_llm_for_tests(lambda **_kw: {"new_risks": [], "expanded_risks": [], "overall_tone": "unchanged", "ongoing_risks": []})
     with pytest.raises(FilingNotFound):
         svc.get_intel("MSFT", "risk_diff", fetcher=fetcher)
 
@@ -215,9 +215,9 @@ def test_risk_diff_includes_both_accessions_in_key(cache: CacheStub) -> None:
         latest_10k=_bundle("0000-25-001"),
         prior_10k=_bundle("0000-24-001"),
     )
-    svc.set_llm_for_tests(lambda **_kw: {"new_risks": [], "expanded_risks": [], "overall_tone": "modestly worse"})
+    svc.set_llm_for_tests(lambda **_kw: {"new_risks": [], "expanded_risks": [], "overall_tone": "modestly worse", "ongoing_risks": []})
     r = svc.get_intel("MSFT", "risk_diff", fetcher=fetcher)
-    assert r.cache_key == "v2_0000-25-001_vs_0000-24-001"
+    assert r.cache_key == "v3_0000-25-001_vs_0000-24-001"
     assert len(r.sources) == 2
 
 
