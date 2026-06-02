@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AIAssistPanel } from './AIAssistPanel'
 import { DataCardPanel } from './DataCardPanel'
 import { useDdCoach } from '../../hooks/useDdCoach'
 import type {
@@ -257,6 +258,7 @@ export function DdCoachView() {
       ) : (
         <ScreenBody
           idx={screenIdx}
+          ticker={activeTicker}
           card={card}
           answers={answers}
           onAnswers={persistAnswers}
@@ -340,6 +342,7 @@ function FilingsBar({ filings }: { filings: FilingLinks }) {
 
 interface ScreenBodyProps {
   idx: ScreenIdx
+  ticker: string
   card: DataCard
   answers: Answers
   onAnswers: (next: Answers) => Promise<void> | void
@@ -371,20 +374,36 @@ interface ScreenBodyProps {
 
 function ScreenBody(p: ScreenBodyProps) {
   switch (p.idx) {
-    case 0: return <Screen1
-      card={p.card}
-      q1={p.answers.q1_business ?? ''}
-      setQ1={v => p.onAnswers({ q1_business: v })}
-      flagResponse={p.answers.q1_flag_response ?? null}
-      setFlagResponse={fr => p.onAnswers({ q1_flag_response: fr })}
-    />
-    case 1: return <SimpleTextScreen
-      heading="What They Sell"
-      prompt="How does this company actually make money? Name the top product or service, and who pays for it."
-      example="They rent GPU compute by the hour to AI startups. About 40% of revenue comes from one customer."
-      value={p.answers.q2_revenue_model ?? ''}
-      onChange={v => p.onAnswers({ q2_revenue_model: v })}
-    />
+    case 0: return <>
+      <Screen1
+        card={p.card}
+        q1={p.answers.q1_business ?? ''}
+        setQ1={v => p.onAnswers({ q1_business: v })}
+        flagResponse={p.answers.q1_flag_response ?? null}
+        setFlagResponse={fr => p.onAnswers({ q1_flag_response: fr })}
+      />
+      <AIAssistPanel
+        ticker={p.ticker}
+        insightType="business_summary"
+        title="AI take: what this company actually does"
+        subtitle="plain-English summary from the latest 10-K"
+      />
+    </>
+    case 1: return <>
+      <SimpleTextScreen
+        heading="What They Sell"
+        prompt="How does this company actually make money? Name the top product or service, and who pays for it."
+        example="They rent GPU compute by the hour to AI startups. About 40% of revenue comes from one customer."
+        value={p.answers.q2_revenue_model ?? ''}
+        onChange={v => p.onAnswers({ q2_revenue_model: v })}
+      />
+      <AIAssistPanel
+        ticker={p.ticker}
+        insightType="mda_summary"
+        title="AI take: latest revenue & margin drivers"
+        subtitle="MD&A from the most recent 10-Q"
+      />
+    </>
     case 2: return <SimpleTextScreen
       heading="The Market"
       prompt="How big is the pie they're chasing? How much of it do they have today?"
@@ -399,10 +418,18 @@ function ScreenBody(p: ScreenBodyProps) {
       value={p.answers.q3_moat ?? ''}
       onChange={v => p.onAnswers({ q3_moat: v })}
     />
-    case 4: return <Screen5Leadership
-      value={p.answers.q5_leadership ?? null}
-      onChange={lead => p.onAnswers({ q5_leadership: lead })}
-    />
+    case 4: return <>
+      <Screen5Leadership
+        value={p.answers.q5_leadership ?? null}
+        onChange={lead => p.onAnswers({ q5_leadership: lead })}
+      />
+      <AIAssistPanel
+        ticker={p.ticker}
+        insightType="leadership"
+        title="AI take: leadership & compensation"
+        subtitle="latest DEF 14A proxy + recent Form 4 cadence"
+      />
+    </>
     case 5: return <Screen6PathToTarget
       card={p.card}
       targetPrice={p.targetPrice}
@@ -412,10 +439,18 @@ function ScreenBody(p: ScreenBodyProps) {
       loading={p.pathLoading}
       onCompute={p.onComputePath}
     />
-    case 6: return <Screen7Risks
-      value={p.answers.q4_risks ?? ''}
-      onChange={v => p.onAnswers({ q4_risks: v })}
-    />
+    case 6: return <>
+      <Screen7Risks
+        value={p.answers.q4_risks ?? ''}
+        onChange={v => p.onAnswers({ q4_risks: v })}
+      />
+      <AIAssistPanel
+        ticker={p.ticker}
+        insightType="risk_diff"
+        title="AI take: risks that are NEW this year"
+        subtitle="latest 10-K Item 1A compared to last year's"
+      />
+    </>
     case 7: return <SimpleTextScreen
       heading="Why Now"
       prompt="What has to happen in the next 12 months for this to work? If you can't name a catalyst, it isn't 'now' — it's 'maybe someday.'"
@@ -423,10 +458,18 @@ function ScreenBody(p: ScreenBodyProps) {
       value={p.answers.q3_why_now ?? ''}
       onChange={v => p.onAnswers({ q3_why_now: v })}
     />
-    case 8: return <Screen9BearCase
-      value={p.answers.q9_bear_case ?? ''}
-      onChange={v => p.onAnswers({ q9_bear_case: v })}
-    />
+    case 8: return <>
+      <Screen9BearCase
+        value={p.answers.q9_bear_case ?? ''}
+        onChange={v => p.onAnswers({ q9_bear_case: v })}
+      />
+      <AIAssistPanel
+        ticker={p.ticker}
+        insightType="bear_scaffold"
+        title="AI take: three plausible –50% scenarios"
+        subtitle="stress-tests for your thesis, not predictions"
+      />
+    </>
     case 9: return <Screen10Decision
       card={p.card}
       pathResult={p.pathResult}

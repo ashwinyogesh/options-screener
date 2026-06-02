@@ -1,4 +1,4 @@
-# DD Coach — Methodology (V2)
+# DD Coach — Methodology (V3)
 
 > Plain-English due-diligence wizard for non-finance retail investors.
 > This doc and the code in `backend/services/dd_coach/` change together.
@@ -190,6 +190,8 @@ CIKs come from `services/fundamentals_service._load_cik_map()` which is already 
 - [ ] Changed an endpoint shape? Update both the router and the Scope table.
 - [ ] Touched V2 completion validation (`assert_completable`) thresholds? Update both `models.BEAR_CASE_MIN_CHARS` / `BAIL_OUT_TRIGGER_MIN_CHARS` **and** the V2 Additions section below.
 - [ ] Touched the peer-multiple band? Update `peer_multiples.py` **and** the Path-to-Target peer-band table.
+- [ ] Added or changed a filings-intelligence prompt or schema? Update `filings_intel/prompts.py` **and** the V3 Filings Intelligence section below; bump the cache_key prefix if the schema is materially incompatible.
+- [ ] Added an insight type? Update `VALID_INSIGHT_TYPES`, the per-insight schema, the router `_INSIGHT_TYPE_LITERAL`, the frontend `InsightType` union, **and** the V3 Insight table below.
 
 ---
 
@@ -307,3 +309,75 @@ user can override.
 | Reverse-DCF check | Deferred | **Shipped (V2)** as Path to Target — same idea, no jargon. |
 | Print / PDF export | Deferred | Still deferred. |
 | Outcome marker | Deferred | Still deferred; revisit-date scheduler too. |
+| LLM-assisted filing summaries | Deferred | **Shipped (V3)** — see V3 Filings Intelligence below. |
+
+---
+
+# V3 Filings Intelligence
+
+LLM-derived insights from SEC filings, surfaced as collapsible **AI assist** panels in the wizard. The goal is to give the retail user a *plain-English* read of the source document before they write their own answer — not to replace their thinking.
+
+## V3.1 Architecture
+
+```
+Router:  GET /api/dd_coach/intel/{ticker}/{insight_type}?force=
+  ↓
+filings_intel/service.get_intel()
+  1. peek cache key (cheap — just metadata + disk cache)
+  2. Cosmos lookup (`dd_filings_intel`)
+  3. on miss: fetch filing text → LLM → persist → return
+  ↓
+filings_intel/fetcher.FilingsFetcher  (wraps services/supply_chain/sec_client)
+filings_intel/sections   (pure HTML → Business / Risk Factors / MD&A)
+filings_intel/prompts    (system prompt + JSON schema per insight)
+filings_intel/cosmos     (separate container; in-memory fallback for local dev)
+```
+
+Raw filing HTML is cached on disk under `$DD_FILINGS_CACHE_DIR` (default `data/dd_filings_cache/`) keyed by accession#. LLM-derived insights are cached in the Cosmos container `dd_filings_intel`, keyed by `{ticker}|{cache_key}|{insight_type}` where `cache_key` includes the accession#(s) so a new filing automatically invalidates the cache.
+
+**Cost.** Single Azure OpenAI call per insight (model: `AZURE_OPENAI_DEPLOYMENT`, default `gpt-4.1` / `gpt-4o`). Per-insight inputs are bounded by per-section soft caps in [`sections.py`](../backend/services/dd_coach/filings_intel/sections.py): `MAX_BUSINESS_CHARS=60_000`, `MAX_RISK_CHARS=80_000`, `MAX_MDA_CHARS=50_000`.
+
+## V3.2 Insights
+
+| Insight type | Source filings | Cache key shape | Wizard screen |
+|---|---|---|---|
+| `business_summary` | latest 10-K Item 1 | `{accession}` | 0 — The Business |
+| `mda_summary` | latest 10-Q Item 7 (fallback: 10-K) | `{accession}` | 1 — What They Sell |
+| `risk_diff` | latest 10-K Item 1A **vs** prior-year 10-K Item 1A | `{latest}_vs_{prior}` | 6 — The Risks |
+| `leadership` | latest DEF 14A + Form 4 metadata (last 180 days) | `{def14a}_f4_{count}` | 4 — Leadership |
+| `bear_scaffold` | latest 10-K (Business + Risk Factors) | `{accession}` | 8 — Bear Case |
+
+All insight responses use Azure OpenAI strict `json_schema` mode — see [`prompts.py`](../backend/services/dd_coach/filings_intel/prompts.py) for the per-insight schema. Schemas are versioned implicitly by their shape: any breaking change to a schema requires bumping the cache prefix so stale cached docs aren’t served.
+
+## V3.3 Prompt design rules
+
+All prompts share a base ruleset (see `_BASE_RULES` in `prompts.py`):
+
+- Write for a retail investor; no MBA jargon.
+- Never invent numbers — if the source doesn’t say it, omit it.
+- Short quoted phrases OK (< 25 words); no long verbatim sections.
+- Be candid about uncertainty.
+
+The `risk_diff` prompt specifically rejects boilerplate wording changes — only genuinely new or materially expanded risks are surfaced. The `leadership` prompt is told that Form 4 *metadata alone* cannot distinguish buys from sells, so its `insider_activity_note` must be qualitative.
+
+## V3.4 UI integration
+
+Frontend renders an [`AIAssistPanel`](../frontend/src/components/DdCoach/AIAssistPanel.tsx) inside the wizard for the five insight-bound screens. The panel:
+
+- Is **collapsed by default** — the user explicitly opts in by clicking the header.
+- Lazy-fetches on first expand (10–20 s cold; instant when Cosmos cache hits).
+- Shows source filing links + a “Freshly generated” / “Cached” badge.
+- Offers a **Regenerate** button (passes `force=true` to bypass the cache).
+
+The panel is advisory — it never auto-fills the user’s textarea. This is deliberate; the V1 design rule “the user must write their own thesis” still holds.
+
+## V3.5 Operational notes
+
+- **SEC etiquette.** All fetches go through `services/supply_chain/sec_client.SecDataClient`, which already honours SEC’s `User-Agent` requirement (`SEC_USER_AGENT` env var) and uses the shared tenacity retry policy. No second HTTP client is introduced.
+- **Cosmos provisioning.** The `dd_filings_intel` container is declared in [`infra/modules/cosmos.bicep`](../infra/modules/cosmos.bicep). When the container is missing in prod, the service degrades to “no-cache” mode (each request hits the SEC + LLM) and logs a warning — deploy the bicep update to enable caching.
+- **Local dev.** With no `NARRATIVE_COSMOS_ENDPOINT` (or `DD_COACH_LOCAL_INMEMORY=1`), the cache uses an in-process dict and a stern WARNING is logged on first use.
+
+## V3.6 Cost cap and rate-limiting
+
+The `/intel/{ticker}/{insight_type}` endpoint is rate-limited to 10/minute per IP (slowapi) and bounded per-insight by the section soft caps. Worst case (5 insights, all cache misses) is one ticker ≈ 5 LLM calls + 4 filing fetches; with `gpt-4o` and bounded inputs that lands inside the per-ticker $1.00 cap chosen in the V3 plan.
+

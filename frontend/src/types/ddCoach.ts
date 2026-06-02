@@ -212,3 +212,90 @@ export interface DDCoachError {
   detail: string
   unavailable: boolean
 }
+
+// ---------- Filings intelligence (V3) ----------
+
+export type InsightType =
+  | 'business_summary'
+  | 'risk_diff'
+  | 'mda_summary'
+  | 'leadership'
+  | 'bear_scaffold'
+
+export interface IntelSource {
+  form: string
+  accession: string
+  filing_date: string
+  primary_doc_url: string
+}
+
+export interface IntelResult {
+  ticker: string
+  insight_type: InsightType
+  cache_key: string
+  sources: IntelSource[]
+  content: Record<string, unknown>
+  generated_at: string
+  cached: boolean
+}
+
+// Per-insight content shapes (matches backend JSON schemas).
+
+export interface BusinessSummaryContent {
+  summary: string
+  primary_products: string[]
+  main_customers: string
+  moat_hypothesis: string
+  segments: string[]
+}
+
+export interface RiskDiffNewRisk {
+  title: string
+  summary: string
+  severity: 'low' | 'medium' | 'high'
+}
+
+export interface RiskDiffExpandedRisk {
+  title: string
+  what_changed: string
+  severity: 'low' | 'medium' | 'high'
+}
+
+export interface RiskDiffContent {
+  new_risks: RiskDiffNewRisk[]
+  expanded_risks: RiskDiffExpandedRisk[]
+  overall_tone: 'materially worse' | 'modestly worse' | 'unchanged' | 'modestly better'
+}
+
+export interface MdaSummaryContent {
+  revenue_bridge: string
+  margin_drivers: string
+  liquidity: string
+  forward_tone: 'optimistic' | 'cautious' | 'neutral' | 'guarded'
+  highlights: string[]
+}
+
+export interface LeadershipContent {
+  ceo_name: string
+  ceo_tenure_note: string
+  comp_alignment:
+    | 'heavily stock-linked'
+    | 'performance-linked'
+    | 'mixed'
+    | 'salary-heavy'
+    | 'unclear'
+  comp_summary: string
+  insider_activity_note: string
+  concerns: string[]
+}
+
+export interface BearScaffoldScenario {
+  title: string
+  narrative: string
+  probability_range_pct: string
+  metric_to_watch: string
+}
+
+export interface BearScaffoldContent {
+  scenarios: BearScaffoldScenario[]
+}

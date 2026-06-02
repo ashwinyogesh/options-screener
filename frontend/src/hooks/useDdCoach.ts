@@ -4,6 +4,8 @@ import type {
   DDCoachError,
   DDEntry,
   FilingLinks,
+  InsightType,
+  IntelResult,
   PatchEntryInput,
   PathToTarget,
   ValuationOutput,
@@ -60,6 +62,8 @@ export interface UseDdCoachReturn {
   fetchFilings: (ticker: string) => Promise<FetchResult<FilingLinks>>
   // Path to target (Screen 6)
   fetchPathToTarget: (ticker: string, targetPrice: number) => Promise<FetchResult<PathToTarget>>
+  // Filings intelligence (V3) — LLM-derived insights, cached server-side by accession#.
+  fetchIntel: (ticker: string, insightType: InsightType, opts?: { force?: boolean }) => Promise<FetchResult<IntelResult>>
   // Valuation compute
   computeValuation: (req: ValuationRequest) => Promise<FetchResult<ValuationOutput>>
   // Entry CRUD
@@ -103,6 +107,14 @@ export function useDdCoach(): UseDdCoachReturn {
     [wrap],
   )
 
+  const fetchIntel = useCallback(
+    (ticker: string, insightType: InsightType, opts?: { force?: boolean }) => wrap(() => jsonFetch<IntelResult>(
+      `${API_BASE}/api/dd_coach/intel/${encodeURIComponent(ticker.toUpperCase())}/${insightType}`
+      + (opts?.force ? '?force=true' : ''),
+    )),
+    [wrap],
+  )
+
   const computeValuation = useCallback(
     (req: ValuationRequest) => wrap(() => jsonFetch<ValuationOutput>(
       `${API_BASE}/api/dd_coach/valuation`,
@@ -139,6 +151,7 @@ export function useDdCoach(): UseDdCoachReturn {
     fetchDataCard,
     fetchFilings,
     fetchPathToTarget,
+    fetchIntel,
     computeValuation,
     createEntry,
     patchEntry,
