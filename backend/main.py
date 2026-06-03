@@ -58,7 +58,7 @@ app.add_middleware(
         "http://127.0.0.1:3000",
     ],
     allow_credentials=False,
-    allow_methods=["POST", "GET", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type"],
     # Custom response headers the frontend reads explicitly. CORS hides any
     # response header not in the CORS-safelisted set unless listed here.
