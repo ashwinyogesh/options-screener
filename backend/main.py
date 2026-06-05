@@ -58,6 +58,9 @@ app.add_middleware(
         "http://127.0.0.1:3000",
     ],
     allow_credentials=False,
+    # PATCH and DELETE are used by the DD Coach entries router. Without them,
+    # browsers block PATCH preflights in prod and the call surfaces as the
+    # generic "TypeError: Failed to fetch" — see save-thesis bug.
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type"],
     # Custom response headers the frontend reads explicitly. CORS hides any

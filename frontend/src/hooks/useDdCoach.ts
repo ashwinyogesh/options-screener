@@ -52,7 +52,15 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<FetchResul
     const data = await response.json() as T
     return { data, error: null }
   } catch (err) {
-    const detail = err instanceof Error ? err.message : 'Network error — is the backend running?'
+    let detail = 'Network error — is the backend running?'
+    if (err instanceof TypeError) {
+      // Browsers throw "TypeError: Failed to fetch" when the request can't
+      // reach the server at all (backend down, CORS, dropped wifi).
+      detail = "Couldn't reach the backend. Is the FastAPI server running at "
+        + `${API_BASE.replace(/\/+$/, '')}? (original error: ${err.message})`
+    } else if (err instanceof Error && err.message) {
+      detail = err.message
+    }
     return { data: null, error: { detail, unavailable: false } }
   }
 }
@@ -72,6 +80,8 @@ export interface UseDdCoachReturn {
   guidedValuation: (req: GuidedValuationInput) => Promise<FetchResult<GuidedValuationResult>>
   // Entry CRUD
   createEntry: (ticker: string) => Promise<FetchResult<DDEntry>>
+  listEntries: (opts?: { ticker?: string; status?: 'draft' | 'completed'; limit?: number }) => Promise<FetchResult<{ items: DDEntry[]; count: number }>>
+  getEntry: (id: string, ticker: string) => Promise<FetchResult<DDEntry>>
   patchEntry: (id: string, ticker: string, patch: PatchEntryInput) => Promise<FetchResult<DDEntry>>
   completeEntry: (id: string, ticker: string) => Promise<FetchResult<DDEntry>>
   loading: boolean
@@ -143,6 +153,27 @@ export function useDdCoach(): UseDdCoachReturn {
     [wrap],
   )
 
+  const listEntries = useCallback(
+    (opts?: { ticker?: string; status?: 'draft' | 'completed'; limit?: number }) => {
+      const params = new URLSearchParams()
+      if (opts?.ticker) params.set('ticker', opts.ticker.toUpperCase())
+      if (opts?.status) params.set('status', opts.status)
+      if (opts?.limit) params.set('limit', String(opts.limit))
+      const qs = params.toString()
+      return wrap(() => jsonFetch<{ items: DDEntry[]; count: number }>(
+        `${API_BASE}/api/dd_coach/entries${qs ? `?${qs}` : ''}`,
+      ))
+    },
+    [wrap],
+  )
+
+  const getEntry = useCallback(
+    (id: string, ticker: string) => wrap(() => jsonFetch<DDEntry>(
+      `${API_BASE}/api/dd_coach/entries/${encodeURIComponent(id)}?ticker=${encodeURIComponent(ticker.toUpperCase())}`,
+    )),
+    [wrap],
+  )
+
   const patchEntry = useCallback(
     (id: string, ticker: string, patch: PatchEntryInput) => wrap(() => jsonFetch<DDEntry>(
       `${API_BASE}/api/dd_coach/entries/${encodeURIComponent(id)}?ticker=${encodeURIComponent(ticker.toUpperCase())}`,
@@ -167,6 +198,8 @@ export function useDdCoach(): UseDdCoachReturn {
     computeValuation,
     guidedValuation,
     createEntry,
+    listEntries,
+    getEntry,
     patchEntry,
     completeEntry,
     loading,

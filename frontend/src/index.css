@@ -1924,6 +1924,37 @@ details[open] .ic-guide-summary::before { content: '▼ '; }
 }
 .dd-input:focus { outline: none; border-color: #4f6ef7; }
 
+/* Saved theses list (start screen) */
+.dd-saved { margin-top: 28px; }
+.dd-saved-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.dd-saved-header h3 { font-size: 14px; margin: 0; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.5px; }
+.dd-saved-refresh {
+  background: transparent; border: 1px solid #2d3148; color: #94a3b8;
+  border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+}
+.dd-saved-refresh:hover:not(:disabled) { color: #e2e8f0; border-color: #475569; }
+.dd-saved-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+.dd-saved-empty { color: #64748b; font-size: 13px; margin: 6px 0; }
+.dd-saved-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.dd-saved-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; background: #0f172a; border: 1px solid #1f2440; border-radius: 6px;
+}
+.dd-saved-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dd-saved-ticker { font-weight: 600; color: #f1f5f9; font-size: 14px; }
+.dd-saved-status {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.dd-saved-status-draft { background: #1e293b; color: #fcd34d; border: 1px solid #422f1e; }
+.dd-saved-status-completed { background: #14252a; color: #4ade80; border: 1px solid #1e3a2e; }
+.dd-saved-call {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  background: #1a2238; color: #93c5fd;
+}
+.dd-saved-date { color: #64748b; font-size: 12px; }
+.dd-saved-open { font-size: 12px; padding: 4px 12px; }
+
 /* Step strip */
 .dd-steps {
   list-style: none; padding: 0; margin: 8px 0 0; display: flex; gap: 4px;

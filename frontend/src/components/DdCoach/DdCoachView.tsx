@@ -118,6 +118,12 @@ export function DdCoachView() {
   const [bailOutTrigger, setBailOutTrigger] = useState<string>('')
   const [commitmentAck, setCommitmentAck] = useState<boolean>(false)
 
+  // Saved-theses list (start screen)
+  const [recentEntries, setRecentEntries] = useState<DDEntry[] | null>(null)
+  const [recentLoading, setRecentLoading] = useState(false)
+  const [recentError, setRecentError] = useState<string | null>(null)
+  const [recentReloadKey, setRecentReloadKey] = useState(0)
+
   // Path-to-Target state (Screen 6)
   const [targetPrice, setTargetPrice] = useState<number>(0)
   const [pathResult, setPathResult] = useState<PathToTarget | null>(null)
@@ -176,6 +182,68 @@ export function DdCoachView() {
       setTargetPrice(Number((cardRes.data.spot_price * 1.2).toFixed(2)))
     }
   }, [ticker, coach])
+
+  // ---- resume / view a saved entry from the start screen ----
+  const openEntry = useCallback(async (saved: DDEntry) => {
+    const t = saved.ticker.toUpperCase()
+    setError(null)
+    setRecentError(null)
+    // Hydrate wizard state from the saved entry before fetching live data.
+    setAnswers(saved.answers ?? {})
+    setUserCall(saved.valuation?.user_call ?? null)
+    setPlannedDollars(saved.sizing?.planned_dollars ?? 0)
+    setStomach(saved.sizing?.stomach_answer ?? null)
+    setFinalDollars(saved.sizing?.final_dollars ?? 0)
+    setPortfolioPct(saved.sizing?.portfolio_pct_estimate ?? 0)
+    setSellTarget(saved.sizing?.sell_target ?? 0)
+    setAddMorePrice(saved.sizing?.add_more_price ?? 0)
+    setBailOutTrigger(saved.sizing?.bail_out_trigger ?? '')
+    setCommitmentAck(Boolean(saved.sizing?.commitment_acknowledged))
+    setTargetPrice(0); setPathResult(null); setPathError(null)
+    setEntry(saved)
+    setActiveTicker(t)
+    setCompleted(saved.status === 'completed')
+    setScreenIdx(0)
+
+    // Pull fresh data card + filings; if the card fails (e.g. yfinance hiccup)
+    // we still let the user view the saved thesis but flag it.
+    const [cardRes, filingsRes] = await Promise.all([
+      coach.fetchDataCard(t),
+      coach.fetchFilings(t),
+    ])
+    if (cardRes.error) {
+      setError(`Couldn't refresh the data card for ${t} (${cardRes.error.detail}). Showing saved thesis only.`)
+      // Fall back to the snapshot stored at draft time so the panel renders.
+      setCard((saved.data_card_snapshot ?? null) as unknown as DataCard | null)
+    } else {
+      setCard(cardRes.data)
+      if (cardRes.data?.spot_price) {
+        setTargetPrice(Number((cardRes.data.spot_price * 1.2).toFixed(2)))
+      }
+    }
+    setFilings(filingsRes.data)
+  }, [coach])
+
+  // ---- saved-theses list (start screen) ----
+  useEffect(() => {
+    if (activeTicker) return  // only fetch on the start screen
+    let cancelled = false
+    setRecentLoading(true)
+    setRecentError(null)
+    coach.listEntries({ limit: 25 }).then(res => {
+      if (cancelled) return
+      if (res.error) {
+        setRecentError(res.error.detail)
+        setRecentEntries([])
+      } else {
+        setRecentEntries(res.data?.items ?? [])
+      }
+      setRecentLoading(false)
+    })
+    return () => { cancelled = true }
+    // recentReloadKey is in the deps so "Refresh" can force a re-fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTicker, recentReloadKey])
 
   // ---- autosave on every screen advance ----
   const persistAnswers = useCallback(async (next: Answers) => {
@@ -365,6 +433,13 @@ export function DdCoachView() {
           </button>
         </div>
         {error && <div className="error-banner">{error}</div>}
+        <SavedThesesPanel
+          entries={recentEntries}
+          loading={recentLoading}
+          error={recentError}
+          onOpen={openEntry}
+          onRefresh={() => setRecentReloadKey(k => k + 1)}
+        />
       </div>
     )
   }
@@ -453,6 +528,62 @@ export function DdCoachView() {
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
+
+function SavedThesesPanel({
+  entries, loading, error, onOpen, onRefresh,
+}: {
+  entries: DDEntry[] | null
+  loading: boolean
+  error: string | null
+  onOpen: (e: DDEntry) => void
+  onRefresh: () => void
+}) {
+  return (
+    <section className="dd-saved">
+      <header className="dd-saved-header">
+        <h3>Your saved theses</h3>
+        <button type="button" className="dd-saved-refresh" onClick={onRefresh} disabled={loading}>
+          {loading ? 'Loading…' : 'Refresh'}
+        </button>
+      </header>
+      {error && <div className="error-banner">Couldn't load saved theses: {error}</div>}
+      {!error && !loading && entries != null && entries.length === 0 && (
+        <p className="dd-saved-empty">
+          No saved theses yet. Run a ticker through the wizard above and click <em>Save thesis &amp; complete</em> at the end.
+        </p>
+      )}
+      {entries && entries.length > 0 && (
+        <ul className="dd-saved-list">
+          {entries.map(e => {
+            const dt = new Date(e.updated_at || e.created_at)
+            const dateLabel = isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+            const call = e.valuation?.user_call
+            const callBadge = call === 'cheap' ? 'Cheap'
+              : call === 'fair' ? 'Fair'
+              : call === 'expensive_worth_it' ? 'Pricey (worth it)'
+              : call === 'cannot_value' ? "Can't value"
+              : null
+            return (
+              <li key={e.id} className="dd-saved-row">
+                <div className="dd-saved-main">
+                  <span className="dd-saved-ticker">{e.ticker}</span>
+                  <span className={`dd-saved-status dd-saved-status-${e.status}`}>
+                    {e.status === 'completed' ? 'Completed' : 'Draft'}
+                  </span>
+                  {callBadge && <span className="dd-saved-call">{callBadge}</span>}
+                  <span className="dd-saved-date">{dateLabel}</span>
+                </div>
+                <button type="button" className="btn-secondary dd-saved-open" onClick={() => void onOpen(e)}>
+                  {e.status === 'completed' ? 'View' : 'Resume'}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
+  )
+}
 
 function StepStrip({ current }: { current: ScreenIdx }) {
   return (
