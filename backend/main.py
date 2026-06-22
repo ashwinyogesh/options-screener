@@ -47,6 +47,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://options.tinkerhub.xyz",
+        "https://polite-hill-0d499e810.7.azurestaticapps.net",
         "https://optionsapi-ajdwhug5g9ena5bj.centralus-01.azurewebsites.net",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
