@@ -1,6 +1,0 @@
-# Phase 4 deps — conviction classifier worker.
-azure-identity==1.17.1
-azure-keyvault-secrets==4.8.0
-azure-cosmos==4.7.0
-openai>=1.51.0
-tenacity==9.0.0

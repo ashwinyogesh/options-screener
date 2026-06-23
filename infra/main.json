@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "542408607668923859"
+      "templateHash": "4720956131267821724"
     }
   },
   "parameters": {
@@ -13,14 +13,14 @@
       "type": "string",
       "defaultValue": "options-rg",
       "metadata": {
-        "description": "Name of the resource group hosting all narrative platform resources."
+        "description": "Name of the resource group hosting all platform resources."
       }
     },
     "location": {
       "type": "string",
       "defaultValue": "eastus",
       "metadata": {
-        "description": "Azure region for all resources. Existing stack lives in centralus."
+        "description": "Azure region for the resource group, Container Apps env, and monitoring resources."
       }
     },
     "nameSuffix": {
@@ -31,83 +31,53 @@
         "description": "Short suffix appended to globally-unique resource names. Lowercase alnum, 3-9 chars."
       }
     },
-    "keyVaultAdminObjectIds": {
-      "type": "array",
-      "defaultValue": [],
-      "metadata": {
-        "description": "Azure AD principal IDs (object IDs) that should receive Key Vault Secrets Officer."
-      }
-    },
     "cosmosLocation": {
       "type": "string",
       "defaultValue": "westus2",
       "metadata": {
-        "description": "Region for Cosmos DB account. Defaults to westus2 (eastus has capacity constraints)."
+        "description": "Region for the Cosmos DB account. Defaults to westus2 (eastus has serverless capacity constraints)."
       }
     },
     "cosmosDataContributorPrincipalIds": {
       "type": "array",
       "defaultValue": [],
       "metadata": {
-        "description": "Principal IDs granted Cosmos DB Built-in Data Contributor."
+        "description": "Principal IDs granted Cosmos DB Built-in Data Contributor (admins + screener job MIs)."
       }
     },
     "cosmosDataReaderPrincipalIds": {
       "type": "array",
       "defaultValue": [],
       "metadata": {
-        "description": "Principal IDs granted Cosmos DB Built-in Data Reader. Used by the App Service backend (optionsapi) MI for read-only access to ticker_timeline."
+        "description": "Principal IDs granted Cosmos DB Built-in Data Reader. Used by the App Service backend (optionsapi) MI for read-only access."
       }
     },
-    "ingestionImage": {
+    "screenerCspImage": {
       "type": "string",
-      "defaultValue": "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest",
+      "defaultValue": "ghcr.io/ashwinchandlapur/options-screener-worker:latest",
       "metadata": {
-        "description": "Container image for the ingestion worker. Infra deploy preserves the live image; only falls back to placeholder on first deploy."
+        "description": "Container image for job-screener-csp (ADR-0024). Preserved by CI workflow."
       }
     },
-    "ingestionMinReplicas": {
-      "type": "int",
-      "defaultValue": 1,
-      "minValue": 0,
-      "maxValue": 2,
-      "metadata": {
-        "description": "Minimum replicas for job-ingestor. Set to 0 by default — the ingestion CI workflow sets it to 1 when deploying."
-      }
-    },
-    "extractorImage": {
+    "screenerCcImage": {
       "type": "string",
-      "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
+      "defaultValue": "ghcr.io/ashwinchandlapur/options-screener-worker:latest",
       "metadata": {
-        "description": "Container image for job-extractor. Preserved by infra workflow."
+        "description": "Container image for job-screener-cc (ADR-0024). Preserved by CI workflow."
       }
     },
-    "aggregatorImage": {
+    "screenerDitmImage": {
       "type": "string",
-      "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
+      "defaultValue": "ghcr.io/ashwinchandlapur/options-screener-worker:latest",
       "metadata": {
-        "description": "Container image for job-aggregator. Preserved by infra workflow."
+        "description": "Container image for job-screener-ditm (ADR-0024). Preserved by CI workflow."
       }
     },
-    "classifierImage": {
+    "screenerSwingImage": {
       "type": "string",
-      "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
+      "defaultValue": "ghcr.io/ashwinchandlapur/options-screener-worker:latest",
       "metadata": {
-        "description": "Container image for job-classifier. Preserved by infra workflow."
-      }
-    },
-    "detectorImage": {
-      "type": "string",
-      "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
-      "metadata": {
-        "description": "Container image for job-narrative-detector. Preserved by infra workflow."
-      }
-    },
-    "scorerImage": {
-      "type": "string",
-      "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
-      "metadata": {
-        "description": "Container image for job-acs-scorer. Preserved by infra workflow."
+        "description": "Container image for job-screener-swing (ADR-0025). Preserved by CI workflow."
       }
     },
     "ghcrUsername": {
@@ -127,9 +97,8 @@
     "tags": {
       "type": "object",
       "defaultValue": {
-        "workload": "narrative-intelligence",
-        "costCenter": "options-screener",
-        "budget": "150usd-month"
+        "workload": "options-screener",
+        "costCenter": "options-screener"
       },
       "metadata": {
         "description": "Tag map applied to every resource."
@@ -143,416 +112,6 @@
       "name": "[parameters('resourceGroupName')]",
       "location": "[parameters('location')]",
       "tags": "[parameters('tags')]"
-    },
-    {
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2025-04-01",
-      "name": "storage",
-      "resourceGroup": "[parameters('resourceGroupName')]",
-      "properties": {
-        "expressionEvaluationOptions": {
-          "scope": "inner"
-        },
-        "mode": "Incremental",
-        "parameters": {
-          "location": {
-            "value": "[parameters('location')]"
-          },
-          "nameSuffix": {
-            "value": "[parameters('nameSuffix')]"
-          },
-          "tags": {
-            "value": "[parameters('tags')]"
-          }
-        },
-        "template": {
-          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-          "contentVersion": "1.0.0.0",
-          "metadata": {
-            "_generator": {
-              "name": "bicep",
-              "version": "0.43.8.12551",
-              "templateHash": "17676573403615261783"
-            }
-          },
-          "parameters": {
-            "location": {
-              "type": "string",
-              "metadata": {
-                "description": "Azure region."
-              }
-            },
-            "nameSuffix": {
-              "type": "string",
-              "metadata": {
-                "description": "Suffix for globally-unique storage account name."
-              }
-            },
-            "tags": {
-              "type": "object",
-              "metadata": {
-                "description": "Tags applied to the storage account."
-              }
-            }
-          },
-          "variables": {
-            "storageAccountName": "[toLower(format('stnarrative{0}', parameters('nameSuffix')))]"
-          },
-          "resources": [
-            {
-              "type": "Microsoft.Storage/storageAccounts",
-              "apiVersion": "2023-05-01",
-              "name": "[variables('storageAccountName')]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "sku": {
-                "name": "Standard_LRS"
-              },
-              "kind": "StorageV2",
-              "properties": {
-                "accessTier": "Hot",
-                "minimumTlsVersion": "TLS1_2",
-                "allowBlobPublicAccess": false,
-                "supportsHttpsTrafficOnly": true,
-                "isHnsEnabled": false,
-                "networkAcls": {
-                  "bypass": "AzureServices",
-                  "defaultAction": "Allow"
-                }
-              }
-            },
-            {
-              "type": "Microsoft.Storage/storageAccounts/blobServices",
-              "apiVersion": "2023-05-01",
-              "name": "[format('{0}/{1}', variables('storageAccountName'), 'default')]",
-              "properties": {
-                "deleteRetentionPolicy": {
-                  "enabled": true,
-                  "days": 7
-                },
-                "containerDeleteRetentionPolicy": {
-                  "enabled": true,
-                  "days": 7
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
-              "apiVersion": "2023-05-01",
-              "name": "[format('{0}/{1}/{2}', variables('storageAccountName'), 'default', 'reddit-raw')]",
-              "properties": {
-                "publicAccess": "None"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]"
-              ]
-            },
-            {
-              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
-              "apiVersion": "2023-05-01",
-              "name": "[format('{0}/{1}/{2}', variables('storageAccountName'), 'default', 'backtest-results')]",
-              "properties": {
-                "publicAccess": "None"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]"
-              ]
-            },
-            {
-              "type": "Microsoft.Storage/storageAccounts/managementPolicies",
-              "apiVersion": "2023-05-01",
-              "name": "[format('{0}/{1}', variables('storageAccountName'), 'default')]",
-              "properties": {
-                "policy": {
-                  "rules": [
-                    {
-                      "name": "reddit-raw-lifecycle",
-                      "enabled": true,
-                      "type": "Lifecycle",
-                      "definition": {
-                        "filters": {
-                          "blobTypes": [
-                            "blockBlob"
-                          ],
-                          "prefixMatch": [
-                            "reddit-raw/"
-                          ]
-                        },
-                        "actions": {
-                          "baseBlob": {
-                            "tierToCool": {
-                              "daysAfterModificationGreaterThan": 30
-                            },
-                            "delete": {
-                              "daysAfterModificationGreaterThan": 365
-                            }
-                          }
-                        }
-                      }
-                    }
-                  ]
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
-              ]
-            }
-          ],
-          "outputs": {
-            "storageAccountName": {
-              "type": "string",
-              "value": "[variables('storageAccountName')]"
-            },
-            "storageAccountId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
-            },
-            "redditRawContainerName": {
-              "type": "string",
-              "value": "reddit-raw"
-            },
-            "backtestResultsContainerName": {
-              "type": "string",
-              "value": "backtest-results"
-            }
-          }
-        }
-      },
-      "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
-      ]
-    },
-    {
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2025-04-01",
-      "name": "eventhubs",
-      "resourceGroup": "[parameters('resourceGroupName')]",
-      "properties": {
-        "expressionEvaluationOptions": {
-          "scope": "inner"
-        },
-        "mode": "Incremental",
-        "parameters": {
-          "location": {
-            "value": "[parameters('location')]"
-          },
-          "nameSuffix": {
-            "value": "[parameters('nameSuffix')]"
-          },
-          "tags": {
-            "value": "[parameters('tags')]"
-          }
-        },
-        "template": {
-          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-          "contentVersion": "1.0.0.0",
-          "metadata": {
-            "_generator": {
-              "name": "bicep",
-              "version": "0.43.8.12551",
-              "templateHash": "12722443251290389572"
-            }
-          },
-          "parameters": {
-            "location": {
-              "type": "string",
-              "metadata": {
-                "description": "Azure region."
-              }
-            },
-            "nameSuffix": {
-              "type": "string",
-              "metadata": {
-                "description": "Suffix for the Event Hubs namespace name."
-              }
-            },
-            "tags": {
-              "type": "object",
-              "metadata": {
-                "description": "Tags applied to the namespace."
-              }
-            }
-          },
-          "variables": {
-            "namespaceName": "[format('evhns-narrative-{0}', parameters('nameSuffix'))]"
-          },
-          "resources": [
-            {
-              "type": "Microsoft.EventHub/namespaces",
-              "apiVersion": "2024-01-01",
-              "name": "[variables('namespaceName')]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "sku": {
-                "name": "Basic",
-                "tier": "Basic",
-                "capacity": 1
-              },
-              "properties": {
-                "isAutoInflateEnabled": false,
-                "minimumTlsVersion": "1.2",
-                "publicNetworkAccess": "Enabled"
-              }
-            },
-            {
-              "type": "Microsoft.EventHub/namespaces/eventhubs",
-              "apiVersion": "2024-01-01",
-              "name": "[format('{0}/{1}', variables('namespaceName'), 'reddit-raw-events')]",
-              "properties": {
-                "partitionCount": 4,
-                "messageRetentionInDays": 1
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.EventHub/namespaces', variables('namespaceName'))]"
-              ]
-            }
-          ],
-          "outputs": {
-            "namespaceName": {
-              "type": "string",
-              "value": "[variables('namespaceName')]"
-            },
-            "namespaceId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.EventHub/namespaces', variables('namespaceName'))]"
-            },
-            "rawEventsName": {
-              "type": "string",
-              "value": "reddit-raw-events"
-            }
-          }
-        }
-      },
-      "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
-      ]
-    },
-    {
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2025-04-01",
-      "name": "keyvault",
-      "resourceGroup": "[parameters('resourceGroupName')]",
-      "properties": {
-        "expressionEvaluationOptions": {
-          "scope": "inner"
-        },
-        "mode": "Incremental",
-        "parameters": {
-          "location": {
-            "value": "[parameters('location')]"
-          },
-          "nameSuffix": {
-            "value": "[parameters('nameSuffix')]"
-          },
-          "tags": {
-            "value": "[parameters('tags')]"
-          },
-          "adminObjectIds": {
-            "value": "[parameters('keyVaultAdminObjectIds')]"
-          }
-        },
-        "template": {
-          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-          "contentVersion": "1.0.0.0",
-          "metadata": {
-            "_generator": {
-              "name": "bicep",
-              "version": "0.43.8.12551",
-              "templateHash": "971162138217559547"
-            }
-          },
-          "parameters": {
-            "location": {
-              "type": "string",
-              "metadata": {
-                "description": "Azure region."
-              }
-            },
-            "nameSuffix": {
-              "type": "string",
-              "metadata": {
-                "description": "Suffix for the Key Vault name."
-              }
-            },
-            "tags": {
-              "type": "object",
-              "metadata": {
-                "description": "Tags applied to the vault."
-              }
-            },
-            "adminObjectIds": {
-              "type": "array",
-              "defaultValue": [],
-              "metadata": {
-                "description": "Object IDs of admins receiving Key Vault Secrets Officer."
-              }
-            }
-          },
-          "variables": {
-            "keyVaultName": "[format('kv-narrative-{0}', parameters('nameSuffix'))]",
-            "roleSecretsOfficer": "/providers/Microsoft.Authorization/roleDefinitions/b86a8fe4-44ce-4948-aee5-eccb2c155cd7"
-          },
-          "resources": [
-            {
-              "type": "Microsoft.KeyVault/vaults",
-              "apiVersion": "2023-07-01",
-              "name": "[variables('keyVaultName')]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "properties": {
-                "tenantId": "[subscription().tenantId]",
-                "sku": {
-                  "family": "A",
-                  "name": "standard"
-                },
-                "enableRbacAuthorization": true,
-                "enableSoftDelete": true,
-                "softDeleteRetentionInDays": 7,
-                "enablePurgeProtection": true,
-                "publicNetworkAccess": "Enabled"
-              }
-            },
-            {
-              "copy": {
-                "name": "adminAssignments",
-                "count": "[length(parameters('adminObjectIds'))]"
-              },
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), parameters('adminObjectIds')[copyIndex()], 'secrets-officer')]",
-              "properties": {
-                "roleDefinitionId": "[variables('roleSecretsOfficer')]",
-                "principalId": "[parameters('adminObjectIds')[copyIndex()]]",
-                "principalType": "User"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
-              ]
-            }
-          ],
-          "outputs": {
-            "keyVaultName": {
-              "type": "string",
-              "value": "[variables('keyVaultName')]"
-            },
-            "keyVaultUri": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), '2023-07-01').vaultUri]"
-            },
-            "keyVaultId": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
-            }
-          }
-        }
-      },
-      "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
-      ]
     },
     {
       "type": "Microsoft.Resources/deployments",
@@ -694,47 +253,20 @@
           "logAnalyticsWorkspaceId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.logAnalyticsWorkspaceId.value]"
           },
-          "keyVaultUri": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'keyvault'), '2025-04-01').outputs.keyVaultUri.value]"
-          },
-          "keyVaultId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'keyvault'), '2025-04-01').outputs.keyVaultId.value]"
-          },
-          "eventHubNamespaceFqdn": {
-            "value": "[format('{0}.servicebus.windows.net', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'eventhubs'), '2025-04-01').outputs.namespaceName.value)]"
-          },
-          "eventHubNamespaceId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'eventhubs'), '2025-04-01').outputs.namespaceId.value]"
-          },
           "cosmosEndpoint": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.accountEndpoint.value]"
           },
-          "blobAccountName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.storageAccountName.value]"
+          "screenerCspImage": {
+            "value": "[parameters('screenerCspImage')]"
           },
-          "blobStorageId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.storageAccountId.value]"
+          "screenerCcImage": {
+            "value": "[parameters('screenerCcImage')]"
           },
-          "ingestionImage": {
-            "value": "[parameters('ingestionImage')]"
+          "screenerDitmImage": {
+            "value": "[parameters('screenerDitmImage')]"
           },
-          "ingestionMinReplicas": {
-            "value": "[parameters('ingestionMinReplicas')]"
-          },
-          "extractorImage": {
-            "value": "[parameters('extractorImage')]"
-          },
-          "aggregatorImage": {
-            "value": "[parameters('aggregatorImage')]"
-          },
-          "classifierImage": {
-            "value": "[parameters('classifierImage')]"
-          },
-          "detectorImage": {
-            "value": "[parameters('detectorImage')]"
-          },
-          "scorerImage": {
-            "value": "[parameters('scorerImage')]"
+          "screenerSwingImage": {
+            "value": "[parameters('screenerSwingImage')]"
           },
           "ghcrUsername": {
             "value": "[parameters('ghcrUsername')]"
@@ -750,7 +282,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "140278623388934755"
+              "templateHash": "15896471469097471224"
             }
           },
           "parameters": {
@@ -778,55 +310,32 @@
                 "description": "Resource ID of the Log Analytics workspace from the monitoring module."
               }
             },
-            "ingestionImage": {
+            "screenerCspImage": {
               "type": "string",
-              "defaultValue": "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest",
+              "defaultValue": "ghcr.io/ashwinchandlapur/options-screener-worker:latest",
               "metadata": {
-                "description": "Container image for the ingestion worker. Defaults to a public MCR placeholder; CI deploy overrides with the real ghcr.io image."
+                "description": "Container image for job-screener-csp (ADR-0024). Preserved from live deployment by CI workflow."
               }
             },
-            "ingestionMinReplicas": {
-              "type": "int",
-              "defaultValue": 1,
-              "minValue": 0,
-              "maxValue": 2,
+            "screenerCcImage": {
+              "type": "string",
+              "defaultValue": "ghcr.io/ashwinchandlapur/options-screener-worker:latest",
               "metadata": {
-                "description": "Minimum replicas for job-ingestor. Defaults to 0 so infra deploy never auto-starts it; the ingestion CI workflow sets this to 1 when deploying the real image."
+                "description": "Container image for job-screener-cc (ADR-0024). Preserved from live deployment by CI workflow."
               }
             },
-            "extractorImage": {
+            "screenerSwingImage": {
               "type": "string",
-              "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
+              "defaultValue": "ghcr.io/ashwinchandlapur/options-screener-worker:latest",
               "metadata": {
-                "description": "Container image for job-extractor. Preserved from live deployment by infra workflow."
+                "description": "Container image for job-screener-swing (ADR-0025). Preserved from live deployment by CI workflow."
               }
             },
-            "aggregatorImage": {
+            "screenerDitmImage": {
               "type": "string",
-              "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
+              "defaultValue": "ghcr.io/ashwinchandlapur/options-screener-worker:latest",
               "metadata": {
-                "description": "Container image for job-aggregator. Preserved from live deployment by infra workflow."
-              }
-            },
-            "classifierImage": {
-              "type": "string",
-              "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
-              "metadata": {
-                "description": "Container image for job-classifier. Preserved from live deployment by infra workflow."
-              }
-            },
-            "detectorImage": {
-              "type": "string",
-              "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
-              "metadata": {
-                "description": "Container image for job-narrative-detector. Preserved from live deployment by infra workflow."
-              }
-            },
-            "scorerImage": {
-              "type": "string",
-              "defaultValue": "mcr.microsoft.com/k8se/quickstart-jobs:latest",
-              "metadata": {
-                "description": "Container image for job-acs-scorer. Preserved from live deployment by infra workflow."
+                "description": "Container image for job-screener-ditm (ADR-0024). Preserved from live deployment by CI workflow."
               }
             },
             "ghcrUsername": {
@@ -840,64 +349,18 @@
               "type": "securestring",
               "defaultValue": "",
               "metadata": {
-                "description": "GHCR password / PAT with read:packages. Provided by infra workflow via secret param."
-              }
-            },
-            "keyVaultUri": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Key Vault URI passed to workers as KEYVAULT_URI."
-              }
-            },
-            "eventHubNamespaceFqdn": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Event Hubs FQDN passed to workers as EVENT_HUB_NAMESPACE."
-              }
-            },
-            "blobAccountName": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Storage account name passed to workers as BLOB_ACCOUNT_NAME."
+                "description": "GHCR password / PAT with read:packages. Provided by CI workflow via secret param."
               }
             },
             "cosmosEndpoint": {
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Cosmos DB account endpoint passed to extractor and aggregator workers as COSMOS_ENDPOINT."
-              }
-            },
-            "keyVaultId": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Resource ID of the Key Vault. Used to assign Key Vault Secrets User to worker managed identities."
-              }
-            },
-            "blobStorageId": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Resource ID of the Blob storage account. Used to assign Storage Blob Data Contributor to job-ingestor."
-              }
-            },
-            "eventHubNamespaceId": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Resource ID of the Event Hubs namespace. Used to assign EH Sender/Receiver roles."
+                "description": "Cosmos DB account endpoint passed to workers as COSMOS_ENDPOINT."
               }
             }
           },
           "variables": {
-            "roleSecretsUser": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
-            "roleBlobContributor": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]",
-            "roleEhSender": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2b629674-e913-4c01-ae53-ef4638d8f975')]",
-            "roleEhReceiver": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a638d3c7-ab3a-418d-83e6-5f17a39d4fde')]",
             "ghcrConfigured": "[not(empty(parameters('ghcrUsername')))]",
             "ghcrSecretName": "ghcr-password",
             "ghcrSecrets": "[if(variables('ghcrConfigured'), createArray(createObject('name', variables('ghcrSecretName'), 'value', parameters('ghcrPassword'))), createArray())]",
@@ -928,278 +391,9 @@
               }
             },
             {
-              "type": "Microsoft.App/containerApps",
-              "apiVersion": "2024-03-01",
-              "name": "job-ingestor",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "identity": {
-                "type": "SystemAssigned"
-              },
-              "properties": {
-                "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]",
-                "workloadProfileName": "Consumption",
-                "configuration": {
-                  "activeRevisionsMode": "Single",
-                  "ingress": null,
-                  "secrets": "[variables('ghcrSecrets')]",
-                  "registries": "[variables('ghcrRegistries')]"
-                },
-                "template": {
-                  "containers": [
-                    {
-                      "name": "ingestion",
-                      "image": "[parameters('ingestionImage')]",
-                      "resources": {
-                        "cpu": "[json('0.25')]",
-                        "memory": "0.5Gi"
-                      },
-                      "env": [
-                        {
-                          "name": "KEYVAULT_URI",
-                          "value": "[parameters('keyVaultUri')]"
-                        },
-                        {
-                          "name": "EVENT_HUB_NAMESPACE",
-                          "value": "[parameters('eventHubNamespaceFqdn')]"
-                        },
-                        {
-                          "name": "BLOB_ACCOUNT_NAME",
-                          "value": "[parameters('blobAccountName')]"
-                        },
-                        {
-                          "name": "LOG_LEVEL",
-                          "value": "INFO"
-                        }
-                      ]
-                    }
-                  ],
-                  "scale": {
-                    "minReplicas": "[parameters('ingestionMinReplicas')]",
-                    "maxReplicas": 2
-                  }
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]"
-              ]
-            },
-            {
               "type": "Microsoft.App/jobs",
               "apiVersion": "2024-03-01",
-              "name": "job-extractor",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "identity": {
-                "type": "SystemAssigned"
-              },
-              "properties": {
-                "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]",
-                "configuration": {
-                  "triggerType": "Schedule",
-                  "replicaTimeout": 120,
-                  "scheduleTriggerConfig": {
-                    "cronExpression": "*/5 * * * *",
-                    "parallelism": 1,
-                    "replicaCompletionCount": 1
-                  },
-                  "secrets": "[variables('ghcrSecrets')]",
-                  "registries": "[variables('ghcrRegistries')]"
-                },
-                "template": {
-                  "containers": [
-                    {
-                      "name": "extractor",
-                      "image": "[parameters('extractorImage')]",
-                      "resources": {
-                        "cpu": "[json('0.25')]",
-                        "memory": "0.5Gi"
-                      },
-                      "env": [
-                        {
-                          "name": "KEYVAULT_URI",
-                          "value": "[parameters('keyVaultUri')]"
-                        },
-                        {
-                          "name": "EVENT_HUB_NAMESPACE",
-                          "value": "[parameters('eventHubNamespaceFqdn')]"
-                        },
-                        {
-                          "name": "COSMOS_ENDPOINT",
-                          "value": "[parameters('cosmosEndpoint')]"
-                        },
-                        {
-                          "name": "LOG_LEVEL",
-                          "value": "INFO"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.App/jobs",
-              "apiVersion": "2024-03-01",
-              "name": "job-aggregator",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "identity": {
-                "type": "SystemAssigned"
-              },
-              "properties": {
-                "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]",
-                "configuration": {
-                  "triggerType": "Schedule",
-                  "replicaTimeout": 1800,
-                  "scheduleTriggerConfig": {
-                    "cronExpression": "*/15 * * * *",
-                    "parallelism": 1,
-                    "replicaCompletionCount": 1
-                  },
-                  "secrets": "[variables('ghcrSecrets')]",
-                  "registries": "[variables('ghcrRegistries')]"
-                },
-                "template": {
-                  "containers": [
-                    {
-                      "name": "aggregator",
-                      "image": "[parameters('aggregatorImage')]",
-                      "resources": {
-                        "cpu": "[json('0.25')]",
-                        "memory": "0.5Gi"
-                      },
-                      "env": [
-                        {
-                          "name": "COSMOS_ENDPOINT",
-                          "value": "[parameters('cosmosEndpoint')]"
-                        },
-                        {
-                          "name": "LOG_LEVEL",
-                          "value": "INFO"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.App/jobs",
-              "apiVersion": "2024-03-01",
-              "name": "job-classifier",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "identity": {
-                "type": "SystemAssigned"
-              },
-              "properties": {
-                "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]",
-                "configuration": {
-                  "triggerType": "Schedule",
-                  "replicaTimeout": 1500,
-                  "scheduleTriggerConfig": {
-                    "cronExpression": "*/30 * * * *",
-                    "parallelism": 1,
-                    "replicaCompletionCount": 1
-                  },
-                  "secrets": "[variables('ghcrSecrets')]",
-                  "registries": "[variables('ghcrRegistries')]"
-                },
-                "template": {
-                  "containers": [
-                    {
-                      "name": "classifier",
-                      "image": "[parameters('classifierImage')]",
-                      "resources": {
-                        "cpu": "[json('0.5')]",
-                        "memory": "1.0Gi"
-                      },
-                      "env": [
-                        {
-                          "name": "KEYVAULT_URI",
-                          "value": "[parameters('keyVaultUri')]"
-                        },
-                        {
-                          "name": "COSMOS_ENDPOINT",
-                          "value": "[parameters('cosmosEndpoint')]"
-                        },
-                        {
-                          "name": "LOG_LEVEL",
-                          "value": "INFO"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.App/jobs",
-              "apiVersion": "2024-03-01",
-              "name": "job-narrative-detector",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "identity": {
-                "type": "SystemAssigned"
-              },
-              "properties": {
-                "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]",
-                "configuration": {
-                  "triggerType": "Schedule",
-                  "replicaTimeout": 3300,
-                  "scheduleTriggerConfig": {
-                    "cronExpression": "0 * * * *",
-                    "parallelism": 1,
-                    "replicaCompletionCount": 1
-                  },
-                  "secrets": "[variables('ghcrSecrets')]",
-                  "registries": "[variables('ghcrRegistries')]"
-                },
-                "template": {
-                  "containers": [
-                    {
-                      "name": "narrative-detector",
-                      "image": "[parameters('detectorImage')]",
-                      "resources": {
-                        "cpu": "[json('0.5')]",
-                        "memory": "1.0Gi"
-                      },
-                      "env": [
-                        {
-                          "name": "KEYVAULT_URI",
-                          "value": "[parameters('keyVaultUri')]"
-                        },
-                        {
-                          "name": "COSMOS_ENDPOINT",
-                          "value": "[parameters('cosmosEndpoint')]"
-                        },
-                        {
-                          "name": "LOG_LEVEL",
-                          "value": "INFO"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.App/jobs",
-              "apiVersion": "2024-03-01",
-              "name": "job-acs-scorer",
+              "name": "job-screener-csp",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
               "identity": {
@@ -1211,7 +405,7 @@
                   "triggerType": "Schedule",
                   "replicaTimeout": 840,
                   "scheduleTriggerConfig": {
-                    "cronExpression": "*/20 * * * *",
+                    "cronExpression": "*/15 * * * *",
                     "parallelism": 1,
                     "replicaCompletionCount": 1
                   },
@@ -1221,24 +415,32 @@
                 "template": {
                   "containers": [
                     {
-                      "name": "acs-scorer",
-                      "image": "[parameters('scorerImage')]",
+                      "name": "screener-csp",
+                      "image": "[parameters('screenerCspImage')]",
                       "resources": {
-                        "cpu": "[json('0.25')]",
-                        "memory": "0.5Gi"
+                        "cpu": "[json('0.5')]",
+                        "memory": "1.0Gi"
                       },
                       "env": [
-                        {
-                          "name": "KEYVAULT_URI",
-                          "value": "[parameters('keyVaultUri')]"
-                        },
                         {
                           "name": "COSMOS_ENDPOINT",
                           "value": "[parameters('cosmosEndpoint')]"
                         },
                         {
+                          "name": "STRATEGY",
+                          "value": "csp"
+                        },
+                        {
                           "name": "LOG_LEVEL",
                           "value": "INFO"
+                        },
+                        {
+                          "name": "MIN_REFRESH_SECONDS_MARKET",
+                          "value": "900"
+                        },
+                        {
+                          "name": "MIN_REFRESH_SECONDS_OFF",
+                          "value": "14400"
                         }
                       ]
                     }
@@ -1250,115 +452,186 @@
               ]
             },
             {
-              "condition": "[not(empty(parameters('keyVaultId')))]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "name": "[guid(parameters('keyVaultId'), 'job-narrative-detector', variables('roleSecretsUser'))]",
+              "type": "Microsoft.App/jobs",
+              "apiVersion": "2024-03-01",
+              "name": "job-screener-cc",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
               "properties": {
-                "roleDefinitionId": "[variables('roleSecretsUser')]",
-                "principalId": "[reference(resourceId('Microsoft.App/jobs', 'job-narrative-detector'), '2024-03-01', 'full').identity.principalId]",
-                "principalType": "ServicePrincipal"
+                "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]",
+                "configuration": {
+                  "triggerType": "Schedule",
+                  "replicaTimeout": 840,
+                  "scheduleTriggerConfig": {
+                    "cronExpression": "*/15 * * * *",
+                    "parallelism": 1,
+                    "replicaCompletionCount": 1
+                  },
+                  "secrets": "[variables('ghcrSecrets')]",
+                  "registries": "[variables('ghcrRegistries')]"
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "screener-cc",
+                      "image": "[parameters('screenerCcImage')]",
+                      "resources": {
+                        "cpu": "[json('0.5')]",
+                        "memory": "1.0Gi"
+                      },
+                      "env": [
+                        {
+                          "name": "COSMOS_ENDPOINT",
+                          "value": "[parameters('cosmosEndpoint')]"
+                        },
+                        {
+                          "name": "STRATEGY",
+                          "value": "cc"
+                        },
+                        {
+                          "name": "LOG_LEVEL",
+                          "value": "INFO"
+                        },
+                        {
+                          "name": "MIN_REFRESH_SECONDS_MARKET",
+                          "value": "900"
+                        },
+                        {
+                          "name": "MIN_REFRESH_SECONDS_OFF",
+                          "value": "14400"
+                        }
+                      ]
+                    }
+                  ]
+                }
               },
               "dependsOn": [
-                "[resourceId('Microsoft.App/jobs', 'job-narrative-detector')]"
+                "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]"
               ]
             },
             {
-              "condition": "[not(empty(parameters('keyVaultId')))]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "name": "[guid(parameters('keyVaultId'), 'job-acs-scorer', variables('roleSecretsUser'))]",
+              "type": "Microsoft.App/jobs",
+              "apiVersion": "2024-03-01",
+              "name": "job-screener-ditm",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
               "properties": {
-                "roleDefinitionId": "[variables('roleSecretsUser')]",
-                "principalId": "[reference(resourceId('Microsoft.App/jobs', 'job-acs-scorer'), '2024-03-01', 'full').identity.principalId]",
-                "principalType": "ServicePrincipal"
+                "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]",
+                "configuration": {
+                  "triggerType": "Schedule",
+                  "replicaTimeout": 840,
+                  "scheduleTriggerConfig": {
+                    "cronExpression": "*/15 * * * *",
+                    "parallelism": 1,
+                    "replicaCompletionCount": 1
+                  },
+                  "secrets": "[variables('ghcrSecrets')]",
+                  "registries": "[variables('ghcrRegistries')]"
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "screener-ditm",
+                      "image": "[parameters('screenerDitmImage')]",
+                      "resources": {
+                        "cpu": "[json('0.5')]",
+                        "memory": "1.0Gi"
+                      },
+                      "env": [
+                        {
+                          "name": "COSMOS_ENDPOINT",
+                          "value": "[parameters('cosmosEndpoint')]"
+                        },
+                        {
+                          "name": "STRATEGY",
+                          "value": "ditm"
+                        },
+                        {
+                          "name": "LOG_LEVEL",
+                          "value": "INFO"
+                        },
+                        {
+                          "name": "MIN_REFRESH_SECONDS_MARKET",
+                          "value": "900"
+                        },
+                        {
+                          "name": "MIN_REFRESH_SECONDS_OFF",
+                          "value": "14400"
+                        }
+                      ]
+                    }
+                  ]
+                }
               },
               "dependsOn": [
-                "[resourceId('Microsoft.App/jobs', 'job-acs-scorer')]"
+                "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]"
               ]
             },
             {
-              "condition": "[not(empty(parameters('keyVaultId')))]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "name": "[guid(parameters('keyVaultId'), 'job-ingestor', variables('roleSecretsUser'))]",
+              "type": "Microsoft.App/jobs",
+              "apiVersion": "2024-03-01",
+              "name": "job-screener-swing",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
               "properties": {
-                "roleDefinitionId": "[variables('roleSecretsUser')]",
-                "principalId": "[reference(resourceId('Microsoft.App/containerApps', 'job-ingestor'), '2024-03-01', 'full').identity.principalId]",
-                "principalType": "ServicePrincipal"
+                "environmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]",
+                "configuration": {
+                  "triggerType": "Schedule",
+                  "replicaTimeout": 840,
+                  "scheduleTriggerConfig": {
+                    "cronExpression": "*/15 * * * *",
+                    "parallelism": 1,
+                    "replicaCompletionCount": 1
+                  },
+                  "secrets": "[variables('ghcrSecrets')]",
+                  "registries": "[variables('ghcrRegistries')]"
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "screener-swing",
+                      "image": "[parameters('screenerSwingImage')]",
+                      "resources": {
+                        "cpu": "[json('0.5')]",
+                        "memory": "1.0Gi"
+                      },
+                      "env": [
+                        {
+                          "name": "COSMOS_ENDPOINT",
+                          "value": "[parameters('cosmosEndpoint')]"
+                        },
+                        {
+                          "name": "STRATEGY",
+                          "value": "swing"
+                        },
+                        {
+                          "name": "LOG_LEVEL",
+                          "value": "INFO"
+                        },
+                        {
+                          "name": "MIN_REFRESH_SECONDS_MARKET",
+                          "value": "900"
+                        },
+                        {
+                          "name": "MIN_REFRESH_SECONDS_OFF",
+                          "value": "14400"
+                        }
+                      ]
+                    }
+                  ]
+                }
               },
               "dependsOn": [
-                "[resourceId('Microsoft.App/containerApps', 'job-ingestor')]"
-              ]
-            },
-            {
-              "condition": "[not(empty(parameters('blobStorageId')))]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "name": "[guid(parameters('blobStorageId'), 'job-ingestor', variables('roleBlobContributor'))]",
-              "properties": {
-                "roleDefinitionId": "[variables('roleBlobContributor')]",
-                "principalId": "[reference(resourceId('Microsoft.App/containerApps', 'job-ingestor'), '2024-03-01', 'full').identity.principalId]",
-                "principalType": "ServicePrincipal"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.App/containerApps', 'job-ingestor')]"
-              ]
-            },
-            {
-              "condition": "[not(empty(parameters('keyVaultId')))]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "name": "[guid(parameters('keyVaultId'), 'job-extractor', variables('roleSecretsUser'))]",
-              "properties": {
-                "roleDefinitionId": "[variables('roleSecretsUser')]",
-                "principalId": "[reference(resourceId('Microsoft.App/jobs', 'job-extractor'), '2024-03-01', 'full').identity.principalId]",
-                "principalType": "ServicePrincipal"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.App/jobs', 'job-extractor')]"
-              ]
-            },
-            {
-              "condition": "[not(empty(parameters('keyVaultId')))]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "name": "[guid(parameters('keyVaultId'), 'job-classifier', variables('roleSecretsUser'))]",
-              "properties": {
-                "roleDefinitionId": "[variables('roleSecretsUser')]",
-                "principalId": "[reference(resourceId('Microsoft.App/jobs', 'job-classifier'), '2024-03-01', 'full').identity.principalId]",
-                "principalType": "ServicePrincipal"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.App/jobs', 'job-classifier')]"
-              ]
-            },
-            {
-              "condition": "[not(empty(parameters('eventHubNamespaceId')))]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "name": "[guid(parameters('eventHubNamespaceId'), 'job-ingestor', variables('roleEhSender'))]",
-              "properties": {
-                "roleDefinitionId": "[variables('roleEhSender')]",
-                "principalId": "[reference(resourceId('Microsoft.App/containerApps', 'job-ingestor'), '2024-03-01', 'full').identity.principalId]",
-                "principalType": "ServicePrincipal"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.App/containerApps', 'job-ingestor')]"
-              ]
-            },
-            {
-              "condition": "[not(empty(parameters('eventHubNamespaceId')))]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "name": "[guid(parameters('eventHubNamespaceId'), 'job-extractor', variables('roleEhReceiver'))]",
-              "properties": {
-                "roleDefinitionId": "[variables('roleEhReceiver')]",
-                "principalId": "[reference(resourceId('Microsoft.App/jobs', 'job-extractor'), '2024-03-01', 'full').identity.principalId]",
-                "principalType": "ServicePrincipal"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.App/jobs', 'job-extractor')]"
+                "[resourceId('Microsoft.App/managedEnvironments', variables('envName'))]"
               ]
             }
           ],
@@ -1371,44 +644,29 @@
               "type": "string",
               "value": "[variables('envName')]"
             },
-            "ingestionAppName": {
+            "screenerCspJobPrincipalId": {
               "type": "string",
-              "value": "job-ingestor"
+              "value": "[reference(resourceId('Microsoft.App/jobs', 'job-screener-csp'), '2024-03-01', 'full').identity.principalId]"
             },
-            "ingestionPrincipalId": {
+            "screenerCcJobPrincipalId": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.App/containerApps', 'job-ingestor'), '2024-03-01', 'full').identity.principalId]"
+              "value": "[reference(resourceId('Microsoft.App/jobs', 'job-screener-cc'), '2024-03-01', 'full').identity.principalId]"
             },
-            "extractorJobPrincipalId": {
+            "screenerDitmJobPrincipalId": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.App/jobs', 'job-extractor'), '2024-03-01', 'full').identity.principalId]"
+              "value": "[reference(resourceId('Microsoft.App/jobs', 'job-screener-ditm'), '2024-03-01', 'full').identity.principalId]"
             },
-            "aggregatorJobPrincipalId": {
+            "screenerSwingJobPrincipalId": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.App/jobs', 'job-aggregator'), '2024-03-01', 'full').identity.principalId]"
-            },
-            "classifierJobPrincipalId": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.App/jobs', 'job-classifier'), '2024-03-01', 'full').identity.principalId]"
-            },
-            "detectorJobPrincipalId": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.App/jobs', 'job-narrative-detector'), '2024-03-01', 'full').identity.principalId]"
-            },
-            "scorerJobPrincipalId": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.App/jobs', 'job-acs-scorer'), '2024-03-01', 'full').identity.principalId]"
+              "value": "[reference(resourceId('Microsoft.App/jobs', 'job-screener-swing'), '2024-03-01', 'full').identity.principalId]"
             }
           }
         }
       },
       "dependsOn": [
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'eventhubs')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'keyvault')]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'monitoring')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage')]"
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', parameters('resourceGroupName'))]"
       ]
     },
     {
@@ -1442,7 +700,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "17053762409235018719"
+              "templateHash": "1575869588115998290"
             }
           },
           "parameters": {
@@ -1528,10 +786,10 @@
             {
               "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
               "apiVersion": "2024-05-15",
-              "name": "[format('{0}/{1}/{2}', variables('accountName'), variables('databaseName'), 'signals')]",
+              "name": "[format('{0}/{1}/{2}', variables('accountName'), variables('databaseName'), 'screener_csp')]",
               "properties": {
                 "resource": {
-                  "id": "signals",
+                  "id": "screener_csp",
                   "partitionKey": {
                     "paths": [
                       "/ticker"
@@ -1539,41 +797,7 @@
                     "kind": "Hash",
                     "version": 2
                   },
-                  "indexingPolicy": {
-                    "indexingMode": "consistent",
-                    "automatic": true,
-                    "includedPaths": [
-                      {
-                        "path": "/*"
-                      }
-                    ],
-                    "excludedPaths": [
-                      {
-                        "path": "/embedding/?"
-                      }
-                    ]
-                  }
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', variables('accountName'), variables('databaseName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
-              "apiVersion": "2024-05-15",
-              "name": "[format('{0}/{1}/{2}', variables('accountName'), variables('databaseName'), 'ticker_timeline')]",
-              "properties": {
-                "resource": {
-                  "id": "ticker_timeline",
-                  "partitionKey": {
-                    "paths": [
-                      "/ticker"
-                    ],
-                    "kind": "Hash",
-                    "version": 2
-                  },
-                  "defaultTtl": 7776000,
+                  "defaultTtl": 86400,
                   "indexingPolicy": {
                     "indexingMode": "consistent",
                     "automatic": true,
@@ -1582,13 +806,10 @@
                         "path": "/ticker/?"
                       },
                       {
-                        "path": "/bucket_date/?"
-                      },
-                      {
-                        "path": "/window_days/?"
-                      },
-                      {
                         "path": "/computed_at/?"
+                      },
+                      {
+                        "path": "/result/best_csp_score/?"
                       }
                     ],
                     "excludedPaths": [
@@ -1606,10 +827,133 @@
             {
               "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
               "apiVersion": "2024-05-15",
-              "name": "[format('{0}/{1}/{2}', variables('accountName'), variables('databaseName'), 'narratives')]",
+              "name": "[format('{0}/{1}/{2}', variables('accountName'), variables('databaseName'), 'screener_cc')]",
               "properties": {
                 "resource": {
-                  "id": "narratives",
+                  "id": "screener_cc",
+                  "partitionKey": {
+                    "paths": [
+                      "/ticker"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": 86400,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "automatic": true,
+                    "includedPaths": [
+                      {
+                        "path": "/ticker/?"
+                      },
+                      {
+                        "path": "/computed_at/?"
+                      },
+                      {
+                        "path": "/result/best_cc_score/?"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', variables('accountName'), variables('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', variables('accountName'), variables('databaseName'), 'screener_ditm')]",
+              "properties": {
+                "resource": {
+                  "id": "screener_ditm",
+                  "partitionKey": {
+                    "paths": [
+                      "/ticker"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": 86400,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "automatic": true,
+                    "includedPaths": [
+                      {
+                        "path": "/ticker/?"
+                      },
+                      {
+                        "path": "/computed_at/?"
+                      },
+                      {
+                        "path": "/result/best_ditm_score/?"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', variables('accountName'), variables('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', variables('accountName'), variables('databaseName'), 'screener_swing')]",
+              "properties": {
+                "resource": {
+                  "id": "screener_swing",
+                  "partitionKey": {
+                    "paths": [
+                      "/ticker"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": 86400,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "automatic": true,
+                    "includedPaths": [
+                      {
+                        "path": "/ticker/?"
+                      },
+                      {
+                        "path": "/computed_at/?"
+                      },
+                      {
+                        "path": "/result/data/swing_score/?"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', variables('accountName'), variables('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', variables('accountName'), variables('databaseName'), 'dd_entries')]",
+              "properties": {
+                "resource": {
+                  "id": "dd_entries",
                   "partitionKey": {
                     "paths": [
                       "/ticker"
@@ -1621,6 +965,66 @@
                     "indexingMode": "consistent",
                     "automatic": true,
                     "includedPaths": [
+                      {
+                        "path": "/ticker/?"
+                      },
+                      {
+                        "path": "/user_id/?"
+                      },
+                      {
+                        "path": "/status/?"
+                      },
+                      {
+                        "path": "/created_at/?"
+                      },
+                      {
+                        "path": "/updated_at/?"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', variables('accountName'), variables('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', variables('accountName'), variables('databaseName'), 'dd_filings_intel')]",
+              "properties": {
+                "resource": {
+                  "id": "dd_filings_intel",
+                  "partitionKey": {
+                    "paths": [
+                      "/ticker"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "automatic": true,
+                    "includedPaths": [
+                      {
+                        "path": "/ticker/?"
+                      },
+                      {
+                        "path": "/insight_type/?"
+                      },
+                      {
+                        "path": "/cache_key/?"
+                      },
+                      {
+                        "path": "/generated_at/?"
+                      }
+                    ],
+                    "excludedPaths": [
                       {
                         "path": "/*"
                       }
@@ -1686,11 +1090,10 @@
           },
           "principalIds": {
             "value": [
-              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.extractorJobPrincipalId.value]",
-              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.aggregatorJobPrincipalId.value]",
-              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.classifierJobPrincipalId.value]",
-              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.detectorJobPrincipalId.value]",
-              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.scorerJobPrincipalId.value]"
+              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.screenerCspJobPrincipalId.value]",
+              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.screenerCcJobPrincipalId.value]",
+              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.screenerDitmJobPrincipalId.value]",
+              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.screenerSwingJobPrincipalId.value]"
             ]
           },
           "dataReaderPrincipalIds": {
@@ -1704,7 +1107,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "7639373461468978631"
+              "templateHash": "8099912316270572758"
             }
           },
           "parameters": {
@@ -1724,7 +1127,7 @@
               "type": "array",
               "defaultValue": [],
               "metadata": {
-                "description": "Principal IDs (managed-identity object IDs) to grant Cosmos Data Reader. Used by the read-only App Service backend (optionsapi) which only needs to query ticker_timeline."
+                "description": "Principal IDs (managed-identity object IDs) to grant Cosmos Data Reader. Used by the read-only App Service backend (optionsapi) which only needs to query the screener_* containers."
               }
             }
           },
@@ -1774,18 +1177,6 @@
     }
   ],
   "outputs": {
-    "storageAccountName": {
-      "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.storageAccountName.value]"
-    },
-    "eventHubsNamespace": {
-      "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'eventhubs'), '2025-04-01').outputs.namespaceName.value]"
-    },
-    "keyVaultName": {
-      "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'keyvault'), '2025-04-01').outputs.keyVaultName.value]"
-    },
     "containerAppsEnvId": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.envId.value]"
@@ -1794,29 +1185,25 @@
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.appInsightsConnectionString.value]"
     },
-    "extractorJobPrincipalId": {
-      "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.extractorJobPrincipalId.value]"
-    },
-    "aggregatorJobPrincipalId": {
-      "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.aggregatorJobPrincipalId.value]"
-    },
-    "classifierJobPrincipalId": {
-      "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.classifierJobPrincipalId.value]"
-    },
-    "detectorJobPrincipalId": {
-      "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.detectorJobPrincipalId.value]"
-    },
-    "scorerJobPrincipalId": {
-      "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.scorerJobPrincipalId.value]"
-    },
     "cosmosEndpoint": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.accountEndpoint.value]"
+    },
+    "screenerCspJobPrincipalId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.screenerCspJobPrincipalId.value]"
+    },
+    "screenerCcJobPrincipalId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.screenerCcJobPrincipalId.value]"
+    },
+    "screenerDitmJobPrincipalId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.screenerDitmJobPrincipalId.value]"
+    },
+    "screenerSwingJobPrincipalId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('resourceGroupName')), 'Microsoft.Resources/deployments', 'containerapps'), '2025-04-01').outputs.screenerSwingJobPrincipalId.value]"
     }
   }
 }

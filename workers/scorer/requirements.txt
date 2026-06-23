@@ -1,8 +1,0 @@
-# Phase 6 deps — ACS scorer worker.
-azure-identity==1.17.1
-azure-keyvault-secrets==4.8.0
-azure-cosmos==4.7.0
-numpy==2.0.1
-tenacity==9.0.0
-# Market-cap lookup for §5.3 small-cap haircut. Pinned for reproducibility.
-yfinance==0.2.65

@@ -1,5 +1,0 @@
-# Narrative-backfill worker — forward-price hydrator for signal_events.
-azure-identity==1.17.1
-azure-cosmos==4.7.0
-yfinance==0.2.65
-tenacity==9.0.0

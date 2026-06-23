@@ -1,9 +1,11 @@
 """Cosmos DB client for the DD Coach service.
 
-Mirrors the sync lazy-init pattern used by services/narrative/cosmos_client.py:
-the client and container handle are created on first use and reused thereafter.
+The client and container handle are created on first use and reused thereafter
+(sync lazy-init pattern).
 
-Env vars (shared with the narrative platform; same Cosmos account + DB):
+Env vars (the `NARRATIVE_*` names are historical — the Cosmos account was
+originally provisioned for the retired narrative platform; the account is now
+shared by DD Coach and the screener):
   NARRATIVE_COSMOS_ENDPOINT  — Cosmos account endpoint
   NARRATIVE_COSMOS_DB        — database name (default "narrative")
   DD_COACH_COSMOS_CONTAINER  — container name (default "dd_entries")

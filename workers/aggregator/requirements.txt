@@ -1,8 +1,0 @@
-# Phase 3 aggregator dependencies.
-# azure-identity   — DefaultAzureCredential (managed identity, no secrets needed)
-# azure-cosmos     — read signals, write ticker_timeline
-# tenacity         — retry on transient Cosmos errors
-
-azure-identity==1.17.1
-azure-cosmos==4.7.0
-tenacity==9.0.0

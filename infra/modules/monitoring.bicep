@@ -1,7 +1,8 @@
 // =============================================================================
 // Monitoring — Log Analytics workspace + App Insights (workspace-based).
 //
-// PerGB2018 / 5GB daily cap to honor ADR-0014's $10/mo target. Sampling
+// Required by the Container Apps environment for log aggregation.
+// PerGB2018 / 5GB daily cap to honor the platform cost target. Sampling
 // kicks in on burst — accepted tradeoff.
 // =============================================================================
 

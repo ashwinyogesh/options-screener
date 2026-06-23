@@ -17,7 +17,6 @@ import { DdCoachView } from './components/DdCoach/DdCoachView'
 import { SwingInput } from './components/SwingInput'
 import { SwingFilterPanel } from './components/SwingFilterPanel'
 import { SwingTable } from './components/SwingTable'
-import { NarrativeView } from './components/NarrativeView'
 import { useCsp } from './hooks/useCsp'
 import { useCc } from './hooks/useCc'
 import { useDitm } from './hooks/useDitm'
@@ -107,9 +106,6 @@ function applyDitmFilters(results: DitmResult[], filters: DitmFilterState): Ditm
   })
 }
 
-// Narrative tab is shown by default (Phase 6). Set VITE_NARRATIVE_ENABLED=0 to hide.
-const NARRATIVE_ENABLED = import.meta.env.VITE_NARRATIVE_ENABLED !== '0'
-
 /** Format a backend ISO timestamp as a relative "Updated X min ago" badge label
  *  + a severity class so the user can see when the precomputed scan is stale.
  *
@@ -146,7 +142,7 @@ function _formatPrecomputedAge(isoTimestamp: string): { label: string; className
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'csp' | 'cc' | 'ditm' | 'swing' | 'em-rank' | 'supply' | 'dcf' | 'etv' | 'narrative' | 'dd-coach'>('csp')
+  const [activeTab, setActiveTab] = useState<'csp' | 'cc' | 'ditm' | 'swing' | 'em-rank' | 'supply' | 'dcf' | 'etv' | 'dd-coach'>('csp')
 
   // CSP state
   const { results: cspResults, errors: cspErrors, loading: cspLoading, symbolCount: cspSymbolCount, isScanMode: cspIsScanMode, errorMessage: cspErrorMessage, cachedAt: cspCachedAt, lastUpdatedAt: cspLastUpdatedAt, vixLevel: cspVixLevel, vixPercentile: cspVixPercentile, volRegime: cspVolRegime, run: runCsp, scan: scanCsp } = useCsp()
@@ -212,14 +208,6 @@ export default function App() {
           >
             Supply Chain
           </button>
-          {NARRATIVE_ENABLED && (
-            <button
-              className={`tab-btn${activeTab === 'narrative' ? ' tab-btn-active' : ''}`}
-              onClick={() => setActiveTab('narrative')}
-            >
-              Narrative
-            </button>
-          )}
           <button
             className={`tab-btn${activeTab === 'dcf' ? ' tab-btn-active' : ''}`}
             onClick={() => setActiveTab('dcf')}
@@ -451,7 +439,6 @@ export default function App() {
         {activeTab === 'supply' && <SupplyChainView />}
         {activeTab === 'dcf' && <DcfView />}
         {activeTab === 'etv' && <EtvView />}
-        {activeTab === 'narrative' && NARRATIVE_ENABLED && <NarrativeView />}
         {activeTab === 'dd-coach' && <DdCoachView />}
 
         {activeTab === 'swing' && (

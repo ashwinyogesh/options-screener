@@ -1,25 +1,27 @@
 // =============================================================================
-// Narrative Intelligence Platform — root deployment
+// Options Screener — shared Azure infrastructure (Cosmos + Container Apps env)
 // =============================================================================
 //
-// Subscription-scoped (creates/uses the resource group), region: centralus.
-// Wires together: Storage, Event Hubs (Basic), Key Vault, Container Apps env,
-// App Insights, and Cosmos DB for NoSQL serverless (Phase 2).
+// Subscription-scoped (creates/uses the resource group).
 //
-// See docs/NARRATIVE_METHODOLOGY.md §8 for phasing. This file is safe to
-// `bicep build` today but the full Phase 1 deployment requires the parameters
-// listed at the bottom.
+// Wires together:
+//   - Log Analytics + App Insights (required by Container Apps env logging)
+//   - Container Apps environment + screener precomputation jobs (ADR-0024,
+//     ADR-0025): job-screener-csp / -cc / -ditm / -swing
+//   - Cosmos DB for NoSQL serverless — screener_* containers (ADR-0024/25)
+//     and DD Coach containers (dd_entries, dd_filings_intel)
 //
-// Cost ceiling: $150/mo. See docs/adr/0014-narrative-cost-substitutions.md for
-// the rightsized SKU table this file enforces.
+// Resource names use the `narrative` / `cosmos-nr-` / `cae-narrative-`
+// historical prefixes to avoid breaking the existing live deployment. They
+// no longer reflect the workload scope.
 // =============================================================================
 
 targetScope = 'subscription'
 
-@description('Name of the resource group hosting all narrative platform resources.')
+@description('Name of the resource group hosting all platform resources.')
 param resourceGroupName string = 'options-rg'
 
-@description('Azure region for all resources. Existing stack lives in centralus.')
+@description('Azure region for the resource group, Container Apps env, and monitoring resources.')
 param location string = 'eastus'
 
 @description('Short suffix appended to globally-unique resource names. Lowercase alnum, 3-9 chars.')
@@ -27,43 +29,26 @@ param location string = 'eastus'
 @maxLength(9)
 param nameSuffix string
 
-@description('Azure AD principal IDs (object IDs) that should receive Key Vault Secrets Officer.')
-param keyVaultAdminObjectIds array = []
-
-@description('Region for Cosmos DB account. Defaults to westus2 (eastus has capacity constraints).')
+@description('Region for the Cosmos DB account. Defaults to westus2 (eastus has serverless capacity constraints).')
 param cosmosLocation string = 'westus2'
 
-@description('Principal IDs granted Cosmos DB Built-in Data Contributor.')
+@description('Principal IDs granted Cosmos DB Built-in Data Contributor (admins + screener job MIs).')
 param cosmosDataContributorPrincipalIds array = []
 
-@description('Principal IDs granted Cosmos DB Built-in Data Reader. Used by the App Service backend (optionsapi) MI for read-only access to ticker_timeline.')
+@description('Principal IDs granted Cosmos DB Built-in Data Reader. Used by the App Service backend (optionsapi) MI for read-only access.')
 param cosmosDataReaderPrincipalIds array = []
 
-@description('Container image for the ingestion worker. Infra deploy preserves the live image; only falls back to placeholder on first deploy.')
-param ingestionImage string = 'ghcr.io/ashwinchandlapur/narrative-ingestion:latest'
+@description('Container image for job-screener-csp (ADR-0024). Preserved by CI workflow.')
+param screenerCspImage string = 'ghcr.io/ashwinchandlapur/options-screener-worker:latest'
 
-@description('Minimum replicas for job-ingestor. Set to 0 by default — the ingestion CI workflow sets it to 1 when deploying.')
-@minValue(0)
-@maxValue(2)
-param ingestionMinReplicas int = 1
+@description('Container image for job-screener-cc (ADR-0024). Preserved by CI workflow.')
+param screenerCcImage string = 'ghcr.io/ashwinchandlapur/options-screener-worker:latest'
 
-@description('Container image for job-extractor. Preserved by infra workflow.')
-param extractorImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+@description('Container image for job-screener-ditm (ADR-0024). Preserved by CI workflow.')
+param screenerDitmImage string = 'ghcr.io/ashwinchandlapur/options-screener-worker:latest'
 
-@description('Container image for job-aggregator. Preserved by infra workflow.')
-param aggregatorImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
-
-@description('Container image for job-classifier. Preserved by infra workflow.')
-param classifierImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
-
-@description('Container image for job-narrative-detector. Preserved by infra workflow.')
-param detectorImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
-
-@description('Container image for job-acs-scorer. Preserved by infra workflow.')
-param scorerImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
-
-@description('Container image for job-narrative-backfill. Preserved by infra workflow.')
-param backfillImage string = 'mcr.microsoft.com/k8se/quickstart-jobs:latest'
+@description('Container image for job-screener-swing (ADR-0025). Preserved by CI workflow.')
+param screenerSwingImage string = 'ghcr.io/ashwinchandlapur/options-screener-worker:latest'
 
 @description('GHCR username for pulling worker images. Leave empty to skip registry binding.')
 param ghcrUsername string = ''
@@ -74,46 +59,14 @@ param ghcrPassword string = ''
 
 @description('Tag map applied to every resource.')
 param tags object = {
-  workload: 'narrative-intelligence'
+  workload: 'options-screener'
   costCenter: 'options-screener'
-  budget: '150usd-month'
 }
 
 resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
   name: resourceGroupName
   location: location
   tags: tags
-}
-
-module storage 'modules/storage.bicep' = {
-  scope: rg
-  name: 'storage'
-  params: {
-    location: location
-    nameSuffix: nameSuffix
-    tags: tags
-  }
-}
-
-module eventhubs 'modules/eventhubs.bicep' = {
-  scope: rg
-  name: 'eventhubs'
-  params: {
-    location: location
-    nameSuffix: nameSuffix
-    tags: tags
-  }
-}
-
-module keyvault 'modules/keyvault.bicep' = {
-  scope: rg
-  name: 'keyvault'
-  params: {
-    location: location
-    nameSuffix: nameSuffix
-    tags: tags
-    adminObjectIds: keyVaultAdminObjectIds
-  }
 }
 
 module monitoring 'modules/monitoring.bicep' = {
@@ -134,27 +87,16 @@ module containerapps 'modules/containerapps.bicep' = {
     nameSuffix: nameSuffix
     tags: tags
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
-    keyVaultUri: keyvault.outputs.keyVaultUri
-    keyVaultId: keyvault.outputs.keyVaultId
-    eventHubNamespaceFqdn: '${eventhubs.outputs.namespaceName}.servicebus.windows.net'
-    eventHubNamespaceId: eventhubs.outputs.namespaceId
     cosmosEndpoint: cosmos.outputs.accountEndpoint
-    blobAccountName: storage.outputs.storageAccountName
-    blobStorageId: storage.outputs.storageAccountId
-    ingestionImage: ingestionImage
-    ingestionMinReplicas: ingestionMinReplicas
-    extractorImage: extractorImage
-    aggregatorImage: aggregatorImage
-    classifierImage: classifierImage
-    detectorImage: detectorImage
-    scorerImage: scorerImage
-    backfillImage: backfillImage
+    screenerCspImage: screenerCspImage
+    screenerCcImage: screenerCcImage
+    screenerDitmImage: screenerDitmImage
+    screenerSwingImage: screenerSwingImage
     ghcrUsername: ghcrUsername
     ghcrPassword: ghcrPassword
   }
 }
 
-// Phase 2 — Cosmos DB for NoSQL serverless (replaces Postgres; no region restrictions)
 module cosmos 'modules/cosmos.bicep' = {
   scope: rg
   name: 'cosmos'
@@ -166,37 +108,28 @@ module cosmos 'modules/cosmos.bicep' = {
   }
 }
 
-// Auto-grant Cosmos Data Contributor to worker MIs. Decoupled from the cosmos
-// module to break the circular dependency (containerapps depends on cosmos
-// endpoint; cosmos roles depend on containerapps principalIds).
-// External admin object IDs continue to flow through cosmos.bicep via
-// cosmosDataContributorPrincipalIds.
+// Auto-grant Cosmos Data Contributor to screener worker MIs. Decoupled from
+// the cosmos module to break the circular dependency (containerapps depends
+// on cosmos endpoint; cosmos roles depend on containerapps principalIds).
 module cosmosRoles 'modules/cosmos-roles.bicep' = {
   scope: rg
   name: 'cosmos-roles'
   params: {
     cosmosAccountName: cosmos.outputs.accountName
     principalIds: [
-      containerapps.outputs.extractorJobPrincipalId
-      containerapps.outputs.aggregatorJobPrincipalId
-      containerapps.outputs.classifierJobPrincipalId
-      containerapps.outputs.detectorJobPrincipalId
-      containerapps.outputs.scorerJobPrincipalId
-      containerapps.outputs.backfillJobPrincipalId
+      containerapps.outputs.screenerCspJobPrincipalId
+      containerapps.outputs.screenerCcJobPrincipalId
+      containerapps.outputs.screenerDitmJobPrincipalId
+      containerapps.outputs.screenerSwingJobPrincipalId
     ]
     dataReaderPrincipalIds: cosmosDataReaderPrincipalIds
   }
 }
 
-output storageAccountName string = storage.outputs.storageAccountName
-output eventHubsNamespace string = eventhubs.outputs.namespaceName
-output keyVaultName string = keyvault.outputs.keyVaultName
 output containerAppsEnvId string = containerapps.outputs.envId
 output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString
-output extractorJobPrincipalId string = containerapps.outputs.extractorJobPrincipalId
-output aggregatorJobPrincipalId string = containerapps.outputs.aggregatorJobPrincipalId
-output classifierJobPrincipalId string = containerapps.outputs.classifierJobPrincipalId
-output detectorJobPrincipalId string = containerapps.outputs.detectorJobPrincipalId
-output scorerJobPrincipalId string = containerapps.outputs.scorerJobPrincipalId
-output backfillJobPrincipalId string = containerapps.outputs.backfillJobPrincipalId
 output cosmosEndpoint string = cosmos.outputs.accountEndpoint
+output screenerCspJobPrincipalId string = containerapps.outputs.screenerCspJobPrincipalId
+output screenerCcJobPrincipalId string = containerapps.outputs.screenerCcJobPrincipalId
+output screenerDitmJobPrincipalId string = containerapps.outputs.screenerDitmJobPrincipalId
+output screenerSwingJobPrincipalId string = containerapps.outputs.screenerSwingJobPrincipalId

@@ -1,24 +1,35 @@
-# Narrative Intelligence Platform — Infrastructure
+# Options Screener — Shared Azure Infrastructure
 
-Bicep templates for the narrative pipeline. See:
-
-- [docs/adr/0013-narrative-intelligence-platform.md](../docs/adr/0013-narrative-intelligence-platform.md) — platform decision
-- [docs/adr/0014-narrative-cost-substitutions.md](../docs/adr/0014-narrative-cost-substitutions.md) — rightsized SKU choices
-- [docs/NARRATIVE_METHODOLOGY.md](../docs/NARRATIVE_METHODOLOGY.md) — methodology
+Bicep templates that provision the shared Azure resources used by the
+screener backend and DD Coach. The frontend (Azure Static Web Apps) and
+backend (Azure Web App) are deployed by separate workflows.
 
 ## Layout
 
 ```
 infra/
-  main.bicep              # subscription-scoped roll-up
+  main.bicep                # subscription-scoped roll-up
   modules/
-    storage.bicep         # Standard_LRS, lifecycle Hot→Cool@30d→Delete@365d
-    eventhubs.bicep       # Basic, 1 TU, two topics, 1d retention
-    keyvault.bicep        # Standard, RBAC, soft-delete + purge protection
-    containerapps.bicep   # Consumption env + job-ingestor always-on app
-    monitoring.bicep      # Log Analytics 5GB cap + workspace-based App Insights
-    # Phase 2: postgres.bicep (B1ms with pgvector + timescaledb + pg_cron)
+    monitoring.bicep        # Log Analytics 5GB cap + workspace-based App Insights
+    containerapps.bicep     # Consumption env + 4 screener precomputation jobs
+    cosmos.bicep            # Cosmos DB serverless — screener_* + dd_* containers
+    cosmos-roles.bicep      # Data-plane RBAC for screener job MIs + backend reader
 ```
+
+What's provisioned:
+
+- Log Analytics + App Insights — required by the Container Apps environment
+  for log aggregation.
+- Container Apps environment + four screener jobs (`job-screener-{csp,cc,ditm,swing}`)
+  per [ADR-0024](../docs/adr/0024-screener-precomputation.md) and
+  [ADR-0025](../docs/adr/0025-swing-precomputation.md). All four share the
+  same image; `STRATEGY` env selects which screener runs.
+- Cosmos DB for NoSQL serverless with the four `screener_*` containers and
+  the two DD Coach containers (`dd_entries`, `dd_filings_intel`).
+
+Historical names (`cae-narrative-*`, `cosmos-nr-*`, database `narrative`) are
+preserved to avoid breaking the live deployment — they no longer reflect the
+workload scope.
 
 ## Build
 
@@ -26,27 +37,11 @@ infra/
 az bicep build --file infra/main.bicep
 ```
 
-## Phase 1 deploy (manual; CI follows)
+## Deploy
 
 ```pwsh
-az deployment sub create `
-  --location centralus `
-  --template-file infra/main.bicep `
-  --parameters nameSuffix=<3-8 char suffix> keyVaultAdminObjectIds="['<your-aad-object-id>']"
+az deployment sub create \
+  --location eastus \
+  --template-file infra/main.bicep \
+  --parameters nameSuffix=<3-9 char suffix>
 ```
-
-Parameters:
-
-| Name | Required | Notes |
-|---|---|---|
-| `resourceGroupName` | no | defaults to `rg-narrative` |
-| `location` | no | defaults to `centralus` |
-| `nameSuffix` | **yes** | lowercase alnum, 3–8 chars; appended to globally-unique names |
-| `keyVaultAdminObjectIds` | no | Azure AD object IDs to grant Key Vault Secrets Officer |
-| `tags` | no | merged into the default tag set |
-
-## Cost ceiling
-
-This stack is engineered to a $150/mo Azure ceiling. Any change that raises a
-SKU tier requires a follow-up ADR with an updated budget projection. See
-`ADR-0014` for the substitution table.
