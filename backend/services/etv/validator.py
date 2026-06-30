@@ -309,6 +309,12 @@ def validate_report(
         dec_block["confidence_pct"] = 90
         corrections.append(f"decision.confidence_pct: {conf} → 90 (cap)")
         conf = 90
+    # Capture the LLM's pre-guard "thesis confidence" (after enforcing the
+    # declared 0–90 ceiling, before deterministic gate penalties).  Surfaced
+    # separately from the final number so the UI can tell a genuinely weak
+    # thesis apart from a strong thesis that a server guard knocked down.
+    thesis_conf = conf
+    gate_adjustments: list[dict] = []
     # Fragility deduction: when the LLM's LRs swung the ratio by > 0.5
     # away from the IV-prior decision, dock 15 from confidence.
     if prob_check and prob_check.get("decision_fragile"):
@@ -325,6 +331,14 @@ def validate_report(
             corrections.append(
                 f"decision.confidence_pct: {conf} → {new_conf} (LR-fragility)"
             )
+            gate_adjustments.append({
+                "source": "lr_fragility",
+                "delta": round(new_conf - conf, 1),
+                "reason": (
+                    f"posterior-vs-llm ratio gap "
+                    f"{prob_check.get('ratio_gap_llm_vs_posterior')} > 0.5"
+                ),
+            })
             conf = new_conf
     # Anti-anchoring guard: base-case intrinsic within 5% of spot
     # strongly suggests the LLM rediscovered spot via a current-company
@@ -353,7 +367,21 @@ def validate_report(
                         f"decision.confidence_pct: {conf} → {new_conf} "
                         f"(anchored-to-spot)"
                     )
+                    gate_adjustments.append({
+                        "source": "anchored_to_spot",
+                        "delta": round(new_conf - conf, 1),
+                        "reason": (
+                            f"base intrinsic ${base_fund:.2f} within "
+                            f"{spot_gap*100:.1f}% of spot ${spot:.2f}"
+                        ),
+                    })
                     conf = new_conf
+    # Surface the thesis/gate split on the decision block.  thesis_conf is
+    # the LLM's pre-guard number; gate_adjustments lists each deterministic
+    # penalty (negative deltas).  Final confidence_pct = thesis_conf +
+    # Σ(gate_adjustments deltas).
+    dec_block["thesis_confidence_pct"] = round(thesis_conf, 1)
+    dec_block["gate_adjustments"] = gate_adjustments
     ratio = asym_block.get("ratio")
     no_trade_reasons: list[str] = []
     if isinstance(ratio, (int, float)) and ratio < 2:

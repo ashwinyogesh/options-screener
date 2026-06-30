@@ -25,6 +25,11 @@ const fmtPct = (v: number | null | undefined, d = 1) =>
   v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(d)}%`
 const fmtPctRaw = (v: number | null | undefined, d = 1) =>
   v == null ? '—' : `${v.toFixed(d)}%`
+// Confidence is a bounded conviction score on a 0–90 scale (hard-capped at
+// 90 by the backend), NOT a probability — so show the ceiling explicitly
+// rather than a misleading `%` suffix.
+const fmtConf = (v: number | null | undefined) =>
+  v == null ? '—' : `${Math.round(v)} / 90`
 const fmtFrac = (v: number | null | undefined, d = 1) =>
   v == null ? '—' : `${(v * 100).toFixed(d)}%`
 const fmtNum = (v: number | null | undefined, d = 2) =>
@@ -46,6 +51,10 @@ const CONF_COLORS: Record<string, string> = {
   High: '#4ade80',
   Medium: '#fbbf24',
   Low: '#f87171',
+}
+const GATE_LABELS: Record<string, string> = {
+  lr_fragility: 'LR-fragility guard',
+  anchored_to_spot: 'Anchored-to-spot clamp',
 }
 
 // ============================================================ primitives ===
@@ -339,7 +348,7 @@ function DecisionBanner({ d }: { d: EtvData }) {
       >
         <Stat
           label="Confidence"
-          value={fmtPctRaw(conf, 0)}
+          value={fmtConf(conf)}
           color={conf >= 70 ? '#4ade80' : conf >= 55 ? '#fbbf24' : '#f87171'}
         />
         <Stat label="Current" value={fmtCur(d.grounding.current_price)} />
@@ -1230,7 +1239,7 @@ function DecisionSection({ r }: { r: EtvReport }) {
         <Stat label="Direction" value={d.direction} />
         <Stat
           label="Confidence"
-          value={fmtPctRaw(d.confidence_pct, 0)}
+          value={fmtConf(d.confidence_pct)}
           color={
             d.confidence_pct != null && d.confidence_pct >= 70
               ? '#4ade80'
@@ -1241,6 +1250,64 @@ function DecisionSection({ r }: { r: EtvReport }) {
         />
         <Stat label="Horizon" value={d.horizon} />
       </div>
+      {d.thesis_confidence_pct != null &&
+        (d.gate_adjustments?.length ?? 0) > 0 && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 10,
+              background: '#0f172a',
+              borderRadius: 6,
+            }}
+          >
+            <Label>Confidence breakdown</Label>
+            <div style={{ display: 'grid', gap: 6, fontSize: 13, marginTop: 6 }}>
+              <div
+                style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}
+              >
+                <span style={{ color: '#94a3b8' }}>Thesis confidence (LLM)</span>
+                <span style={{ color: '#cbd5e1', fontWeight: 600 }}>
+                  {Math.round(d.thesis_confidence_pct)} / 90
+                </span>
+              </div>
+              {d.gate_adjustments!.map((g, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                  }}
+                >
+                  <span style={{ color: '#94a3b8' }} title={g.reason}>
+                    {GATE_LABELS[g.source] ?? g.source}
+                  </span>
+                  <span style={{ color: '#f87171', fontWeight: 600 }}>
+                    {g.delta}
+                  </span>
+                </div>
+              ))}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  borderTop: '1px solid #1f2937',
+                  paddingTop: 6,
+                }}
+              >
+                <span style={{ color: '#cbd5e1' }}>Net confidence</span>
+                <span style={{ color: '#e2e8f0', fontWeight: 700 }}>
+                  {fmtConf(d.confidence_pct)}
+                </span>
+              </div>
+            </div>
+            <div style={{ marginTop: 6, fontSize: 11, color: '#64748b' }}>
+              Server guards reduced the LLM's thesis confidence — this number is
+              gate-limited, not a weak thesis. Hover a row for the reason.
+            </div>
+          </div>
+        )}
       <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
         <div>
           <Label>Horizon rationale</Label>

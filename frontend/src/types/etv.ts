@@ -91,6 +91,12 @@ export interface EtvCatalyst {
 
 export type EtvConfidence = 'High' | 'Medium' | 'Low'
 
+export interface EtvGateAdjustment {
+  source: 'lr_fragility' | 'anchored_to_spot'
+  delta: number
+  reason: string
+}
+
 export interface EtvReport {
   company_summary: string
   missing_inputs: string[]
@@ -204,6 +210,11 @@ export interface EtvReport {
     decision: 'TRADE' | 'NO TRADE'
     direction: 'LONG' | 'SHORT' | 'NEUTRAL'
     confidence_pct: number | null
+    // LLM's pre-guard thesis confidence (0–90), before deterministic
+    // server gate penalties. confidence_pct = thesis_confidence_pct +
+    // Σ(gate_adjustments deltas).
+    thesis_confidence_pct?: number | null
+    gate_adjustments?: EtvGateAdjustment[]
     confidence_deductions: string[]
     horizon: 'Short' | 'Medium' | 'Long'
     horizon_rationale: string
