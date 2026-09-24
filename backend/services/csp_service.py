@@ -98,6 +98,9 @@ class CspResult:
     expected_move: float = 0.0       # price × hv_sigma × √(dte/365)
     dist_from_52w_high_pct: float = 0.0  # 0 = at 52w high, -10 = 10% below
     chain_median_oi: float = 0.0     # median OI in 0.10–0.40 delta range
+    sma_200: float = 0.0             # 200-day SMA (HPO trend anchor)
+    avwap_52w_low: float = 0.0       # anchored VWAP from the 52-week low (HPO institutional anchor)
+    put_wall: float = 0.0            # scored put strike below spot with the largest OI (HPO options anchor)
 
 
 @dataclass
@@ -434,6 +437,19 @@ def _csp_symbol_factory(_sym: str, df, current_price: float) -> tuple[Indicators
         vol_support_2=vol_sups[1] if len(vol_sups) > 1 else None,
         vol_support_3=vol_sups[2] if len(vol_sups) > 2 else None,
     )
+    # Trend + institutional anchors for Happy-Price (HPO).
+    _close = df["Close"]
+    sma_200 = round(float(_close.rolling(200).mean().iloc[-1]), 4) if len(_close) >= 200 else 0.0
+    try:
+        _win = df.iloc[-252:] if len(df) >= 252 else df
+        _low_idx = _win["Low"].idxmin()
+        _tp = (df["High"] + df["Low"] + df["Close"]) / 3.0
+        _vol_from = df["Volume"].loc[_low_idx:]
+        _vsum = float(_vol_from.sum())
+        avwap_52w_low = round(float((_tp.loc[_low_idx:] * _vol_from).sum() / _vsum), 4) if _vsum > 0 else 0.0
+    except Exception:
+        avwap_52w_low = 0.0
+
     metrics = SymbolMetrics(
         bb_upper=bb["bb_upper"],
         bb_middle=bb["bb_middle"],
@@ -441,6 +457,8 @@ def _csp_symbol_factory(_sym: str, df, current_price: float) -> tuple[Indicators
         sma_ratio=sma_r,
         hv_sigma=hv_sigma,
         iv_percentile=iv_pct,
+        sma_200=sma_200,
+        avwap_52w_low=avwap_52w_low,
     )
     return indicators, metrics
 
@@ -520,6 +538,19 @@ def _csp_tie_break(bundle) -> tuple[float, ...]:
     return (float(val),)
 
 
+def _csp_put_wall(bundles: list[StrikeBundle], current_price: float) -> float:
+    """Approx put wall: scored put strike below spot with the largest open interest.
+
+    Uses the scored (delta-band) strikes, not the full chain — a v1 proxy for the
+    options-positioning support level. 0.0 when no strikes sit below spot."""
+    below = [
+        (b.candidate.strike, b.candidate.open_interest or 0)
+        for b in bundles
+        if b.candidate.strike < current_price
+    ]
+    return float(max(below, key=lambda x: x[1])[0]) if below else 0.0
+
+
 def _csp_result_factory(
     ctx: ExpirationContext,
     bundles: list[StrikeBundle],
@@ -591,6 +622,9 @@ def _csp_result_factory(
         expected_move=round(ctx.current_price * (metrics.hv_sigma or 0.0) * math.sqrt(ctx.dte / 365.0), 2),
         dist_from_52w_high_pct=round(ind.dist_from_52w_high_pct, 2),
         chain_median_oi=ctx.chain_median_oi,
+        sma_200=round(metrics.sma_200 or 0.0, 4),
+        avwap_52w_low=round(metrics.avwap_52w_low or 0.0, 4),
+        put_wall=_csp_put_wall(bundles, ctx.current_price),
     )
 
 

@@ -44,6 +44,9 @@ export interface CspResult {
   expected_move: number
   dist_from_52w_high_pct: number
   chain_median_oi: number
+  sma_200: number
+  avwap_52w_low: number
+  put_wall: number
 }
 
 export interface CspExpirationRow {

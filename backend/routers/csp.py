@@ -133,6 +133,9 @@ class CspResultOut(BaseModel):
     expected_move: float
     dist_from_52w_high_pct: float
     chain_median_oi: float
+    sma_200: float
+    avwap_52w_low: float
+    put_wall: float
 
 
 class CspErrorOut(BaseModel):
@@ -293,6 +296,9 @@ def _to_out(r: CspResult) -> CspResultOut:
         expected_move=r.expected_move,
         dist_from_52w_high_pct=r.dist_from_52w_high_pct,
         chain_median_oi=r.chain_median_oi,
+        sma_200=r.sma_200,
+        avwap_52w_low=r.avwap_52w_low,
+        put_wall=r.put_wall,
     )
 
 

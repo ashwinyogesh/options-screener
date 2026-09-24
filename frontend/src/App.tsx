@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { CspInput } from './components/CspInput'
 import { CspFilterPanel } from './components/CspFilterPanel'
+import { CspAllocatorPanel } from './components/CspAllocatorPanel'
 import { CspTable } from './components/CspTable'
 import { CcInput } from './components/CcInput'
 import { CcTable } from './components/CcTable'
@@ -276,6 +277,9 @@ export default function App() {
                   </span>
                 )}
               </div>
+            )}
+            {!cspLoading && filteredCsp.length > 0 && (
+              <CspAllocatorPanel results={filteredCsp} />
             )}
             <CspTable data={filteredCsp} />
             {!cspLoading && cspResults.length === 0 && !cspErrorMessage && (

@@ -140,7 +140,10 @@
       "using_hv_fallback": true,
       "expected_move": 20.92,
       "dist_from_52w_high_pct": 0.0,
-      "chain_median_oi": 0.0
+      "chain_median_oi": 0.0,
+      "sma_200": 260.0922,
+      "avwap_52w_low": 247.108,
+      "put_wall": 300.0
     },
     {
       "symbol": "AAPL",
@@ -275,7 +278,10 @@
       "using_hv_fallback": true,
       "expected_move": 26.32,
       "dist_from_52w_high_pct": 0.0,
-      "chain_median_oi": 0.0
+      "chain_median_oi": 0.0,
+      "sma_200": 260.0922,
+      "avwap_52w_low": 247.108,
+      "put_wall": 300.0
     }
   ],
   "error": null

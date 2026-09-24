@@ -321,6 +321,9 @@ def _csp_from_dict(d: dict[str, Any]) -> CspResult:
         expected_move=d.get("expected_move", 0.0),
         dist_from_52w_high_pct=d.get("dist_from_52w_high_pct", 0.0),
         chain_median_oi=d.get("chain_median_oi", 0.0),
+        sma_200=d.get("sma_200", 0.0),
+        avwap_52w_low=d.get("avwap_52w_low", 0.0),
+        put_wall=d.get("put_wall", 0.0),
     )
 
 

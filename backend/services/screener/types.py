@@ -104,6 +104,8 @@ class SymbolMetrics:
     iv_percentile: Optional[float] = None
     earnings_date: Optional[str] = None    # ISO YYYY-MM-DD; per-expiration view available on ctx
     gap_3d_pct: Optional[float] = None     # DITM: max overnight gap last 3 sessions (%)
+    sma_200: Optional[float] = None        # 200-day SMA (HPO trend anchor)
+    avwap_52w_low: Optional[float] = None  # anchored VWAP from 52-week low (HPO institutional anchor)
 
 
 @dataclass(frozen=True)
